@@ -1,0 +1,6 @@
+{
+  "name": "BookToGame AI Agent",
+  "description": "An AI Agent that digests textbooks, breaks them into interactive modules, and generates playable educational games.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
