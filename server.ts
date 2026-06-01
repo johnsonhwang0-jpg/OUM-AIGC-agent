@@ -19,14 +19,96 @@ import {
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 8080;
 
 // Body parsing configurations
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // AI Provider configuration
-const AI_PROVIDER = process.env.AI_PROVIDER || "huggingface"; // "gemini", "ollama", or "huggingface"
+const AI_PROVIDER = process.env.AI_PROVIDER || "deepseek"; // "deepseek", "dashscope", "gemini", "ollama", or "huggingface"
+
+// DeepSeek API client
+async function callDeepSeek(prompt: string, systemPrompt: string = "", model: string = ""): Promise<string> {
+  try {
+    const deepseekModel = model || process.env.DEEPSEEK_MODEL || "deepseek-chat";
+    const deepseekApiKey = process.env.DEEPSEEK_API_KEY || "";
+    
+    if (!deepseekApiKey) {
+      throw new Error("DEEPSEEK_API_KEY is not configured");
+    }
+    
+    const response = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${deepseekApiKey}`
+      },
+      body: JSON.stringify({
+        model: deepseekModel,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 4096,
+        response_format: { type: "json_object" }
+      })
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`DeepSeek API error: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || "";
+  } catch (error) {
+    console.error("DeepSeek call failed:", error);
+    throw error;
+  }
+}
+
+// DashScope (阿里云通义千问) API client
+async function callDashScope(prompt: string, systemPrompt: string = "", model: string = ""): Promise<string> {
+  try {
+    const dashscopeModel = model || process.env.DASHSCOPE_MODEL || "qwen-plus";
+    const dashscopeApiKey = process.env.DASHSCOPE_API_KEY || "";
+    
+    if (!dashscopeApiKey) {
+      throw new Error("DASHSCOPE_API_KEY is not configured");
+    }
+    
+    const response = await fetch("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${dashscopeApiKey}`
+      },
+      body: JSON.stringify({
+        model: dashscopeModel,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 4096,
+        response_format: { type: "json_object" }
+      })
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`DashScope API error: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || "";
+  } catch (error) {
+    console.error("DashScope call failed:", error);
+    throw error;
+  }
+}
 
 // Lazy initializer for Google GenAI client
 let aiInstance: GoogleGenAI | null = null;
@@ -175,44 +257,49 @@ app.get("/api/health", (req, res) => {
 app.get("/api/projects", async (req, res) => {
   try {
     const projects = await getAllProjects();
+    console.log("📋 GET /api/projects returning:", projects.length, "projects");
     res.json(projects);
   } catch (error) {
-    console.error("Failed to get projects:", error);
+    console.error("❌ Failed to get projects:", error);
     res.status(500).json({ error: "Failed to get projects" });
   }
 });
 
 app.get("/api/projects/:id", async (req, res) => {
   try {
+    console.log("📥 GET /api/projects/:id called:", req.params.id);
     const project = await getProject(req.params.id);
+    console.log("📋 Project found:", project ? "yes" : "no", project);
     if (!project) {
       return res.status(404).json({ error: "Project not found" });
     }
     res.json(project);
   } catch (error) {
-    console.error("Failed to get project:", error);
+    console.error("❌ Failed to get project:", error);
     res.status(500).json({ error: "Failed to get project" });
   }
 });
 
 app.post("/api/projects", async (req, res) => {
   try {
-    const { name, pdfFileName, pdfData } = req.body;
+    const { name, pdfFileName, pdfData, bookTitle, bookContentText, directoryItems, modules } = req.body;
+    console.log("📥 POST /api/projects called with:", { name, pdfFileName: pdfFileName ? "yes" : "no", pdfData: pdfData ? "yes" : "no" });
     if (!name) {
       return res.status(400).json({ error: "Project name is required" });
     }
-    const project = await createProject(name, pdfFileName, pdfData);
+    const project = await createProject(name, pdfFileName, pdfData, bookTitle, bookContentText, directoryItems, modules);
+    console.log("✅ Project created in DB:", project.id);
     res.json(project);
   } catch (error) {
-    console.error("Failed to create project:", error);
+    console.error("❌ Failed to create project:", error);
     res.status(500).json({ error: "Failed to create project" });
   }
 });
 
 app.put("/api/projects/:id", async (req, res) => {
   try {
-    const { name, bookTitle, bookContentText, directoryItems, modules } = req.body;
-    await updateProject(req.params.id, { name, bookTitle, bookContentText, directoryItems, modules });
+    const { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData } = req.body;
+    await updateProject(req.params.id, { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData });
     res.json({ success: true });
   } catch (error) {
     console.error("Failed to update project:", error);
@@ -267,13 +354,17 @@ app.post("/api/projects/:id/scripts", async (req, res) => {
  */
 app.post("/api/parse-book", async (req, res) => {
   try {
-    const { title, fullText } = req.body;
-    if (!title || !fullText) {
-      return res.status(400).json({ error: "Missing book title or extracted content text." });
+    const { title, fullText, directoryStructure } = req.body;
+    if (!title) {
+      return res.status(400).json({ error: "Missing book title." });
     }
 
+    const directoryText = directoryStructure && directoryStructure.length > 0
+      ? JSON.stringify(directoryStructure, null, 2)
+      : fullText?.substring(0, 15000) || "";
+
     const systemInstruction = `You are an expert curriculum designer and high-cognition educational analyst (中文环境).
-Your sole task in this step is to analyze the textbook text, map its internal conceptual network, and split it into highly refined, high-cohesion, and fine-grained chronological learning slices/modules (at least 15-20 slices for a full curriculum to capture all nuances).
+Your sole task in this step is to analyze the textbook structure, map its internal conceptual network, and split it into highly refined, high-cohesion, and fine-grained chronological learning slices/modules (at least 15-20 slices for a full curriculum to capture all nuances).
 
 Please respect these core instructions strictly:
 1. Slicing granularity, completeness, and original logic:
@@ -311,13 +402,19 @@ You MUST output ONLY valid JSON format matching this schema:
 Reply in Chinese only.`;
 
     const promptMessage = `Identify textbook structure for "${title}".
-Analyze the following text extract from the textbook:\n\n${fullText.substring(0, 15000)}\n\n
-Separate this textbook into at least 15-20 distinct, fine-grained, logically chronosequential slices/modules focusing on information load reasonability and strong conceptual cohesion or association.`;
+Below is the structured table of contents extracted from the textbook (JSON format with chapter titles, page numbers, and hierarchy levels):\n\n${directoryText}\n\n
+Separate this textbook into at least 15-20 distinct, fine-grained, logically chronosequential slices/modules. Each slice should cover 1-2 closely related sections from the directory structure above. Focus on information load reasonability and strong conceptual cohesion.`;
 
     let outputText: string;
     
     // Choose AI provider based on configuration
-    if (AI_PROVIDER === "ollama") {
+    if (AI_PROVIDER === "deepseek") {
+      console.log("🔄 Using DeepSeek for textbook parsing...");
+      outputText = await callDeepSeek(promptMessage, systemInstruction);
+    } else if (AI_PROVIDER === "dashscope") {
+      console.log("🔄 Using DashScope (通义千问) for textbook parsing...");
+      outputText = await callDashScope(promptMessage, systemInstruction);
+    } else if (AI_PROVIDER === "ollama") {
       console.log("🔄 Using Ollama for textbook parsing...");
       outputText = await callOllama(promptMessage, systemInstruction);
     } else if (AI_PROVIDER === "huggingface") {
@@ -329,8 +426,8 @@ Separate this textbook into at least 15-20 distinct, fine-grained, logically chr
       if (!key || key.trim() === "" || key.trim() === "your-actual-gemini-api-key-here") {
         return res.status(401).json({ 
           error: "GEMINI_API_KEY 未配置",
-          message: "请在 .env 文件中设置有效的 Google Gemini API Key，或者设置 AI_PROVIDER=huggingface 使用免费云端模型。",
-          detail: "当前无法调用 AI 模型进行教材分析，请先配置 API Key 或切换到 Hugging Face。"
+          message: "请在 .env 文件中设置有效的 Google Gemini API Key，或者设置 AI_PROVIDER=dashscope 使用阿里云通义千问。",
+          detail: "当前无法调用 AI 模型进行教材分析，请先配置 API Key 或切换到 DashScope。"
         });
       }
       
@@ -642,7 +739,13 @@ Make the challenges direct, logical, scientific and fully complete. Ensure all o
 
     let outputText: string;
     
-    if (AI_PROVIDER === "ollama") {
+    if (AI_PROVIDER === "deepseek") {
+      console.log("🔄 Using DeepSeek for script generation...");
+      outputText = await callDeepSeek(promptText, systemInstruction);
+    } else if (AI_PROVIDER === "dashscope") {
+      console.log("🔄 Using DashScope (通义千问) for script generation...");
+      outputText = await callDashScope(promptText, systemInstruction);
+    } else if (AI_PROVIDER === "ollama") {
       console.log("🔄 Using Ollama for script generation...");
       outputText = await callOllama(promptText, systemInstruction);
     } else if (AI_PROVIDER === "huggingface") {
@@ -653,8 +756,8 @@ Make the challenges direct, logical, scientific and fully complete. Ensure all o
       if (!key || key.trim() === "" || key.trim() === "your-actual-gemini-api-key-here") {
         return res.status(401).json({ 
           error: "GEMINI_API_KEY 未配置",
-          message: "请在 .env 文件中设置有效的 Google Gemini API Key，或者设置 AI_PROVIDER=huggingface 使用免费云端模型。",
-          detail: "当前无法调用 AI 模型生成游戏脚本，请先配置 API Key 或切换到 Hugging Face。"
+          message: "请在 .env 文件中设置有效的 Google Gemini API Key，或者设置 AI_PROVIDER=dashscope 使用阿里云通义千问。",
+          detail: "当前无法调用 AI 模型生成游戏脚本，请先配置 API Key 或切换到 DashScope。"
         });
       }
       

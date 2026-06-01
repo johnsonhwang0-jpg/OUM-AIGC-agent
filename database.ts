@@ -86,15 +86,34 @@ export async function getDatabase(): Promise<Database> {
   return db;
 }
 
-export async function createProject(name: string, pdfFileName?: string, pdfData?: string): Promise<Project> {
+export async function createProject(
+  name: string,
+  pdfFileName?: string,
+  pdfData?: string,
+  bookTitle?: string,
+  bookContentText?: string,
+  directoryItems?: string,
+  modules?: string
+): Promise<Project> {
   const database = await getDatabase();
   const id = `proj-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   const now = new Date().toISOString();
 
   database.run(
     `INSERT INTO projects (id, name, pdfFileName, pdfData, bookTitle, bookContentText, directoryItems, modules, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, '', '', '', '', ?, ?)`,
-    [id, name, pdfFileName || null, pdfData || null, now, now]
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      name,
+      pdfFileName || null,
+      pdfData || null,
+      bookTitle || "",
+      bookContentText || "",
+      directoryItems || "",
+      modules || "",
+      now,
+      now
+    ]
   );
 
   saveDatabase(database);
@@ -104,10 +123,10 @@ export async function createProject(name: string, pdfFileName?: string, pdfData?
     name,
     pdfFileName: pdfFileName || "",
     pdfData: pdfData || null,
-    bookTitle: "",
-    bookContentText: "",
-    directoryItems: "",
-    modules: "",
+    bookTitle: bookTitle || "",
+    bookContentText: bookContentText || "",
+    directoryItems: directoryItems || "",
+    modules: modules || "",
     createdAt: now,
     updatedAt: now
   };
@@ -115,7 +134,7 @@ export async function createProject(name: string, pdfFileName?: string, pdfData?
 
 export async function updateProject(
   id: string,
-  updates: Partial<Pick<Project, "name" | "bookTitle" | "bookContentText" | "directoryItems" | "modules">>
+  updates: Partial<Pick<Project, "name" | "bookTitle" | "bookContentText" | "directoryItems" | "modules" | "pdfFileName" | "pdfData">>
 ): Promise<void> {
   const database = await getDatabase();
   const now = new Date().toISOString();
@@ -143,6 +162,14 @@ export async function updateProject(
     fields.push("modules = ?");
     values.push(updates.modules);
   }
+  if (updates.pdfFileName !== undefined) {
+    fields.push("pdfFileName = ?");
+    values.push(updates.pdfFileName);
+  }
+  if (updates.pdfData !== undefined) {
+    fields.push("pdfData = ?");
+    values.push(updates.pdfData);
+  }
 
   if (fields.length === 0) return;
 
@@ -167,26 +194,32 @@ export async function updateProjectPdf(id: string, pdfFileName: string, pdfData:
 
 export async function getProject(id: string): Promise<Project | null> {
   const database = await getDatabase();
-  const result = database.exec(`SELECT * FROM projects WHERE id = ?`, [id]);
+  const result = database.exec(`SELECT * FROM projects`);
 
-  if (result.length === 0 || result[0].values.length === 0) {
+  if (result.length === 0) {
     return null;
   }
 
-  const row = result[0].values[0];
   const columns = result[0].columns;
+  const idIndex = columns.indexOf("id");
+
+  const matchingRow = result[0].values.find(row => row[idIndex] === id);
+
+  if (!matchingRow) {
+    return null;
+  }
 
   const project: Project = {
-    id: row[columns.indexOf("id")] as string,
-    name: row[columns.indexOf("name")] as string,
-    pdfFileName: (row[columns.indexOf("pdfFileName")] as string) || "",
-    pdfData: row[columns.indexOf("pdfData")] as string | null,
-    bookTitle: (row[columns.indexOf("bookTitle")] as string) || "",
-    bookContentText: (row[columns.indexOf("bookContentText")] as string) || "",
-    directoryItems: (row[columns.indexOf("directoryItems")] as string) || "",
-    modules: (row[columns.indexOf("modules")] as string) || "",
-    createdAt: row[columns.indexOf("createdAt")] as string,
-    updatedAt: row[columns.indexOf("updatedAt")] as string
+    id: matchingRow[idIndex] as string,
+    name: (matchingRow[columns.indexOf("name")] as string) || "",
+    pdfFileName: (matchingRow[columns.indexOf("pdfFileName")] as string) || "",
+    pdfData: matchingRow[columns.indexOf("pdfData")] as string | null,
+    bookTitle: (matchingRow[columns.indexOf("bookTitle")] as string) || "",
+    bookContentText: (matchingRow[columns.indexOf("bookContentText")] as string) || "",
+    directoryItems: (matchingRow[columns.indexOf("directoryItems")] as string) || "",
+    modules: (matchingRow[columns.indexOf("modules")] as string) || "",
+    createdAt: matchingRow[columns.indexOf("createdAt")] as string,
+    updatedAt: matchingRow[columns.indexOf("updatedAt")] as string
   };
 
   return project;

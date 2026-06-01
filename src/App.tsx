@@ -114,6 +114,7 @@ export default function App() {
   const [pdfExtractionProgress, setPdfExtractionProgress] = useState<string>("");
   const [pdfReaderLoading, setPdfReaderLoading] = useState<boolean>(false);
   const [pdfPageOffset, setPdfPageOffset] = useState<number>(0);
+  const [pdfData, setPdfData] = useState<string | null>(null);
 
   // Project Management State
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -164,10 +165,12 @@ export default function App() {
       if (response.ok) {
         const projects = await response.json();
         setProjectList(projects);
+        return projects;
       }
     } catch (err) {
       console.error("Failed to load project list:", err);
     }
+    return [];
   }, []);
 
   // Load a specific project
@@ -182,10 +185,13 @@ export default function App() {
       setCurrentProjectId(projectId);
       setBookTitle(project.bookTitle || project.name || "");
       setBookContentText(project.bookContentText || "");
+      setPdfFileName(project.pdfFileName || "");
+      setPdfData(project.pdfData || null);
 
       if (project.directoryItems) {
         try {
-          setDirectoryItems(JSON.parse(project.directoryItems));
+          const parsed = JSON.parse(project.directoryItems);
+          setDirectoryItems(parsed);
         } catch (e) {
           console.error("Failed to parse directory items:", e);
         }
@@ -194,8 +200,10 @@ export default function App() {
       if (project.modules) {
         try {
           const parsedModules = JSON.parse(project.modules);
-          setModules(parsedModules);
-          setActiveStep(2);
+          if (Array.isArray(parsedModules) && parsedModules.length > 0) {
+            setModules(parsedModules);
+            setActiveStep(2);
+          }
         } catch (e) {
           console.error("Failed to parse modules:", e);
         }
@@ -215,12 +223,25 @@ export default function App() {
         setSavedScripts(scriptsMap);
       }
 
-      addAgentMessage(
-        `📂 **已加载项目：${project.name}**\n\n` +
-        (project.bookTitle ? `教材：《${project.bookTitle}》\n` : "") +
-        (project.modules ? `已保存 ${JSON.parse(project.modules).length} 个切片\n` : "") +
-        `您可以继续之前的编辑工作。`
-      );
+      let msg = `📂 **已加载项目：${project.name}**\n\n`;
+      if (project.pdfFileName) msg += `📄 PDF：${project.pdfFileName}\n`;
+      if (project.bookTitle) msg += `📖 教材：《${project.bookTitle}》\n`;
+      if (project.directoryItems) {
+        try {
+          const dirs = JSON.parse(project.directoryItems);
+          msg += `📑 目录：${Array.isArray(dirs) ? dirs.length : 0} 个章节节点\n`;
+        } catch {}
+      }
+      if (project.modules) {
+        try {
+          const mods = JSON.parse(project.modules);
+          if (Array.isArray(mods) && mods.length > 0) {
+            msg += `🧩 策划大纲：${mods.length} 个切片\n`;
+          }
+        } catch {}
+      }
+      msg += `\n您可以继续之前的编辑工作。`;
+      addAgentMessage(msg);
 
       setShowProjectList(false);
     } catch (err) {
@@ -230,44 +251,73 @@ export default function App() {
   }, [addAgentMessage]);
 
   // Create a new project
-  const createNewProject = useCallback(async (name: string, pdfFile?: string, pdfData?: string) => {
+  const createNewProject = useCallback(async (
+    name: string,
+    pdfFile?: string,
+    pdfData?: string,
+    bTitle?: string,
+    bContent?: string,
+    dirItems?: any[],
+    mods?: any[]
+  ) => {
+    console.log("🔵 createNewProject called:", name);
     try {
       const response = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, pdfFileName: pdfFile, pdfData })
+        body: JSON.stringify({
+          name,
+          pdfFileName: pdfFile,
+          pdfData,
+          bookTitle: bTitle || "",
+          bookContentText: bContent || "",
+          directoryItems: dirItems ? JSON.stringify(dirItems) : "",
+          modules: mods ? JSON.stringify(mods) : ""
+        })
       });
+      console.log("📡 createNewProject response status:", response.status);
       if (!response.ok) {
         throw new Error("Failed to create project");
       }
       const project = await response.json();
+      console.log("✅ Project created:", project);
       setCurrentProjectId(project.id);
+      // Force refresh project list
       await loadProjectList();
       return project;
     } catch (err) {
-      console.error("Failed to create project:", err);
+      console.error("❌ Failed to create project:", err);
       throw err;
     }
   }, [loadProjectList]);
 
   // Save current project state
-  const saveCurrentProject = useCallback(async () => {
+  const saveCurrentProject = useCallback(async (overrideModules?: any[]) => {
     if (!currentProjectId) return;
     try {
-      await fetch(`/api/projects/${currentProjectId}`, {
+      const modulesToSave = overrideModules || modules;
+      console.log("💾 saveCurrentProject: saving", {
+        projectId: currentProjectId,
+        modulesCount: modulesToSave.length,
+        directoryItemsCount: directoryItems.length
+      });
+      const response = await fetch(`/api/projects/${currentProjectId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bookTitle,
           bookContentText,
           directoryItems: JSON.stringify(directoryItems),
-          modules: JSON.stringify(modules)
+          modules: JSON.stringify(modulesToSave),
+          pdfFileName,
+          pdfData
         })
       });
+      console.log("✅ saveCurrentProject: response status", response.status);
     } catch (err) {
       console.error("Failed to save project:", err);
     }
-  }, [currentProjectId, bookTitle, bookContentText, directoryItems, modules]);
+  }, [currentProjectId, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData]);
 
   // Save script to project
   const saveScriptToProject = useCallback(async (moduleId: string, script: any) => {
@@ -431,15 +481,30 @@ export default function App() {
         setPdfExtractionProgress("");
 
         const projectName = file.name.replace(/\.[^/.]+$/, "");
-        try {
-          const arrayBuffer = e.target?.result as ArrayBuffer;
-          const base64Pdf = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-          await createNewProject(projectName, file.name, base64Pdf);
-          addAgentMessage(`📦 **成功收到您上传的教材电子书：**\n《${file.name}》\n\n项目 **"${projectName}"** 已创建并保存！\n\n我已在浏览器终端成功无损读取了前 **${pageLimit} 页** 的文本（约 ${extractedText.length} 字），并智能探测出**印刷页与PDF物理页的偏差偏移量 (Offset) 为 \`${autoOffset >= 0 ? "+" : ""}${autoOffset}\` 页**。\n\n系统已对教材页面完成了降噪对齐与目录抽取。接下来，请在右侧页面底部点击 **"✨ 教材内容智能切片"**，我们即可完成智能内容切块！`);
-        } catch (err) {
-          console.error("Failed to create project:", err);
-          addAgentMessage(`📦 **成功收到您上传的教材电子书：**\n《${file.name}》\n\n我已在浏览器终端成功无损读取了前 **${pageLimit} 页** 的文本（约 ${extractedText.length} 字），并智能探测出**印刷页与PDF物理页的偏差偏移量 (Offset) 为 \`${autoOffset >= 0 ? "+" : ""}${autoOffset}\` 页**。\n\n系统已对教材页面完成了降噪对齐与目录抽取。接下来，请在右侧页面底部点击 **"✨ 教材内容智能切片"**，我们即可完成智能内容切块！`);
-        }
+        const base64Reader = new FileReader();
+        base64Reader.onload = async () => {
+          try {
+            const dataUrl = base64Reader.result as string;
+            const base64Pdf = dataUrl.split(",")[1];
+            setPdfData(base64Pdf);
+            
+            await createNewProject(
+              projectName,
+              file.name,
+              base64Pdf,
+              projectName,
+              extractedText,
+              parsedOutline,
+              []
+            );
+            setShowProjectList(true);
+            addAgentMessage(`📦 **成功收到您上传的教材电子书：**\n《${file.name}》\n\n项目 **"${projectName}"** 已创建并保存到数据库！\n\n我已在浏览器终端成功无损读取了前 **${pageLimit} 页** 的文本（约 ${extractedText.length} 字），并智能探测出**印刷页与PDF物理页的偏差偏移量 (Offset) 为 \`${autoOffset >= 0 ? "+" : ""}${autoOffset}\` 页**。\n\n系统已对教材页面完成了降噪对齐与目录抽取。我已为您打开左侧的“我的项目”列表，您可以看到新创建的项目。接下来，请在右侧页面底部点击 **"✨ 教材内容智能切片"**，我们即可完成智能内容切块！`);
+          } catch (err) {
+            console.error("Failed to create project in base64Reader:", err);
+            addAgentMessage(`📦 **成功收到您上传的教材电子书：**\n《${file.name}》\n\n项目 **"${projectName}"** 已收到并完成解析，但数据库存储时遇到问题：${(err as Error).message || err}。您仍可在当前会话中体验完整教学切片与大纲设计！`);
+          }
+        };
+        base64Reader.readAsDataURL(file);
       } catch (err: any) {
         console.error(err);
         setPdfReaderLoading(false);
@@ -550,7 +615,8 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: bookTitle,
-          fullText: bookContentText
+          fullText: bookContentText,
+          directoryStructure: directoryItems
         })
       });
 
@@ -603,20 +669,29 @@ export default function App() {
 
       setModules(formattedModules);
       setIsParsing(false);
-      setActiveStep(2); // Auto navigate to planning board
+      setActiveStep(2);
 
-      // Create project if not exists and save modules
+      console.log("📦 handleSplitBook: currentProjectId =", currentProjectId);
+
       if (!currentProjectId) {
+        console.log("🆕 No project ID, creating new project");
         try {
-          await createNewProject(bookTitle || `项目-${Date.now()}`);
+          await createNewProject(
+            bookTitle || `项目-${Date.now()}`,
+            pdfFileName || "",
+            pdfData || "",
+            bookTitle,
+            bookContentText,
+            directoryItems,
+            formattedModules
+          );
         } catch (e) {
           console.error("Failed to create project:", e);
         }
-      }
-
-      // Save to database
-      if (currentProjectId) {
-        await saveCurrentProject();
+      } else {
+        console.log("💾 Project exists, updating modules to DB with fresh data");
+        await saveCurrentProject(formattedModules);
+        await loadProjectList();
       }
 
       addAgentMessage(
@@ -1392,14 +1467,14 @@ export default function StandaloneEduGame() {
                 </div>
                 <div className="text-[11px] text-cyan-400 flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-cyan-455 text-cyan-400" />
-                  ND-3.5-学术大模型引擎
+                  智能内容切片与互动剧本生成
                 </div>
               </div>
             </div>
             
             {/* Minimal decoration */}
             <div className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400">
-              DESKTOP AGENT
+              version 1.0.6
             </div>
           </div>
 
@@ -1598,51 +1673,53 @@ export default function StandaloneEduGame() {
                         </p>
                       </div>
                     </div>
-                    
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowProjectList(!showProjectList)}
-                        className="px-4 py-2.5 text-xs font-bold bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 text-emerald-400 border border-emerald-500/20 rounded-xl transition flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
-                      >
-                        <FileText className="w-3.5 h-3.5" />
-                        我的项目 ({projectList.length})
-                      </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handleSelectTemplate("astro-phys")}
-                        className="px-4 py-2.5 text-xs font-bold bg-cyan-500 hover:bg-cyan-400 active:scale-95 text-white shadow-[0_0_12px_rgba(6,182,212,0.4)] hover:shadow-[0_0_16px_rgba(6,182,212,0.6)] rounded-xl transition flex items-center justify-center gap-1.5 shrink-0 self-stretch md:self-center cursor-pointer"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        使用样例数据
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectTemplate("astro-phys")}
+                      className="px-4 py-2.5 text-xs font-bold bg-cyan-500 hover:bg-cyan-400 active:scale-95 text-white shadow-[0_0_12px_rgba(6,182,212,0.4)] hover:shadow-[0_0_16px_rgba(6,182,212,0.6)] rounded-xl transition flex items-center justify-center gap-1.5 shrink-0 self-stretch md:self-center cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      使用样例数据
+                    </button>
                   </div>
 
                   {/* Project List Panel */}
                   {showProjectList && (
-                    <div className="bg-gradient-to-br from-emerald-950/40 to-cyan-950/40 border border-emerald-500/30 rounded-2xl p-6 shadow-lg">
-                      <h4 className="text-sm font-semibold text-emerald-400 flex items-center gap-2 mb-4">
-                        <FileText className="w-4 h-4" />
-                        我的项目列表
-                      </h4>
+                    <div className="bg-gradient-to-br from-cyan-950/40 to-blue-950/40 border border-cyan-500/30 rounded-2xl p-6 shadow-lg backdrop-blur-sm">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-sm font-semibold text-cyan-400 flex items-center gap-2">
+                          <FileText className="w-4 h-4" />
+                          我的项目列表
+                        </h4>
+                        <span className="text-[10px] font-bold text-slate-500 bg-white/5 px-2 py-0.5 rounded-full border border-white/10">
+                          {projectList.length} 个项目
+                        </span>
+                      </div>
                       {projectList.length === 0 ? (
-                        <p className="text-xs text-slate-400 text-center py-4">暂无保存的项目</p>
+                        <p className="text-xs text-slate-400 text-center py-8">暂无保存的项目</p>
                       ) : (
-                        <div className="space-y-2 max-h-80 overflow-y-auto">
+                        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
                           {projectList.map(project => (
                             <div
                               key={project.id}
-                              className="flex items-center justify-between p-3 bg-black/20 border border-white/10 rounded-xl hover:border-emerald-500/30 transition group"
+                              className="flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl hover:border-cyan-500/40 hover:bg-white/[0.07] active:scale-[0.99] transition-all duration-200 group cursor-pointer"
+                              onClick={() => loadProject(project.id)}
                             >
-                              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => loadProject(project.id)}>
-                                <p className="text-sm font-semibold text-white truncate">{project.name}</p>
-                                <p className="text-xs text-slate-400 mt-0.5">
-                                  {project.bookTitle || "未指定教材"}
-                                  {project.modules ? ` • ${JSON.parse(project.modules).length} 个切片` : ""}
-                                </p>
-                                <p className="text-xs text-slate-500 mt-0.5">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
+                                    <FileText className="w-3.5 h-3.5" />
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-semibold text-white truncate leading-tight">{project.name}</p>
+                                    <p className="text-[11px] text-slate-400 mt-0.5">
+                                      {project.bookTitle || "未指定教材"}
+                                      {project.modules ? ` • ${JSON.parse(project.modules).length} 个切片` : ""}
+                                    </p>
+                                  </div>
+                                </div>
+                                <p className="text-[10px] text-slate-600 mt-1 ml-9">
                                   {new Date(project.updatedAt).toLocaleString("zh-CN")}
                                 </p>
                               </div>
@@ -1652,10 +1729,10 @@ export default function StandaloneEduGame() {
                                   e.stopPropagation();
                                   handleDeleteProject(project.id);
                                 }}
-                                className="p-2 text-slate-500 hover:text-red-400 transition opacity-0 group-hover:opacity-100"
+                                className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition opacity-0 group-hover:opacity-100"
                                 title="删除项目"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           ))}
@@ -1666,10 +1743,20 @@ export default function StandaloneEduGame() {
 
               {/* Custom PDF File Upload box */}
               <div className="space-y-3">
-                <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-                  <Upload className="w-4 h-4 text-cyan-400" />
-                  上传本地 PDF 开辟自定义教材（100% 真实解析）
-                </h4>
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Upload className="w-4 h-4 text-cyan-400" />
+                    上传本地 PDF 开辟自定义教材（100% 真实解析）
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setShowProjectList(!showProjectList)}
+                    className="px-4 py-2 text-xs font-bold bg-cyan-500 hover:bg-cyan-400 active:scale-95 text-white shadow-[0_0_12px_rgba(6,182,212,0.4)] hover:shadow-[0_0_16px_rgba(6,182,212,0.6)] rounded-xl transition-all duration-200 flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    我的项目 ({projectList.length})
+                  </button>
+                </div>
 
                 <div className="border border-dashed border-white/20 rounded-2xl bg-white/5 p-8 flex flex-col items-center justify-center text-center relative hover:border-cyan-500 hover:bg-white/10 transition">
                   <input 
@@ -1688,7 +1775,14 @@ export default function StandaloneEduGame() {
                       <span className="text-sm font-medium text-emerald-400 flex items-center gap-1.5 justify-center">
                         <Check className="w-4 h-4" /> 已绑定文档：{pdfFileName}
                       </span>
-                      <p className="text-xs text-slate-550 text-slate-500">点击或再次拖拽文件可以自由重新更换</p>
+                      <p className="text-xs text-slate-500">点击或再次拖拽文件可以自由重新更换</p>
+                    </div>
+                  ) : pdfData ? (
+                    <div className="space-y-1.5">
+                      <span className="text-sm font-medium text-cyan-400 flex items-center gap-1.5 justify-center">
+                        <Check className="w-4 h-4" /> 已从项目加载 PDF
+                      </span>
+                      <p className="text-xs text-slate-500">PDF 文件已还原，点击可替换</p>
                     </div>
                   ) : (
                     <div>
