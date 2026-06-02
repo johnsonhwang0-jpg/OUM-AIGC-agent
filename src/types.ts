@@ -20,14 +20,35 @@ export interface GameScript {
   conclusion: string;
 }
 
+export interface SummaryInfo {
+  learnedPoints: string[];
+  practicalProblems: string[];
+}
+
+export interface InfoDensity {
+  conceptCount: number;
+  factCount: number;
+  abstractLevel: "低" | "中" | "高";
+  nestingLevel: "无" | "两层" | "三层";
+  suggestedMinutes: string;
+  rationale: string;
+}
+
+export interface CohesionDetail {
+  cohesionType: string;
+  mechanism: string;
+  coreQuestion: string;
+}
+
 export interface BookModule {
   id: string;
-  chapterIndex: string; // e.g., "Chapter 1" or "01"
+  sliceId?: string; // e.g., "S1", "S2"
+  chapterIndex?: string; // e.g., "Chapter 1" or "01" (legacy)
   title: string;
   coveredChapters?: string;
-  summary: string;
-  infoDensity?: string; // 信息量/负载合理性评估
-  cohesionDetail?: string; // 核心考点关联性与内聚度说明
+  summary: SummaryInfo | string; // Support both new object and old string format
+  infoDensity?: InfoDensity | string; // 信息量/负载合理性评估
+  cohesionDetail?: CohesionDetail | string; // 核心考点关联性与内聚度说明
   gameType?: GameType;
   gameTitle?: string;
   gameRules?: string;
@@ -39,8 +60,11 @@ export interface BookModule {
 }
 
 export interface BookBlueprint {
-  title: string;
-  modules: BookModule[];
+  bookTitle?: string;
+  title?: string; // Legacy
+  totalSlices?: number;
+  slices?: BookModule[];
+  modules?: BookModule[]; // Legacy
 }
 
 export interface BookTemplate {

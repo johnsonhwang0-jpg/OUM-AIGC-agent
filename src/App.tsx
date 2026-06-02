@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 import { TEMPLATE_BOOKS } from "./data";
 import { 
-  BookModule, BookBlueprint, GameScript, Message, GameSessionState, GameChallenge, GameType, DirectoryItem 
+  BookModule, BookBlueprint, GameScript, Message, GameSessionState, GameChallenge, GameType, DirectoryItem,
+  SummaryInfo, InfoDensity, CohesionDetail
 } from "./types";
 import { parseTextToDirectory, serializeDirectoryToText } from "./utils/directoryParser";
 import { getExtractedTextForModule, calculateAutoPageOffset } from "./utils/textbookMatcher";
@@ -94,6 +95,35 @@ export default function App() {
   const [codeCopySuccess, setCodeCopySuccess] = useState<boolean>(false);
   const [outputTab, setOutputTab] = useState<'code' | 'preview'>('preview');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  // Helper functions to flatten new object types to strings for UI display
+  const getSummaryText = (summary: BookModule['summary']): string => {
+    if (typeof summary === 'string') return summary;
+    if (summary && typeof summary === 'object') {
+      const learnedPoints = (summary as SummaryInfo).learnedPoints || [];
+      const practicalProblems = (summary as SummaryInfo).practicalProblems || [];
+      return [...learnedPoints, ...practicalProblems].join('\n');
+    }
+    return '';
+  };
+
+  const getInfoDensityText = (infoDensity: BookModule['infoDensity']): string => {
+    if (typeof infoDensity === 'string') return infoDensity || '';
+    if (infoDensity && typeof infoDensity === 'object') {
+      const d = infoDensity as InfoDensity;
+      return `概念数: ${d.conceptCount}, 事实数: ${d.factCount}, 抽象度: ${d.abstractLevel}, 嵌套: ${d.nestingLevel || '无'}, 建议时长: ${d.suggestedMinutes || '10-15'}\n${d.rationale}`;
+    }
+    return '';
+  };
+
+  const getCohesionText = (cohesionDetail: BookModule['cohesionDetail']): string => {
+    if (typeof cohesionDetail === 'string') return cohesionDetail || '';
+    if (cohesionDetail && typeof cohesionDetail === 'object') {
+      const c = cohesionDetail as CohesionDetail;
+      return `类型: ${c.cohesionType}\n核心问题: ${c.coreQuestion}\n${c.mechanism}`;
+    }
+    return '';
+  };
 
 
   // Playable interactive Game Session state for active simulator
@@ -207,6 +237,8 @@ export default function App() {
         } catch (e) {
           console.error("Failed to parse modules:", e);
         }
+      } else {
+        setModules([]);
       }
 
       const scriptsResponse = await fetch(`/api/projects/${projectId}/scripts`);
@@ -403,7 +435,7 @@ export default function App() {
       setActiveStep(2);
       addAgentMessage(
         `📂 **已加载保存的切片方案！**\n\n已从本地存储中恢复了 **${parsedModules.length} 个核心教学单元**：\n` +
-        parsedModules.map(m => ` - **${m.chapterIndex} ${m.title}**: 覆盖知识点 [${m.summary}]`).join("\n") +
+        parsedModules.map(m => ` - **${m.sliceId || m.chapterIndex} ${m.title}**: ${typeof m.summary === 'string' ? m.summary : (m.summary as any)?.learnedPoints?.[0] || '核心概念'}`).join("\n") +
         `\n\n您可以直接使用这些切片继续后续操作，或者点击"🔄 重新 AI 切片"按钮生成新的切片方案。`
       );
       return true;
@@ -575,49 +607,71 @@ export default function App() {
   };
 
   // Triggering Book Splitting (API 1)
+  // 彻底简化：始终使用当前选中的 bookTitle 和 directoryItems 直接调用AI
   const handleSplitBook = async (forceRegenerate: boolean = false) => {
-    if (!bookContentText) {
-      alert("请先选择一本预制书籍或上传您的 PDF 文档！");
-      return;
+    console.log("\n🚀 ========== HANDLE SPLIT BOOK STARTED ==========");
+    console.log("📕 Current bookTitle state:", bookTitle);
+    console.log("📂 Current directoryItems.length:", directoryItems.length);
+    console.log("📋 First 3 directory items:", JSON.stringify(directoryItems.slice(0, 3), null, 2));
+    console.log("📏 Current bookContentText.length:", bookContentText.length);
+    console.log("🔧 forceRegenerate:", forceRegenerate);
+    console.log("==================================================\n");
+
+    try {
+      localStorage.removeItem(SAVED_MODULES_KEY);
+      localStorage.removeItem(`${SAVED_MODULES_KEY}-dir-hash`);
+    } catch (e) {
+      console.error("Failed to clear cache:", e);
     }
 
-    // Check for saved modules first (unless force regenerate is requested)
-    if (!forceRegenerate) {
-      const saved = localStorage.getItem(SAVED_MODULES_KEY);
-      if (saved) {
-        try {
-          const parsedModules: BookModule[] = JSON.parse(saved);
-          if (Array.isArray(parsedModules) && parsedModules.length > 0) {
-            setModules(parsedModules);
-            setIsParsing(false);
-            setActiveStep(2);
-            addAgentMessage(
-              `📂 **检测到已保存的切片方案，已为您自动加载！**\n\n已从本地存储中恢复了 **${parsedModules.length} 个核心教学单元**：\n` +
-              parsedModules.map(m => ` - **${m.chapterIndex} ${m.title}**: 覆盖知识点 [${m.summary}]`).join("\n") +
-              `\n\n您可以直接使用这些切片继续后续操作。如果想要重新生成切片，请点击"🔄 重新 AI 切片"按钮。`
-            );
-            return;
-          }
-        } catch (err) {
-          console.error("加载保存的切片失败:", err);
-          // Continue to regenerate if loading fails
-        }
-      }
+    if (!bookTitle || !bookTitle.trim()) {
+      alert("⚠️ 请先在左侧选择一本书或上传PDF！\n\n当前未检测到课本名称。");
+      return;
+    }
+    if (!directoryItems || directoryItems.length === 0) {
+      alert("⚠️ 当前课本没有可用的目录数据！\n\n请先确认左侧已选择/上传了课本。");
+      return;
+    }
+    if (!bookContentText || !bookContentText.trim()) {
+      alert("⚠️ 当前课本内容为空！\n\n请重新选择或上传PDF。");
+      return;
     }
 
     setIsParsing(true);
     setParseError("");
-    addAgentMessage("🪐 我正在精细通读课本结构，并梳理核心教学目标。这需要大概 3~8 秒，我将基于各个章节的内容类型，策划对应的玩法模型。请坐稳！");
+    setModules([]);
+    setCurrentProjectId(null);
+
+    const shouldCreateNewProject = true;
+
+    addAgentMessage(
+      `🪐 正在为《${bookTitle}》生成 AI 切片方案...\n\n` +
+      `📚 书名：${bookTitle}\n` +
+      `📂 目录章节数：${directoryItems.length}\n` +
+      `📋 目录预览：${directoryItems.slice(0, 3).map(d => d.title).join("、")}...\n\n` +
+      `正在使用 **DeepSeek V4 Flash** 模型分析目录结构，请稍候 3-8 秒...`
+    );
+
+    // 构造API请求数据 - 完全使用当前状态值
+    const requestPayload = {
+      title: bookTitle,
+      fullText: bookContentText,
+      directoryStructure: directoryItems
+    };
+
+    // 详细日志：记录发送给AI的精确数据
+    console.log("\n📤 ========== SENDING TO API ==========");
+    console.log("📕 title (bookTitle):", requestPayload.title);
+    console.log("📂 directoryStructure.length:", requestPayload.directoryStructure.length);
+    console.log("📋 directoryStructure (first 5):", JSON.stringify(requestPayload.directoryStructure.slice(0, 5), null, 2));
+    console.log("📏 fullText.length:", requestPayload.fullText.length);
+    console.log("======================================\n");
 
     try {
       const response = await fetch("/api/parse-book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: bookTitle,
-          fullText: bookContentText,
-          directoryStructure: directoryItems
-        })
+        body: JSON.stringify(requestPayload)
       });
 
       if (!response.ok) {
@@ -626,9 +680,20 @@ export default function App() {
       }
 
       const data: BookBlueprint = await response.json();
-      
-      // Inject unique client ID to manage state changes with robust heuristic game type and scenario defaults
-      const formattedModules: BookModule[] = data.modules.map((mod, index) => {
+      console.log("\n📥 ========== RECEIVED FROM API ==========");
+      console.log("📕 bookTitle from AI:", data.bookTitle);
+      console.log("📊 totalSlices from AI:", data.totalSlices);
+      console.log("📋 Number of slices received:", data.slices?.length || data.modules?.length || 0);
+      console.log("🔍 First slice:", JSON.stringify((data.slices || data.modules || [])[0], null, 2));
+      console.log("=========================================\n");
+
+      const rawModules = data.slices || data.modules || [];
+
+      if (rawModules.length === 0) {
+        throw new Error("AI返回的切片为空，请重试或检查prompt");
+      }
+
+      const formattedModules: BookModule[] = rawModules.map((mod: any, index: number) => {
         const norm = (mod.title || "").toLowerCase();
         let defaultGameType: GameType = 'quiz';
         if (norm.includes("计算") || norm.includes("公式") || norm.includes("数") || norm.includes("物理") || norm.includes("数学") || norm.includes("方程") || norm.includes("量")) {
@@ -647,6 +712,10 @@ export default function App() {
           defaultGameType = 'quiz';
         }
 
+        const summaryText = typeof mod.summary === 'string'
+          ? mod.summary
+          : (mod.summary?.learnedPoints || []).join("；");
+
         const defaultGameTitle = `${mod.title}核心概念通关`;
         const defaultGameRules = `在限定时间内，通过${
           defaultGameType === 'quiz' ? '全知选择问答' :
@@ -655,11 +724,14 @@ export default function App() {
           defaultGameType === 'interactive-story' ? '情境故事分支因果抉择' :
           defaultGameType === 'coding-puzzle' ? '诊断排查缺陷纠错' :
           '量化应用计算推理'
-        }的形式，巩固对 [${mod.summary}] 考点的系统认知。`;
+        }的形式，巩固对 [${summaryText}] 考点的系统认知。`;
 
         return {
           ...mod,
-          id: `mod-${index + 1}-${Date.now()}`,
+          id: mod.id || `mod-${index + 1}-${Date.now()}`,
+          sliceId: mod.sliceId || `S${index + 1}`,
+          chapterIndex: mod.chapterIndex || mod.sliceId || `S${index + 1}`,
+          duration: mod.duration || (mod.infoDensity && typeof mod.infoDensity === 'object' ? (mod.infoDensity as InfoDensity).suggestedMinutes : "10-15分钟"),
           gameType: mod.gameType || defaultGameType,
           gameTitle: mod.gameTitle || defaultGameTitle,
           gameRules: mod.gameRules || defaultGameRules,
@@ -667,20 +739,27 @@ export default function App() {
         };
       });
 
+      // Update book title from response (only if we have one)
+      const responseTitle = data.bookTitle || data.title || bookTitle;
+      if (responseTitle && responseTitle !== bookTitle) {
+        setBookTitle(responseTitle);
+      }
+
       setModules(formattedModules);
       setIsParsing(false);
       setActiveStep(2);
 
+      console.log("✅ Modules set successfully, count:", formattedModules.length);
       console.log("📦 handleSplitBook: currentProjectId =", currentProjectId);
 
-      if (!currentProjectId) {
+      if (shouldCreateNewProject) {
         console.log("🆕 No project ID, creating new project");
         try {
           await createNewProject(
-            bookTitle || `项目-${Date.now()}`,
+            responseTitle || bookTitle,
             pdfFileName || "",
             pdfData || "",
-            bookTitle,
+            responseTitle || bookTitle,
             bookContentText,
             directoryItems,
             formattedModules
@@ -689,23 +768,29 @@ export default function App() {
           console.error("Failed to create project:", e);
         }
       } else {
-        console.log("💾 Project exists, updating modules to DB with fresh data");
+        console.log("💾 Project exists, updating modules to DB");
         await saveCurrentProject(formattedModules);
         await loadProjectList();
       }
 
+      const moduleSummaries = formattedModules.map(m => {
+        const s = typeof m.summary === 'string' ? m.summary : (m.summary as any)?.learnedPoints?.[0] || m.title;
+        return ` - **${m.sliceId || m.chapterIndex} ${m.title}**: ${s}`;
+      }).join("\n");
+
       addAgentMessage(
-        `🎉 **学科游戏化分层规划方案已制定就绪！**\n\n我已将书籍《${data.title}》细切为 **${formattedModules.length} 个核心教学单元**：\n` +
-        formattedModules.map(m => ` - **${m.chapterIndex} ${m.title}**: 覆盖知识点 [${m.summary}]`).join("\n") +
+        `🎉 **学科游戏化分层规划方案已制定就绪！**\n\n我已将书籍《${responseTitle || bookTitle}》细切为 **${formattedModules.length} 个核心教学单元**：\n` +
+        moduleSummaries +
         `\n\n在右侧的工作区中，您现在可以对这一套课程大纲开展**自由编辑与完全订正**。您可以修改任何章节标题，或者自定义真实的冲突模拟场景及核心玩法规范！数据已自动保存到数据库中。`,
         "blueprint_ready"
       );
 
     } catch (err: any) {
-      console.error(err);
+      console.error("❌ handleSplitBook error:", err);
       setIsParsing(false);
       setParseError(err.message || "网络请求超时，请重试。");
-      addAgentMessage("❌ 目录分离解析失败。可能是 API 密钥限制。别担心，您可以在右侧点击重试，或者使用轻量级参数进行运行。");
+      addAgentMessage(`❌ **AI 切片生成失败**\n\n错误信息：${err.message || "未知错误"}\n\n请检查：\n1. 终端是否显示 API Key 配置正确\n2. 网络是否能访问 DeepSeek API\n3. 浏览器控制台的详细错误日志`);
+      alert(`切片生成失败：${err.message || "未知错误"}`);
     }
   };
 
@@ -720,6 +805,12 @@ export default function App() {
     setModules(prev => prev.map(m => m.id === moduleId ? { ...m, scriptStatus: 'generating' } : m));
 
     try {
+      const { extractedOriginalText } = getExtractedTextForModule(
+        mod, directoryItems, bookContentText,
+        pdfPagesText.length > 0 ? pdfPagesText : undefined,
+        pdfPageOffset
+      );
+
       const payload = {
         bookTitle: bookTitle,
         chapterTitle: mod.title,
@@ -728,7 +819,7 @@ export default function App() {
         gameType: mod.gameType,
         gameTitle: mod.gameTitle,
         gameRules: mod.gameRules,
-        extractedContent: bookContentText.substring(0, 3000) // Pass sample textbook snippet
+        extractedContent: extractedOriginalText.substring(0, 8000)
       };
 
       const response = await fetch("/api/generate-script", {
@@ -1474,7 +1565,7 @@ export default function StandaloneEduGame() {
             
             {/* Minimal decoration */}
             <div className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400">
-              version 1.0.6
+              version 1.0.18
             </div>
           </div>
 
@@ -1991,17 +2082,6 @@ export default function StandaloneEduGame() {
                 </div>
               )}
 
-              {hasSavedModules && (
-                <button
-                  type="button"
-                  onClick={loadModulesFromStorage}
-                  className="px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 text-emerald-400 font-semibold rounded-xl text-xs flex items-center gap-2 transition border border-emerald-500/20 hover:border-emerald-500/30 cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  📂 加载已保存切片
-                </button>
-              )}
-
               <button 
                 type="button"
                 onClick={() => handleSplitBook(false)}
@@ -2082,31 +2162,17 @@ export default function StandaloneEduGame() {
                   </button>
 
                   <button
-                    onClick={saveModulesToStorage}
-                    type="button"
-                    disabled={modules.length === 0}
-                    className={`text-xs font-semibold px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 transition border cursor-pointer ${
-                      modules.length === 0
-                        ? 'bg-slate-800/50 text-slate-500 border-slate-700/50 cursor-not-allowed'
-                        : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/20 hover:border-emerald-500/30'
-                    }`}
-                  >
-                    <Download className="w-4 h-4" />
-                    💾 保存切片
-                  </button>
-
-                  <button
                     onClick={() => handleSplitBook(true)}
                     type="button"
                     disabled={isParsing || !bookContentText.trim()}
-                    className={`text-xs font-semibold px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 transition border cursor-pointer ${
+                    className={`text-xs font-semibold px-4 py-2.5 rounded-xl flex items-center gap-2 transition border cursor-pointer ${
                       isParsing || !bookContentText.trim()
                         ? 'bg-slate-800/50 text-slate-500 border-slate-700/50 cursor-not-allowed'
-                        : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/20 hover:border-amber-500/30'
+                        : 'bg-gradient-to-r from-amber-500/10 to-orange-500/10 hover:from-amber-500/20 hover:to-orange-500/20 text-amber-400 border-amber-500/20 hover:border-amber-400/40 hover:shadow-[0_0_15px_rgba(245,158,11,0.2)]'
                     }`}
                   >
-                    <RefreshCw className={`w-4 h-4 ${isParsing ? 'animate-spin' : ''}`} />
-                    🔄 重新切片
+                    <Sparkles className={`w-4 h-4 ${isParsing ? 'animate-spin' : ''}`} />
+                    {isParsing ? 'AI 解析中...' : '✨ AI 重新切片'}
                   </button>
                 </div>
               </div>
@@ -2122,9 +2188,9 @@ export default function StandaloneEduGame() {
                         <th className="p-3 w-[160px]">知识切片主题</th>
                         <th className="p-3 w-[180px]">涵盖核心考点 / 概念</th>
                         <th className="p-3 w-[95px] text-center">预计自学时间</th>
-                        <th className="p-3 w-[280px]">⚡ 信息负荷合理性评估 (密度控制)</th>
+                        <th className="p-3 w-[280px]">⚡ 信息负荷合理性评估</th>
                         <th className="p-3 w-[280px]">🎯 主干考点内聚性与关联机制</th>
-                        <th className="p-3 w-[240px]">🎓 深度研习目标与思维价值</th>
+                        <th className="p-3 w-[240px]">📋 整体设计概要</th>
                         <th className="p-3 w-[55px] text-center">移除</th>
                       </tr>
                     </thead>
@@ -2169,10 +2235,10 @@ export default function StandaloneEduGame() {
                           {/* Col 4: Summary (Associated concepts) */}
                           <td className="p-2 py-3">
                             <textarea 
-                              value={mod.summary}
+                              value={getSummaryText(mod.summary)}
                               onChange={(e) => handleUpdateModule(mod.id, { summary: e.target.value })}
                               rows={3}
-                              placeholder="关联核心考点（3个以内）"
+                              placeholder="完整列出该切片包含的所有知识点和核心概念"
                               className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-300 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
                             />
                           </td>
@@ -2190,10 +2256,10 @@ export default function StandaloneEduGame() {
                           {/* Col 6: Info Density */}
                           <td className="p-2 py-3">
                             <textarea 
-                              value={mod.infoDensity || ""}
+                              value={getInfoDensityText(mod.infoDensity)}
                               onChange={(e) => handleUpdateModule(mod.id, { infoDensity: e.target.value })}
                               rows={3}
-                              placeholder="精细衡量信息吞吐量，评估单次在 10 分钟自学限额内对概念进行合理降维与防疲劳切片。"
+                              placeholder="明确说明为什么这个切片的信息负荷是合理的，分析认知负载、概念深度和时间分配"
                               className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-200 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
                             />
                           </td>
@@ -2201,10 +2267,10 @@ export default function StandaloneEduGame() {
                           {/* Col 7: Cohesion Detail */}
                           <td className="p-2 py-3">
                             <textarea 
-                              value={mod.cohesionDetail || ""}
+                              value={getCohesionText(mod.cohesionDetail)}
                               onChange={(e) => handleUpdateModule(mod.id, { cohesionDetail: e.target.value })}
                               rows={3}
-                              placeholder="阐明为什么包含的概念是强耦合的，说明其共处的物理因果、逻辑递进或联合诊断机制。"
+                              placeholder="说明教学核心是什么，各知识点之间的关联性和为什么可以聚合为一个章节"
                               className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-300 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
                             />
                           </td>
@@ -2215,7 +2281,7 @@ export default function StandaloneEduGame() {
                               value={mod.designRationale || ""}
                               onChange={(e) => handleUpdateModule(mod.id, { designRationale: e.target.value })}
                               rows={3}
-                              placeholder="阐明掌握该切片后，为学生注入怎样的学业深层主观能动性与实际分析应用层价值。"
+                              placeholder="整体设计概要：学生如何通过此切片学习、学到什么内容、能解决什么实际问题"
                               className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-400 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
                             />
                           </td>
@@ -2321,7 +2387,7 @@ export default function StandaloneEduGame() {
                                 涵盖核心考点 / 概念
                               </label>
                               <textarea 
-                                value={mod.summary}
+                                value={getSummaryText(mod.summary)}
                                 onChange={(e) => handleUpdateModule(mod.id, { summary: e.target.value })}
                                 className="w-full h-24 bg-[#050508] hover:bg-white/5 focus:bg-[#050508] border border-[#ffffff1a] focus:border-cyan-500 outline-none rounded-lg p-2 text-xs text-slate-300 transition resize-none leading-relaxed"
                               />
@@ -2336,7 +2402,7 @@ export default function StandaloneEduGame() {
                                   ⚡ 信息负荷合理性评估 (密度控制)
                                 </label>
                                 <textarea 
-                                  value={mod.infoDensity || ""}
+                                  value={getInfoDensityText(mod.infoDensity)}
                                   onChange={(e) => handleUpdateModule(mod.id, { infoDensity: e.target.value })}
                                   className="w-full h-32 bg-[#050508] hover:bg-white/5 focus:bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-2 text-xs text-slate-250 text-slate-200 transition resize-none leading-relaxed"
                                   placeholder="衡量信息吞吐量，评估单学时，防范负荷过载阻碍。"
@@ -2349,7 +2415,7 @@ export default function StandaloneEduGame() {
                                 🎯 主干考点内聚性与关联机制
                               </label>
                               <textarea 
-                                value={mod.cohesionDetail || ""}
+                                value={getCohesionText(mod.cohesionDetail)}
                                 onChange={(e) => handleUpdateModule(mod.id, { cohesionDetail: e.target.value })}
                                 className="w-full h-32 bg-[#050508] hover:bg-white/5 focus:bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-2 text-xs text-slate-300 transition resize-none leading-relaxed"
                                 placeholder="说明此组核心考点的内在强耦合原理或逻辑链条。"
@@ -2739,11 +2805,11 @@ export default function StandaloneEduGame() {
                           <div className="space-y-1 bg-[#050508]/60 p-3 rounded-xl border border-white/5">
                             <span className="text-slate-400 font-semibold block text-[10px] uppercase">📚 知识切片主题与考点</span>
                             <p className="font-bold text-white mb-1">{activeModule.title}</p>
-                            <p className="text-slate-400 leading-normal line-clamp-2">{activeModule.summary}</p>
+                            <p className="text-slate-400 leading-normal line-clamp-2">{getSummaryText(activeModule.summary)}</p>
                           </div>
                           <div className="space-y-1 bg-[#050508]/60 p-3 rounded-xl border border-white/5">
                             <span className="text-slate-400 font-semibold block text-[10px] uppercase">⚡ 信息负荷评估与内聚度</span>
-                            <p className="text-slate-300 leading-normal line-clamp-3 font-medium">{activeModule.infoDensity || "暂无合理度评估"}</p>
+                            <p className="text-slate-300 leading-normal line-clamp-3 font-medium">{getInfoDensityText(activeModule.infoDensity) || "暂无合理度评估"}</p>
                           </div>
                         </div>
 

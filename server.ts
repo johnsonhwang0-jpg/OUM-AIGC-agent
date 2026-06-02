@@ -240,6 +240,46 @@ function cleanCoveredChapters(covered: string, fallbackIndex: string): string {
   return str || fallbackIndex || "1.1";
 }
 
+// Convert old mock blueprint format to new slice format
+function convertOldMockToNewFormat(oldMock: any) {
+  const slices = (oldMock.modules || []).map((mod: any, idx: number) => ({
+    sliceId: `S${idx + 1}`,
+    title: mod.title || `切片${idx + 1}`,
+    coveredChapters: mod.coveredChapters || `${idx + 1}.1`,
+    summary: {
+      learnedPoints: [
+        `能理解${mod.title || "本节"}的核心概念`,
+        `能描述${mod.summary || "相关知识点"}的关键特征`,
+        `能运用${mod.title || "本节"}知识解决实际问题`
+      ],
+      practicalProblems: [
+        `当遇到${mod.title || "本节"}相关场景时，你能运用核心知识进行分析`,
+        `当需要应用${mod.title || "本节"}概念时，你能做出正确决策`
+      ]
+    },
+    infoDensity: {
+      conceptCount: mod.infoDensity ? 3 : 4,
+      factCount: mod.infoDensity ? 2 : 3,
+      abstractLevel: "中",
+      nestingLevel: "两层",
+      suggestedMinutes: "10-15",
+      rationale: mod.infoDensity || "该切片信息量适中，可在10-15分钟内完成学习，不会造成认知过载。"
+    },
+    cohesionDetail: {
+      cohesionType: "时序递进",
+      mechanism: mod.cohesionDetail || "该切片内的知识点围绕同一教学主题组织，逻辑递进关联，形成完整学习单元。",
+      coreQuestion: `如何掌握${mod.title || "本节"}的核心知识并应用于实践？`
+    },
+    designRationale: mod.designRationale || `学生通过本切片学习${mod.title || "核心概念"}，理解知识点之间的关联，并能运用这些知识分析和解决实际问题。`
+  }));
+  
+  return {
+    bookTitle: oldMock.title || "未知教材",
+    totalSlices: slices.length,
+    slices
+  };
+}
+
 function parseJsonResponse(text: string) {
   let cleaned = text.trim();
   const jsonMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -355,153 +395,173 @@ app.post("/api/projects/:id/scripts", async (req, res) => {
 app.post("/api/parse-book", async (req, res) => {
   try {
     const { title, fullText, directoryStructure } = req.body;
+
+    // Log the dynamic data being received from frontend
+    console.log("\n📚 ========== PARSE BOOK API CALL ==========");
+    console.log("📕 Book Title (dynamic from frontend):", title);
+    console.log("📂 Directory Structure length:", directoryStructure?.length || 0);
+    if (directoryStructure && directoryStructure.length > 0) {
+      console.log("📋 First 5 directory items:", JSON.stringify(directoryStructure.slice(0, 5), null, 2));
+    }
+    console.log("📏 fullText length:", fullText?.length || 0);
+    console.log("🤖 AI Provider:", process.env.AI_PROVIDER || "deepseek");
+    console.log("🧠 Model:", process.env.DEEPSEEK_MODEL || "deepseek-chat");
+    console.log("==========================================\n");
+
     if (!title) {
       return res.status(400).json({ error: "Missing book title." });
     }
 
-    const directoryText = directoryStructure && directoryStructure.length > 0
-      ? JSON.stringify(directoryStructure, null, 2)
-      : fullText?.substring(0, 15000) || "";
+    let directoryText = "";
+    if (directoryStructure && directoryStructure.length > 0) {
+      directoryText = "目录 & 课本章节提要：\n";
+      directoryStructure.forEach((item: any) => {
+        const pageStr = item.page ? ` (P.${item.page})` : '';
+        if (item.type === 'chapter') {
+          directoryText += `${item.title}${pageStr}\n`;
+        } else {
+          directoryText += `  - ${item.title}${pageStr}\n`;
+        }
+      });
+    } else {
+      directoryText = fullText?.substring(0, 15000) || "";
+    }
 
-    const systemInstruction = `You are an expert curriculum designer and high-cognition educational analyst (中文环境).
-Your sole task in this step is to analyze the textbook structure, map its internal conceptual network, and split it into highly refined, high-cohesion, and fine-grained chronological learning slices/modules (at least 15-20 slices for a full curriculum to capture all nuances).
+    const fullTextSnippet = fullText && fullText.length > 0
+      ? `\n\n以下是该课本的原始文本内容摘要（供参考）：\n${fullText.substring(0, 8000)}`
+      : "";
 
-Please respect these core instructions strictly:
-1. Slicing granularity, completeness, and original logic:
-   - Slice the curriculum chronologically according to the textbook's native flow without skipping, deleting, or omitting ANY sections/chapters.
-   - You MUST ensure complete, continuous, and exhaustive coverage of all topics inside the text (e.g. if there is Topic 6 with 6.1, 6.2, 6.3, 6.4, 6.5, you MUST cover all of them across your slices instead of stopping early or neglecting sections!). No section/chapter must be left unmapped.
-   - Each slice must contain exactly 1-2 tightly integrated concepts, representing roughly 10 minutes of self-directed study or game-play capability. Do not put an entire complex chapter into one slice! Keep slices small and precise.
-2. Uniform Chapter Range Formatting & Structure:
-   - The field "coveredChapters" (覆盖章节) MUST follow a strict, uniform, clean numeric format:
-     - For multiple/range sections: separate strictly with a single hyphen, e.g., "6.1-6.2", "6.1-6.4" or "2-3".
-     - For a single section: use a single identifier without hyphens, e.g., "6.1", "6.2" or "2".
-     - Strictly NO "Topic", "Section", "Chapter", "第", "节", "and", "&", "与", "和" or space characters.
-   - The slices MUST BE STRICTLY MUTUALLY EXCLUSIVE AND SEQUENTIAL without overlapping. For example, if module 1 covers "1.1-1.2", module 2 must begin at "1.3". Slices should never share or overlap the same chapter or section numbers.
-3. Information Volume / Density Control (信息量/负载合理性):
-   - Evaluate whether each slice's information load is appropriate for a single cognitive step. It should be digestible and clearly scoped, avoiding cognitive fatigue.
-4. Conceptual Cohesion & Suitability for Joint Application (核心考点强关联性):
-   - Show why these specific concepts belong together. The concepts within each slice must share a strong cause-and-effect relationship or systemic unity, making them perfect to be applied and tested together.
-   - Do NOT premature-engineer specific gameplay scenario narratives or mechanics in this phase. That should be deferred to the next phase. Focus purely on robust syllabus slicing!
-
-You MUST output ONLY valid JSON format matching this schema:
+    const systemInstruction = `你是一名为教师/课程设计者提供服务的教学切片专家。我将给你一本书的目录，请你帮我将其切分成多个教学切片，每个切片用于后续设计互动内容。
+ 
+一、核心切片原则
+信息负荷控制：每个切片包含 3-7 个核心概念（或 5-10 条具体策略/事实），对应 8-18 分钟的学习时长
+知识内聚性：每个切片内的知识点必须能共同回答一个完整的子问题或完成一个闭环的子任务
+章节覆盖格式：使用 a-b 格式表示连续章节（如 2.1-2.3），单个章节写成 a（如 5.2）
+二、输出格式要求
+请输出纯 JSON 格式，结构如下：
 {
-  "title": "教材名称",
-  "modules": [
+  "bookTitle": "从目录中提取的书名",
+  "totalSlices": 22,
+  "slices": [
     {
-      "chapterIndex": "章节编号",
-      "title": "单元主题",
-      "coveredChapters": "章节范围",
-      "summary": "核心概念",
-      "infoDensity": "信息负荷评估",
-      "cohesionDetail": "内聚性说明",
-      "duration": "预计时间",
-      "designRationale": "设计说明"
+      "sliceId": "S1",
+      "title": "切片主题名称（一句话，让学生知道这个切片在讲什么）",
+      "coveredChapters": "1.1-1.2",
+      "summary": {
+        "learnedPoints": [
+          "能说出/理解/区分XXX（具体可陈述的知识点）",
+          "能描述XXX的X个阶段/类型",
+          "能解释XXX与XXX的关系"
+        ],
+        "practicalProblems": [
+          "当...时，你能...（具体场景化描述）",
+          "当...时，你能..."
+        ]
+      },
+      "infoDensity": {
+        "conceptCount": 4,
+        "factCount": 2,
+        "abstractLevel": "低/中/高",
+        "nestingLevel": "无/两层/三层",
+        "suggestedMinutes": "8-12",
+        "rationale": "用2-3句话说明：为什么这个负荷是合理的？如果超限，建议如何拆分？"
+      },
+      "cohesionDetail": {
+        "cohesionType": "因果链/时序递进/对比争鸣/问题-解决链/分类并列/工具性内聚/解释性递进",
+        "mechanism": "用3-4句话说明知识点之间的具体连接方式（如：A导致B，B决定C；前3个概念共同支撑第4个；两个考点并列但共同服务于一个目的）",
+        "coreQuestion": "用一句话概括：这个切片最终要回答的核心问题是什么？"
+      },
+      "designRationale": "用1-2句话说明为什么把这些章节/概念切在一起，以及它与前后切片的逻辑关系"
     }
   ]
 }
-Reply in Chinese only.`;
+三、字段详细填写规范
+字段 	 填写要求
+sliceId 	 S1, S2, S3… 按顺序编号
+title 	 一句话主题，建议用"动词+名词"或"核心问题"形式
+coveredChapters 	 使用 a-b 格式，如 2.1-2.3；单节写 3.5
+summary.learnedPoints 	 3-5条，每条以"能…"开头，可验证
+summary.practicalProblems 	 2-3条，格式为"当【具体场景】时，你能【具体行动】"
+infoDensity.conceptCount 	 纯理论概念的数量（如"关键期假说""ZPD"）
+infoDensity.factCount 	 具体事实/策略/步骤的数量（如"9类ESL活动"）
+infoDensity.abstractLevel 	 低=可立即操作；中=需简单推理；高=需理论理解
+infoDensity.nestingLevel 	 无=并列；两层=概念下有子概念；三层=需多步推理
+infoDensity.suggestedMinutes 	 基于conceptCount×2~3分钟 + factCount×0.5~1分钟估算
+infoDensity.rationale 	 必须包含判断结论+依据，如超限则给出拆分建议
+cohesionDetail.cohesionType 	 从括号中选择最匹配的一项
+cohesionDetail.mechanism 	 明确写出"X连接Y""A支撑B""C和D共同指向E"
+cohesionDetail.coreQuestion 	 一个完整的问句，如"如何判断一个孩子处于哪个阅读阶段？"
+designRationale 	 说明切片边界划分的逻辑，以及与前后切片的关系
+四、重要提醒
+如果某一章/节的信息负荷过高（conceptCount > 7 或 abstractLevel=高 且 conceptCount > 5），请在 infoDensity.rationale 中明确建议"拆分为2个切片"
+如果某一章/节的信息负荷过低（conceptCount < 2 且 factCount < 3），请合并到相邻切片
+每个切片必须能让一个普通教师/学生在 20 分钟内完成理解（不含练习）
+输出必须是有效的纯 JSON，不要包含注释或额外文字`;
 
-    const promptMessage = `Identify textbook structure for "${title}".
-Below is the structured table of contents extracted from the textbook (JSON format with chapter titles, page numbers, and hierarchy levels):\n\n${directoryText}\n\n
-Separate this textbook into at least 15-20 distinct, fine-grained, logically chronosequential slices/modules. Each slice should cover 1-2 closely related sections from the directory structure above. Focus on information load reasonability and strong conceptual cohesion.`;
+    const promptMessage = `这是你需要处理的书籍目录，书籍名称是"${title}"，书籍目录信息如下：\n${directoryText}${fullTextSnippet}\n\n请严格按照上述目录结构进行切片，不要使用你训练数据中的其他课本内容。`;
+
+    // DEBUG: Print the actual prompt message being sent to AI
+    console.log("\n📝 ========== PROMPT MESSAGE SENT TO AI ==========");
+    console.log("Title used:", title);
+    console.log("Directory text length:", directoryText.length);
+    console.log("Directory text first 500 chars:", directoryText.substring(0, 500));
+    console.log("Directory text last 300 chars:", directoryText.substring(directoryText.length - 300));
+    console.log("Full prompt message first 1500 chars:", promptMessage.substring(0, 1500));
+    console.log("==========================================\n");
 
     let outputText: string;
-    
-    // Choose AI provider based on configuration
-    if (AI_PROVIDER === "deepseek") {
-      console.log("🔄 Using DeepSeek for textbook parsing...");
-      outputText = await callDeepSeek(promptMessage, systemInstruction);
-    } else if (AI_PROVIDER === "dashscope") {
-      console.log("🔄 Using DashScope (通义千问) for textbook parsing...");
-      outputText = await callDashScope(promptMessage, systemInstruction);
-    } else if (AI_PROVIDER === "ollama") {
-      console.log("🔄 Using Ollama for textbook parsing...");
-      outputText = await callOllama(promptMessage, systemInstruction);
-    } else if (AI_PROVIDER === "huggingface") {
-      console.log("🔄 Using Hugging Face for textbook parsing...");
-      outputText = await callHuggingFace(promptMessage, systemInstruction);
-    } else {
-      // Use Gemini
-      const key = process.env.GEMINI_API_KEY;
-      if (!key || key.trim() === "" || key.trim() === "your-actual-gemini-api-key-here") {
-        return res.status(401).json({ 
-          error: "GEMINI_API_KEY 未配置",
-          message: "请在 .env 文件中设置有效的 Google Gemini API Key，或者设置 AI_PROVIDER=dashscope 使用阿里云通义千问。",
-          detail: "当前无法调用 AI 模型进行教材分析，请先配置 API Key 或切换到 DashScope。"
-        });
-      }
-      
-      const ai = getGenAI();
-      console.log("🔄 Using Gemini for textbook parsing...");
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: promptMessage,
-        config: {
-          systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              modules: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    chapterIndex: { type: Type.STRING, description: "章节微课编号 (Sequential numbering, e.g., '01', '02', '03' etc.)" },
-                    title: { type: Type.STRING, description: "单元主题：指出该切片覆盖的微观核心主题名称" },
-                    coveredChapters: { type: Type.STRING, description: "本切片覆盖的原教材章节范围" },
-                    summary: { type: Type.STRING, description: "本节核心概念网络" },
-                    infoDensity: { type: Type.STRING, description: "信息负荷量评估" },
-                    cohesionDetail: { type: Type.STRING, description: "核心考点关联度与内聚性说明" },
-                    duration: { type: Type.STRING, description: "预计自学/体验时间" },
-                    designRationale: { type: Type.STRING, description: "教学设计说明" }
-                  },
-                  required: ["chapterIndex", "title", "coveredChapters", "summary", "infoDensity", "cohesionDetail", "duration", "designRationale"]
-                }
-              }
-            },
-            required: ["title", "modules"]
-          }
-        }
-      });
-      
-      outputText = response.text;
-      if (!outputText) {
-        throw new Error("No output generated from Gemini model.");
-      }
-    }
+
+    // Force use DeepSeek V4 Flash for this specific endpoint (textbook slicing)
+    const sliceModel = "deepseek-v4-flash";
+    console.log(`🔄 [parse-book] Forcing DeepSeek model: ${sliceModel}`);
+    outputText = await callDeepSeek(promptMessage, systemInstruction, sliceModel);
 
     try {
       const resultObj = parseJsonResponse(outputText);
-      // Clean up coveredChapters layout string to be strictly standard across all modules
-      if (resultObj && Array.isArray(resultObj.modules)) {
-        resultObj.modules = resultObj.modules.map((mod: any, index: number) => {
+      // Clean up coveredChapters layout string to be strictly standard across all slices
+      if (resultObj && Array.isArray(resultObj.slices)) {
+        resultObj.slices = resultObj.slices.map((slice: any, index: number) => {
           const fallbackIdx = `${index + 1}.1`;
           return {
-            ...mod,
-            coveredChapters: cleanCoveredChapters(mod.coveredChapters, fallbackIdx),
-            duration: mod.duration || "10-15分钟",
-            infoDensity: mod.infoDensity || "此切片的概念结构深度合理，单次负荷均局限在10-15分钟内，避免认知疲劳。",
-            cohesionDetail: mod.cohesionDetail || "核心考点高度关联，在逻辑链条上顺承相关，适合开展联合评估。",
-            designRationale: mod.designRationale || "通过场景或习题验证对于该切片内容的知识迁移能力。",
-            summary: mod.summary || "关键核心考点"
+            ...slice,
+            coveredChapters: cleanCoveredChapters(slice.coveredChapters, fallbackIdx),
+            infoDensity: slice.infoDensity || {
+              conceptCount: 3,
+              factCount: 2,
+              abstractLevel: "中",
+              nestingLevel: "两层",
+              suggestedMinutes: "10-15",
+              rationale: "该切片涵盖3-4个紧密相关的核心概念，信息量适中，可在10-15分钟内完成学习，不会造成认知过载。"
+            },
+            cohesionDetail: slice.cohesionDetail || {
+              cohesionType: "时序递进",
+              mechanism: "该切片内的知识点在逻辑上递进关联，围绕同一教学主题组织，形成完整的学习单元。",
+              coreQuestion: "本切片要回答的核心问题是什么？"
+            },
+            designRationale: slice.designRationale || "学生通过本切片学习核心概念，理解知识点之间的关联，并能运用这些知识分析和解决实际问题。",
+            summary: slice.summary || {
+              learnedPoints: ["本切片涵盖的核心知识点"],
+              practicalProblems: ["当...时，你能..."]
+            }
           };
         });
       }
       res.json(resultObj);
     } catch (parseErr) {
       console.error("JSON parsing failed, raw response was:", outputText);
-      const blueprint = getHeuristicOrMockBlueprint(title, fullText);
+      const blueprint = getHeuristicOrMockBlueprint(title, fullText, directoryStructure);
       res.json(blueprint);
     }
 
   } catch (error: any) {
-    console.error("Error splitting chapters via Gemini:", error);
+    console.error("Error splitting chapters via AI:", error);
     try {
-      console.warn("⚠️ API Key/Network issue encountered. Gracefully performing smart local textbook extraction and template pairing fallback...");
-      const blueprint = getHeuristicOrMockBlueprint(req.body.title || "标准教材中的核心课题", req.body.fullText || "");
+      console.warn("⚠️ AI API call failed. Falling back to dynamic directory-based slicing...");
+      const blueprint = getHeuristicOrMockBlueprint(
+        req.body.title || "标准教材中的核心课题",
+        req.body.fullText || "",
+        req.body.directoryStructure || []
+      );
       res.json(blueprint);
     } catch (innerErr: any) {
       res.status(500).json({ error: error.message || "External endpoint processing error" });
@@ -515,11 +575,114 @@ Separate this textbook into at least 15-20 distinct, fine-grained, logically chr
  * the user receives an elegant, tailored, and customizable syllabus in Step 2.
  * Ensure whole sections are continuously covered from first to last with no truncation or skips.
  */
-function getHeuristicOrMockBlueprint(title: string, fullText: string) {
+function getHeuristicOrMockBlueprint(title: string, fullText: string, directoryStructure: any[] = []) {
   const normTitle = (title || "").toLowerCase();
-  const textNorm = (fullText || "").toLowerCase();
 
-  // Try to parse lines chronologically to extract actual chapter/heading structures from fullText
+  if (directoryStructure && directoryStructure.length >= 3) {
+    const chapters = directoryStructure.filter((item: any) => item.type === 'chapter');
+    const sections = directoryStructure.filter((item: any) => item.type === 'section');
+
+    const itemsToSlice = chapters.length >= 2 ? chapters : directoryStructure;
+
+    let chunkSize = 1;
+    if (itemsToSlice.length > 18) {
+      chunkSize = Math.ceil(itemsToSlice.length / 16);
+    }
+
+    const matchedSlices: { chapterIndex: string; title: string; coveredChapters: string; summary: string }[] = [];
+    let seqIdx = 1;
+
+    for (let i = 0; i < itemsToSlice.length; i += chunkSize) {
+      const chunk = itemsToSlice.slice(i, i + chunkSize);
+      if (chunk.length === 0) continue;
+
+      const firstItem = chunk[0];
+      const lastItem = chunk[chunk.length - 1];
+
+      const firstNumMatch = firstItem.title.match(/(\d+(?:\.\d+)?)/);
+      const lastNumMatch = lastItem.title.match(/(\d+(?:\.\d+)?)/);
+      const firstNum = firstNumMatch ? firstNumMatch[1] : `${seqIdx}.1`;
+      const lastNum = lastNumMatch ? lastNumMatch[1] : firstNum;
+
+      let rawCovered = firstNum === lastNum ? firstNum : `${firstNum}-${lastNum}`;
+
+      const titleParts = chunk.map((c: any) => {
+        const cleanTitle = c.title.replace(/^\d+(?:\.\d+)?\s*[-–—.:：、\s]+/, '').trim();
+        return cleanTitle || c.title;
+      });
+      const combinedTitle = titleParts.join(" 与 ");
+      const cleanTitle = combinedTitle.length > 50 ? combinedTitle.substring(0, 47) + "..." : combinedTitle;
+      const combinedSummary = titleParts.join("，") + "核心考点及原理运用论证";
+
+      matchedSlices.push({
+        chapterIndex: String(seqIdx).padStart(2, '0'),
+        title: cleanTitle,
+        coveredChapters: cleanCoveredChapters(rawCovered, firstNum),
+        summary: combinedSummary
+      });
+      seqIdx++;
+    }
+
+    const enrichedSlices = matchedSlices.map((slice) => {
+      const normLine = slice.title.toLowerCase();
+      let gameType = "quiz";
+      let gameTitle = `${slice.title}核心概念通关`;
+
+      if (normLine.includes("计算") || normLine.includes("公式") || normLine.includes("物理") || normLine.includes("数学") || normLine.includes("方程") || normLine.includes("量")) {
+        gameType = "math-quest";
+        gameTitle = `${slice.title}：定量计算与数据推演诊断`;
+      } else if (normLine.includes("代码") || normLine.includes("编程") || normLine.includes("逻辑") || normLine.includes("算法") || normLine.includes("函数")) {
+        gameType = "coding-puzzle";
+        gameTitle = `${slice.title}：逻辑排障与程序除错挑战`;
+      } else if (normLine.includes("概念") || normLine.includes("分类") || normLine.includes("匹配") || normLine.includes("对应") || normLine.includes("关联")) {
+        gameType = "cross-match";
+        gameTitle = `${slice.title}：核心概念知识匹配连线`;
+      } else if (normLine.includes("故事") || normLine.includes("决策") || normLine.includes("抉择") || normLine.includes("剧情") || normLine.includes("历史")) {
+        gameType = "interactive-story";
+        gameTitle = `${slice.title}：情境剧情与因果抉择分支`;
+      } else {
+        gameType = "quiz";
+        gameTitle = `${slice.title}：综合推演与深度应用通关`;
+      }
+
+      const gameRules = `尊敬的学员，请进入关于 "${slice.title}" 的交互论证训练舱。挑战规则：在模拟的危机环境或核心场景下，通过一系列深度学科判断和情境决策，巩固您在 [${slice.title}] 中所学的核心逻辑。`;
+
+      return {
+        chapterIndex: slice.chapterIndex,
+        title: slice.title,
+        coveredChapters: slice.coveredChapters,
+        summary: {
+          learnedPoints: [`能理解${slice.title}的核心概念`, `能描述${slice.title}的关键特征`, `能运用${slice.title}知识解决实际问题`],
+          practicalProblems: [`当遇到${slice.title}相关场景时，你能运用核心知识进行分析`, `当需要应用${slice.title}概念时，你能做出正确决策`]
+        },
+        gameType,
+        gameTitle,
+        gameRules,
+        duration: "10分钟",
+        designRationale: `通过场景式交互，将 [${slice.title}] 抽象规律转化为紧迫的系统级决策，强化深层应用认知。`,
+        infoDensity: {
+          conceptCount: 3,
+          factCount: 2,
+          abstractLevel: "中",
+          nestingLevel: "两层",
+          suggestedMinutes: "10-15",
+          rationale: "该切片信息量适中，可在10-15分钟内完成学习，不会造成认知过载。"
+        },
+        cohesionDetail: {
+          cohesionType: "时序递进",
+          mechanism: `该切片内的知识点围绕"${slice.title}"这一教学主题组织，逻辑递进关联，形成完整学习单元。`,
+          coreQuestion: `如何掌握${slice.title}的核心知识并应用于实践？`
+        }
+      };
+    });
+
+    return {
+      bookTitle: (title || "Custom Textbook").endsWith("》") ? (title || "Custom Textbook") : `《${title || "Custom Textbook"}》`,
+      totalSlices: enrichedSlices.length,
+      slices: enrichedSlices
+    };
+  }
+
   const lines = (fullText || "").split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 3 && l.length < 120);
 
   // Match section headers inside lines list
@@ -566,17 +729,7 @@ function getHeuristicOrMockBlueprint(title: string, fullText: string) {
   // If we couldn't parse enough slices from raw text, fallback to standard mock template structures
   if (sectionLines.length < 3) {
     const rawMock = getMockBlueprint(title);
-    // Standardize all static mock coveredChapters
-    const cleanedModules = rawMock.modules.map((m: any, idx: number) => ({
-      ...m,
-      coveredChapters: cleanCoveredChapters(m.coveredChapters, `${idx + 1}.1`),
-      infoDensity: m.infoDensity || "此切片的概念结构深度合理，单次负荷均局限在 10 分钟学习限额内，确保自学者吸收无障碍，避免产生认知过载。",
-      cohesionDetail: m.cohesionDetail || "此节的 1-2 个主成分属于微观强耦合逻辑链条，极其适宜开展联合论证并设计统一诊断机制。"
-    }));
-    return {
-      ...rawMock,
-      modules: cleanedModules
-    };
+    return convertOldMockToNewFormat(rawMock);
   }
 
   // Partition sections dynamically to guarantee comprehensive coverage from 1st to last section with no truncation!
@@ -622,7 +775,7 @@ function getHeuristicOrMockBlueprint(title: string, fullText: string) {
   }
 
   // If we successfully parsed structures, let's pair them with domain-specific template properties
-  const enrichedModules = matchedSlices.map((slice, i) => {
+  const enrichedSlices = matchedSlices.map((slice, i) => {
     const templateMod = baseModules[i % baseModules.length];
 
     // Select suitable GameType heuristically
@@ -666,8 +819,9 @@ function getHeuristicOrMockBlueprint(title: string, fullText: string) {
   });
 
   return {
-    title: (title || "Custom Textbook").endsWith("》") ? (title || "Custom Textbook") : `《${title || "Custom Textbook"}》`,
-    modules: enrichedModules
+    bookTitle: (title || "Custom Textbook").endsWith("》") ? (title || "Custom Textbook") : `《${title || "Custom Textbook"}》`,
+    totalSlices: enrichedSlices.length,
+    slices: enrichedSlices
   };
 }
 
