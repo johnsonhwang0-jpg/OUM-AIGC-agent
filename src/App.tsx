@@ -16,6 +16,30 @@ import { getExtractedTextForModule, calculateAutoPageOffset } from "./utils/text
 import StandalonePreview from "./components/StandalonePreview";
 import ReactMarkdown from "react-markdown";
 
+function CollapsibleSection({ title, defaultOpen = false, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  return (
+    <div className="border border-white/10 rounded-xl bg-[#09090e] overflow-hidden">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.03] transition cursor-pointer"
+      >
+        <span className="text-sm font-semibold text-slate-200">{title}</span>
+        <span className="text-slate-500 text-xs transition-transform duration-200" style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+          ▶
+        </span>
+      </button>
+      {isOpen && (
+        <div className="px-4 pb-4 border-t border-white/5">
+          <div className="pt-3">
+            {children}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   // Draggable split workspace sizing engine
   const [leftWidth, setLeftWidth] = useState<number>(450);
@@ -52,7 +76,9 @@ export default function App() {
   // Navigation & Progress Steps
   // step 1: Load book, step 2: Edit/design games blueprint, step 3: Generate scripts & Play test
   const [activeStep, setActiveStep] = useState<number>(1);
-  const [step2ViewMode, setStep2ViewMode] = useState<'table' | 'cards'>('cards');
+  const [step2ViewMode, setStep2ViewMode] = useState<'table' | 'cards' | 'raw'>('cards');
+  const [rawBlueprintData, setRawBlueprintData] = useState<string>("");
+  const [aiMeta, setAiMeta] = useState<{ model: string; provider: string; systemInstruction: string; userPrompt: string } | null>(null);
   
   // AI Agent Conversation logs
   const [messages, setMessages] = useState<Message[]>([
@@ -655,7 +681,6 @@ export default function App() {
     // 构造API请求数据 - 完全使用当前状态值
     const requestPayload = {
       title: bookTitle,
-      fullText: bookContentText,
       directoryStructure: directoryItems
     };
 
@@ -664,7 +689,6 @@ export default function App() {
     console.log("📕 title (bookTitle):", requestPayload.title);
     console.log("📂 directoryStructure.length:", requestPayload.directoryStructure.length);
     console.log("📋 directoryStructure (first 5):", JSON.stringify(requestPayload.directoryStructure.slice(0, 5), null, 2));
-    console.log("📏 fullText.length:", requestPayload.fullText.length);
     console.log("======================================\n");
 
     try {
@@ -679,7 +703,22 @@ export default function App() {
         throw new Error(errorData?.message || errorData?.error || `分析失败 - 状态码: ${response.status}`);
       }
 
-      const data: BookBlueprint = await response.json();
+      const rawResponse: any = await response.json();
+      const { _meta, ...data } = rawResponse;
+      
+      if (_meta) {
+        setAiMeta(_meta);
+      }
+      
+      setRawBlueprintData(
+        "========== 实际发送给AI模型的 Prompt ==========\n\n" +
+        "【系统指令 (System Instruction)】:\n" +
+        (_meta?.systemInstruction || "无") +
+        "\n\n【用户指令 (User Prompt)】:\n" +
+        (_meta?.userPrompt || "无") +
+        "\n\n========== AI模型返回的原始响应 ==========\n" +
+        JSON.stringify(data, null, 2)
+      );
       console.log("\n📥 ========== RECEIVED FROM API ==========");
       console.log("📕 bookTitle from AI:", data.bookTitle);
       console.log("📊 totalSlices from AI:", data.totalSlices);
@@ -2150,6 +2189,17 @@ export default function StandaloneEduGame() {
                     >
                       <span>🎴 精美卡片</span>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setStep2ViewMode('raw')}
+                      className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1 cursor-pointer ${
+                        step2ViewMode === 'raw'
+                          ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/20'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span>🔧 原始数据</span>
+                    </button>
                   </div>
 
                   <button
@@ -2178,7 +2228,7 @@ export default function StandaloneEduGame() {
               </div>
 
               {/* TABLE VIEW (Primary / Default) */}
-              {step2ViewMode === 'table' ? (
+              {step2ViewMode === 'table' && (
                 <div className="overflow-x-auto border border-white/10 rounded-2xl bg-[#09090e] shadow-xl">
                   <table className="w-full text-left border-collapse min-w-[1300px]">
                     <thead>
@@ -2303,7 +2353,8 @@ export default function StandaloneEduGame() {
                     </tbody>
                   </table>
                 </div>
-              ) : (
+              )}
+              {step2ViewMode === 'cards' && (
                 /* CARD VIEW (Secondary Presets) */
                 <div className="space-y-4">
                   {modules.map((mod, index) => {
@@ -2440,6 +2491,53 @@ export default function StandaloneEduGame() {
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {step2ViewMode === 'raw' && (
+                <div className="space-y-3">
+                  {aiMeta ? (
+                    <>
+                      <CollapsibleSection title="🤖 调用的AI模型信息" defaultOpen={true}>
+                        <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-all leading-relaxed">
+{`模型名称：${aiMeta.model}
+服务商：${aiMeta.provider}
+API地址：https://api.deepseek.com/chat/completions`}
+                        </pre>
+                      </CollapsibleSection>
+
+                      <CollapsibleSection title="📋 系统指令（System Instruction）" defaultOpen={false}>
+                        <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-all leading-relaxed">
+{aiMeta.systemInstruction}
+                        </pre>
+                      </CollapsibleSection>
+
+                      <CollapsibleSection title="📝 用户指令（User Prompt）" defaultOpen={true}>
+                        <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-all leading-relaxed">
+                          {aiMeta.userPrompt}
+                        </pre>
+                      </CollapsibleSection>
+
+                      <CollapsibleSection title="📤 AI返回的原始数据" defaultOpen={true}>
+                        <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-all leading-relaxed max-h-[50vh] overflow-y-auto">
+                          {rawBlueprintData || "数据为空"}
+                        </pre>
+                      </CollapsibleSection>
+                    </>
+                  ) : (
+                    <div className="border border-white/10 rounded-2xl bg-[#09090e] p-6 text-center text-slate-400">
+                      <p>暂无AI调用数据，请先执行 AI 切片</p>
+                      {modules.length > 0 && (
+                        <div className="mt-4">
+                          <CollapsibleSection title="📤 当前加载的切片数据" defaultOpen={true}>
+                            <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-all leading-relaxed max-h-[50vh] overflow-y-auto">
+                              {JSON.stringify({ bookTitle, totalSlices: modules.length, slices: modules }, null, 2)}
+                            </pre>
+                          </CollapsibleSection>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
