@@ -40,6 +40,11 @@ export interface CohesionDetail {
   coreQuestion: string;
 }
 
+export interface DesignRationaleInfo {
+  learnedPoints: string;
+  practicalProblems: string;
+}
+
 export interface BookModule {
   id: string;
   sliceId?: string; // e.g., "S1", "S2"
@@ -53,7 +58,7 @@ export interface BookModule {
   gameTitle?: string;
   gameRules?: string;
   duration?: string;
-  designRationale?: string; // 教学设计逻辑/课业深度价值
+  designRationale?: DesignRationaleInfo | string; // 教学设计逻辑/课业深度价值
   extractedContent?: string; // Content text utilized for generating this script
   scriptStatus: 'pending' | 'generating' | 'completed' | 'failed';
   script?: GameScript;

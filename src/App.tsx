@@ -175,6 +175,7 @@ export default function App() {
   // Project Management State
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [projectList, setProjectList] = useState<any[]>([]);
+  const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
   const [savedScripts, setSavedScripts] = useState<Record<string, any>>({});
   const [showProjectList, setShowProjectList] = useState<boolean>(false);
 
@@ -412,6 +413,61 @@ export default function App() {
       console.error("Failed to delete project:", err);
     }
   }, [currentProjectId, loadProjectList]);
+
+  // Toggle project selection for batch operations
+  const toggleProjectSelection = useCallback((projectId: string) => {
+    setSelectedProjects(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(projectId)) {
+        newSet.delete(projectId);
+      } else {
+        newSet.add(projectId);
+      }
+      return newSet;
+    });
+  }, []);
+
+  // Select all projects
+  const selectAllProjects = useCallback(() => {
+    if (selectedProjects.size === projectList.length) {
+      setSelectedProjects(new Set());
+    } else {
+      setSelectedProjects(new Set(projectList.map(p => p.id)));
+    }
+  }, [projectList, selectedProjects.size]);
+
+  // Batch delete selected projects
+  const handleBatchDelete = useCallback(async () => {
+    if (selectedProjects.size === 0) return;
+    if (!confirm(`确定要删除选中的 ${selectedProjects.size} 个项目吗？此操作不可撤销。`)) return;
+    
+    try {
+      // Delete all selected projects
+      const promises = Array.from(selectedProjects).map(id => 
+        fetch(`/api/projects/${id}`, { method: "DELETE" })
+      );
+      
+      const responses = await Promise.all(promises);
+      const successfulDeletions = responses.filter(res => res.ok).length;
+      
+      if (successfulDeletions > 0) {
+        // Remove from current project if it was selected
+        if (Array.from(selectedProjects).includes(currentProjectId || "")) {
+          setCurrentProjectId(null);
+          setModules([]);
+          setBookTitle("");
+          setBookContentText("");
+          setDirectoryItems([]);
+          setSavedScripts({});
+        }
+        
+        await loadProjectList();
+        setSelectedProjects(new Set()); // Clear selection after deletion
+      }
+    } catch (err) {
+      console.error("Failed to batch delete projects:", err);
+    }
+  }, [selectedProjects, currentProjectId, loadProjectList]);
 
   // Load project list on mount
   useEffect(() => {
@@ -1604,7 +1660,7 @@ export default function StandaloneEduGame() {
             
             {/* Minimal decoration */}
             <div className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400">
-              version 1.0.18
+              version 1.0.22
             </div>
           </div>
 
@@ -1822,9 +1878,34 @@ export default function StandaloneEduGame() {
                           <FileText className="w-4 h-4" />
                           我的项目列表
                         </h4>
-                        <span className="text-[10px] font-bold text-slate-500 bg-white/5 px-2 py-0.5 rounded-full border border-white/10">
-                          {projectList.length} 个项目
-                        </span>
+                        <div className="flex items-center gap-3">
+                          {selectedProjects.size > 0 && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                                已选 {selectedProjects.size} 项
+                              </span>
+                              <button
+                                type="button"
+                                onClick={handleBatchDelete}
+                                className="text-[10px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 px-2 py-0.5 rounded-full border border-red-500/20 transition cursor-pointer flex items-center gap-1"
+                                title="批量删除"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                删除
+                              </button>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={selectAllProjects}
+                            className="text-[10px] font-bold text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded-full border border-white/10 transition cursor-pointer"
+                          >
+                            {selectedProjects.size === projectList.length ? '取消全选' : '全选'}
+                          </button>
+                          <span className="text-[10px] font-bold text-slate-500 bg-white/5 px-2 py-0.5 rounded-full border border-white/10">
+                            {projectList.length} 个项目
+                          </span>
+                        </div>
                       </div>
                       {projectList.length === 0 ? (
                         <p className="text-xs text-slate-400 text-center py-8">暂无保存的项目</p>
@@ -1833,25 +1914,49 @@ export default function StandaloneEduGame() {
                           {projectList.map(project => (
                             <div
                               key={project.id}
-                              className="flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl hover:border-cyan-500/40 hover:bg-white/[0.07] active:scale-[0.99] transition-all duration-200 group cursor-pointer"
+                              className={`flex items-center justify-between p-3 border rounded-xl hover:bg-white/[0.07] active:scale-[0.99] transition-all duration-200 group cursor-pointer ${
+                                selectedProjects.has(project.id)
+                                  ? 'border-cyan-500/60 bg-cyan-500/10'
+                                  : 'border-white/10 bg-white/5 hover:border-cyan-500/40'
+                              }`}
                               onClick={() => loadProject(project.id)}
                             >
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
-                                    <FileText className="w-3.5 h-3.5" />
+                              <div className="flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleProjectSelection(project.id);
+                                  }}
+                                  className={`w-5 h-5 rounded border-2 flex items-center justify-center transition cursor-pointer shrink-0 ${
+                                    selectedProjects.has(project.id)
+                                      ? 'border-cyan-500 bg-cyan-500 text-white'
+                                      : 'border-white/20 hover:border-white/40'
+                                  }`}
+                                >
+                                  {selectedProjects.has(project.id) && (
+                                    <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none">
+                                      <path d="M2 6L5 9L10 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    </svg>
+                                  )}
+                                </button>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
+                                      <FileText className="w-3.5 h-3.5" />
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-semibold text-white truncate leading-tight">{project.name}</p>
+                                      <p className="text-[11px] text-slate-400 mt-0.5">
+                                        {project.bookTitle || "未指定教材"}
+                                        {project.modules ? ` • ${JSON.parse(project.modules).length} 个切片` : ""}
+                                      </p>
+                                    </div>
                                   </div>
-                                  <div>
-                                    <p className="text-sm font-semibold text-white truncate leading-tight">{project.name}</p>
-                                    <p className="text-[11px] text-slate-400 mt-0.5">
-                                      {project.bookTitle || "未指定教材"}
-                                      {project.modules ? ` • ${JSON.parse(project.modules).length} 个切片` : ""}
-                                    </p>
-                                  </div>
+                                  <p className="text-[10px] text-slate-600 mt-1 ml-9">
+                                    {new Date(project.updatedAt).toLocaleString("zh-CN")}
+                                  </p>
                                 </div>
-                                <p className="text-[10px] text-slate-600 mt-1 ml-9">
-                                  {new Date(project.updatedAt).toLocaleString("zh-CN")}
-                                </p>
                               </div>
                               <button
                                 type="button"
@@ -2327,13 +2432,42 @@ export default function StandaloneEduGame() {
 
                           {/* Col 8: Design Rationale */}
                           <td className="p-2 py-3">
-                            <textarea 
-                              value={mod.designRationale || ""}
-                              onChange={(e) => handleUpdateModule(mod.id, { designRationale: e.target.value })}
-                              rows={3}
-                              placeholder="整体设计概要：学生如何通过此切片学习、学到什么内容、能解决什么实际问题"
-                              className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-400 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
-                            />
+                            {typeof mod.designRationale === 'object' && mod.designRationale !== null ? (
+                              <div className="space-y-2">
+                                <div>
+                                  <p className="text-[10px] font-semibold text-cyan-400 mb-1">学了什么：</p>
+                                  <textarea
+                                    value={(mod.designRationale as any).learnedPoints || ""}
+                                    onChange={(e) => handleUpdateModule(mod.id, {
+                                      designRationale: { learnedPoints: e.target.value, practicalProblems: (mod.designRationale as any).practicalProblems || "" }
+                                    })}
+                                    rows={2}
+                                    placeholder="列出 3-5 条可陈述的知识点"
+                                    className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-400 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
+                                  />
+                                </div>
+                                <div>
+                                  <p className="text-[10px] font-semibold text-amber-400 mb-1">解决的实际问题：</p>
+                                  <textarea
+                                    value={(mod.designRationale as any).practicalProblems || ""}
+                                    onChange={(e) => handleUpdateModule(mod.id, {
+                                      designRationale: { learnedPoints: (mod.designRationale as any).learnedPoints || "", practicalProblems: e.target.value }
+                                    })}
+                                    rows={2}
+                                    placeholder="列出 2-3 个场景，描述能用这些知识解决什么问题"
+                                    className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-400 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <textarea 
+                                value={(mod.designRationale as string) || ""}
+                                onChange={(e) => handleUpdateModule(mod.id, { designRationale: e.target.value })}
+                                rows={3}
+                                placeholder="整体设计概要：学生如何通过此切片学习、学到什么内容、能解决什么实际问题"
+                                className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-400 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
+                              />
+                            )}
                           </td>
 
                           {/* Col 9: Delete operation */}
@@ -2477,11 +2611,36 @@ export default function StandaloneEduGame() {
                               <label className="block text-[11px] font-bold text-slate-400 mb-1">
                                 🎓 深度研习目标与学术应用级价值
                               </label>
-                              <textarea 
-                                value={mod.designRationale || ""}
-                                onChange={(e) => handleUpdateModule(mod.id, { designRationale: e.target.value })}
-                                className="w-full h-20 bg-[#050508] hover:bg-white/5 focus:bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-2 text-xs text-slate-400 transition resize-none leading-relaxed"
-                              />
+                              {typeof mod.designRationale === 'object' && mod.designRationale !== null ? (
+                                <div className="space-y-2">
+                                  <div>
+                                    <p className="text-[10px] font-semibold text-cyan-400 mb-1">学了什么：</p>
+                                    <textarea
+                                      value={(mod.designRationale as any).learnedPoints || ""}
+                                      onChange={(e) => handleUpdateModule(mod.id, {
+                                        designRationale: { learnedPoints: e.target.value, practicalProblems: (mod.designRationale as any).practicalProblems || "" }
+                                      })}
+                                      className="w-full h-16 bg-[#050508] hover:bg-white/5 focus:bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-2 text-xs text-slate-400 transition resize-none leading-relaxed"
+                                    />
+                                  </div>
+                                  <div>
+                                    <p className="text-[10px] font-semibold text-amber-400 mb-1">解决的实际问题：</p>
+                                    <textarea
+                                      value={(mod.designRationale as any).practicalProblems || ""}
+                                      onChange={(e) => handleUpdateModule(mod.id, {
+                                        designRationale: { learnedPoints: (mod.designRationale as any).learnedPoints || "", practicalProblems: e.target.value }
+                                      })}
+                                      className="w-full h-16 bg-[#050508] hover:bg-white/5 focus:bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-2 text-xs text-slate-400 transition resize-none leading-relaxed"
+                                    />
+                                  </div>
+                                </div>
+                              ) : (
+                                <textarea 
+                                  value={(mod.designRationale as string) || ""}
+                                  onChange={(e) => handleUpdateModule(mod.id, { designRationale: e.target.value })}
+                                  className="w-full h-20 bg-[#050508] hover:bg-white/5 focus:bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-2 text-xs text-slate-400 transition resize-none leading-relaxed"
+                                />
+                              )}
                             </div>
 
                           </div>
