@@ -78,7 +78,7 @@ export default function App() {
   const [activeStep, setActiveStep] = useState<number>(1);
   const [step2ViewMode, setStep2ViewMode] = useState<'table' | 'cards' | 'raw'>('cards');
   const [rawBlueprintData, setRawBlueprintData] = useState<string>("");
-  const [aiMeta, setAiMeta] = useState<{ model: string; provider: string; systemInstruction: string; userPrompt: string } | null>(null);
+  const [aiMeta, setAiMeta] = useState<{ model: string; provider: string; systemInstruction: string; userPrompt: string; callTime?: string; status?: 'success' | 'fail' } | null>(null);
   
   // AI Agent Conversation logs
   const [messages, setMessages] = useState<Message[]>([
@@ -763,7 +763,11 @@ export default function App() {
       const { _meta, ...data } = rawResponse;
       
       if (_meta) {
-        setAiMeta(_meta);
+        setAiMeta({
+          ..._meta,
+          callTime: new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          status: 'success'
+        });
       }
       
       setRawBlueprintData(
@@ -884,6 +888,14 @@ export default function App() {
       console.error("❌ handleSplitBook error:", err);
       setIsParsing(false);
       setParseError(err.message || "网络请求超时，请重试。");
+      setAiMeta({
+        model: aiMeta?.model || "unknown",
+        provider: aiMeta?.provider || "unknown",
+        systemInstruction: aiMeta?.systemInstruction || "",
+        userPrompt: aiMeta?.userPrompt || "",
+        callTime: new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        status: 'fail'
+      });
       addAgentMessage(`❌ **AI 切片生成失败**\n\n错误信息：${err.message || "未知错误"}\n\n请检查：\n1. 终端是否显示 API Key 配置正确\n2. 网络是否能访问 DeepSeek API\n3. 浏览器控制台的详细错误日志`);
       alert(`切片生成失败：${err.message || "未知错误"}`);
     }
@@ -2262,11 +2274,29 @@ export default function StandaloneEduGame() {
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div>
                   <h3 className="text-lg font-bold font-display text-white flex items-center gap-2">
-                    🗺️ 课程游戏化大纲进度总表
+                    🗺️ 课程切片策划大纲
                   </h3>
-                  <p className="text-xs text-slate-400">
-                    教材已按细颗粒度智能切分，并在“高能模拟场景”与“强能动玩法”中融入3个以内核心考点，助学者在决策中实现思维内化。
-                  </p>
+                  {aiMeta && (
+                    <div className="flex items-center gap-3 mt-1">
+                      <span className="text-xs text-slate-400">
+                        最后调用：{aiMeta.callTime || "未知"}
+                      </span>
+                      <span className="flex items-center gap-1 text-xs">
+                        <span className={`inline-block w-2 h-2 rounded-full ${
+                          aiMeta.status === 'success' ? 'bg-green-400 shadow-[0_0_6px_rgba(74,222,128,0.6)]' :
+                          aiMeta.status === 'fail' ? 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.6)]' :
+                          'bg-yellow-400'
+                        }`}></span>
+                        <span className={
+                          aiMeta.status === 'success' ? 'text-green-400' :
+                          aiMeta.status === 'fail' ? 'text-red-400' :
+                          'text-yellow-400'
+                        }>
+                          {aiMeta.status === 'success' ? 'Success' : aiMeta.status === 'fail' ? 'Fail' : 'Pending'}
+                        </span>
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">

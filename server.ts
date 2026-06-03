@@ -226,12 +226,31 @@ function cleanCoveredChapters(covered: string, fallbackIndex: string): string {
   const matches = str.match(/\d+(?:\.\d+)?/g);
   if (matches && matches.length >= 2) {
     // If we have a list of numbers like ['6.1', '6.2'], represent it as first-last range, e.g., '6.1-6.2'
-    const first = matches[0];
+    let first = matches[0];
     let last = matches[matches.length - 1];
 
     if (first.includes('.') && !last.includes('.')) {
       const major = first.split('.')[0];
       last = `${major}.${last}`;
+    }
+
+    // Compare chapter numbers segment by segment to handle cases like 5.5 vs 5.3
+    const compareChapters = (a: string, b: string): number => {
+      const partsA = a.split('.').map(Number);
+      const partsB = b.split('.').map(Number);
+      const maxLen = Math.max(partsA.length, partsB.length);
+      for (let i = 0; i < maxLen; i++) {
+        const pa = partsA[i] || 0;
+        const pb = partsB[i] || 0;
+        if (pa < pb) return -1;
+        if (pa > pb) return 1;
+      }
+      return 0;
+    };
+
+    // Auto-fix reversed chapter ranges (e.g., 5.5-5.3 -> 5.3-5.5)
+    if (compareChapters(first, last) > 0) {
+      [first, last] = [last, first];
     }
 
     if (first === last) {
@@ -440,7 +459,7 @@ app.post("/api/parse-book", async (req, res) => {
 ### 一、核心切片原则
 - 信息负荷控制：每个切片包含 3-7 个核心概念（或 5-10 条具体策略/事实），对应 8-18 分钟的学习时长
 - 知识内聚性：每个切片内的知识点必须能共同回答一个完整的子问题或完成一个闭环的子任务
-- 章节覆盖格式：使用 a-b 格式表示连续章节（如 2.1-2.3），单个章节写成 a（如 5.2）
+- 章节覆盖格式：使用 a-b 格式表示连续章节（如 2.1-2.3），单个章节写成 a（如 5.2）。**范围格式中较小的章节号必须在前，较大的在后，绝不允许出现 5.5-5.3 这种倒序写法**
 - 章节覆盖范围（强制约束）：所有切片拼接后必须无遗漏、无重叠地覆盖原始目录中的所有正文章节（Summary、Key Terms、Self-Test、References 等附录内容可以不单独成片）
 
 ### 二、切片划分的强制约束规则
@@ -476,7 +495,7 @@ app.post("/api/parse-book", async (req, res) => {
       },
       "designRationale": {
         "learnedPoints": "列出 3-5 条可陈述的知识点",
-        "practicalProblems": "列出 2-3 个场景，描述能用这些知识解决什么问题"
+        "practicalProblems": "结合本切片所有知识点，描述 2-3 个综合应用场景：当学习者在什么具体情境下，需要同时运用这些知识点来解决什么实际问题。要描述完整的问题场景，而非孤立地对应单个知识点。"
       }
     }
   ]

@@ -359,120 +359,164 @@ export function getExtractedTextForModule(
     return true;
   };
 
-  // 2. High-precision dynamic PDF textbook page range matching
+  // 2. High-precision dynamic PDF textbook page range matching (accordion model)
   if (pdfPagesText && pdfPagesText.length > 0) {
-    const startPart = parts[0] || "";
-    const endPart = parts[parts.length - 1] || "";
-
-    const startNums = parsePartToNumbers(startPart);
-    const endNums = parsePartToNumbers(endPart);
-
-    let startIndex = -1;
-
-    // Find first precise start index match based on section numbers
-    if (startNums.length > 0) {
-      for (let i = 0; i < directoryItems.length; i++) {
-        const itemNums = getTitleSectionNumbers(directoryItems[i].title);
-        if (isMatchNums(startNums, itemNums)) {
-          startIndex = i;
-          break;
-        }
-      }
-    }
-
-    // Fallbacks for start index if strictly no precise TOC match hit
-    if (startIndex === -1 && startPart) {
-      startIndex = directoryItems.findIndex(item => checkIfMatch(item.title, startPart));
-    }
-    if (startIndex === -1 && mod.chapterIndex) {
-      startIndex = directoryItems.findIndex(item => checkIfMatch(item.title, mod.chapterIndex));
-    }
-    if (startIndex === -1 && mod.title) {
-      startIndex = directoryItems.findIndex(item => item.title.toLowerCase().includes(mod.title.toLowerCase()));
-    }
-
-    if (startIndex !== -1) {
-      // Find end match index (first match of endPart AFTER startIndex)
-      let endMatchIndex = startIndex; 
-      if (endPart && endPart !== startPart) {
-        if (endNums.length > 0) {
-          for (let k = startIndex; k < directoryItems.length; k++) {
-            const itemNums = getTitleSectionNumbers(directoryItems[k].title);
-            if (isMatchNums(endNums, itemNums)) {
-              endMatchIndex = k;
-              break; // CRITICAL: Stop at the first logical match of endPart!
-            }
-          }
-        }
-        if (endMatchIndex === startIndex) {
-          // Fallback string matching after startIndex
-          for (let k = startIndex; k < directoryItems.length; k++) {
-            if (checkIfMatch(directoryItems[k].title, endPart)) {
-              endMatchIndex = k;
-              break;
-            }
-          }
-        }
-      }
-
-      const matchedStartItem = directoryItems[startIndex];
-      const matchedEndItem = directoryItems[endMatchIndex];
-
-      const activeStartPrinted = parseInt(matchedStartItem.page || "", 10) || 1;
+    // Parse coveredChapters into start and end chapter numbers
+    // e.g., "1.1-1.3" → startNums=[1,1], endNums=[1,3]
+    // e.g., "5.2" → startNums=[5,2], endNums=[5,2]
+    const parseChapterRange = (coveredStr: string): { startNums: number[]; endNums: number[] } => {
+      const cleanStr = coveredStr.trim();
       
-      // Calculate activeEndPrinted based on the first section after endMatchIndex that is NOT a descendant of the target end chapter.
-      const boundNums = endNums.length > 0 ? endNums : startNums;
-      let nextPagePrinted = -1;
+      // Try range pattern like "1.1-1.3" or "5.2-5.5"
+      const rangeMatch = cleanStr.match(/(\d+(?:\.\d+)*)\s*[-~—至]\s*(\d+(?:\.\d+)*)/);
+      if (rangeMatch) {
+        const startNums = rangeMatch[1].split('.').map(Number);
+        const endNums = rangeMatch[2].split('.').map(Number);
+        return { startNums, endNums };
+      }
+      
+      // Single chapter like "1.1" or "5"
+      const singleMatch = cleanStr.match(/(\d+(?:\.\d+)*)/);
+      if (singleMatch) {
+        const nums = singleMatch[1].split('.').map(Number);
+        return { startNums: nums, endNums: nums };
+      }
+      
+      return { startNums: [], endNums: [] };
+    };
 
-      for (let k = endMatchIndex + 1; k < directoryItems.length; k++) {
-        const nextItem = directoryItems[k];
-        const nextItemNums = getTitleSectionNumbers(nextItem.title);
-        
-        const isDesc = boundNums.length > 0 && isSameOrDescendantArray(boundNums, nextItemNums);
-        
-        if (!isDesc) {
+    const { startNums, endNums } = parseChapterRange(covered);
+
+    if (startNums.length === 0) {
+      // Fallback to old parts-based approach if parsing fails
+    } else {
+      // Helper: check if two number arrays match exactly
+      const numsEqual = (a: number[], b: number[]): boolean => {
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+          if (a[i] !== b[i]) return false;
+        }
+        return true;
+      };
+
+      // Helper: check if child is same or descendant of parent
+      const isSameOrDescendant = (parent: number[], child: number[]): boolean => {
+        if (parent.length === 0 || child.length === 0) return false;
+        if (child.length < parent.length) return false;
+        for (let i = 0; i < parent.length; i++) {
+          if (child[i] !== parent[i]) return false;
+        }
+        return true;
+      };
+
+      // Helper: find directory item index by exact section number match
+      const findItemIndexByNums = (nums: number[]): number => {
+        for (let i = 0; i < directoryItems.length; i++) {
+          const itemNums = getTitleSectionNumbers(directoryItems[i].title);
+          if (numsEqual(nums, itemNums)) {
+            return i;
+          }
+        }
+        return -1;
+      };
+
+      // Helper: find directory item index by fuzzy title match
+      const findItemIndexByTitle = (part: string): number => {
+        return directoryItems.findIndex(item => checkIfMatch(item.title, part));
+      };
+
+      // Find start index
+      let startIndex = findItemIndexByNums(startNums);
+      if (startIndex === -1) {
+        // Fallback: fuzzy match
+        const startPart = startNums.join('.');
+        startIndex = findItemIndexByTitle(startPart);
+      }
+      if (startIndex === -1 && mod.chapterIndex) {
+        startIndex = directoryItems.findIndex(item => checkIfMatch(item.title, mod.chapterIndex));
+      }
+      if (startIndex === -1 && mod.title) {
+        startIndex = directoryItems.findIndex(item => item.title.toLowerCase().includes(mod.title.toLowerCase()));
+      }
+
+      if (startIndex !== -1) {
+        // Find end index
+        let endIndex = findItemIndexByNums(endNums);
+        if (endIndex === -1) {
+          const endPart = endNums.join('.');
+          endIndex = findItemIndexByTitle(endPart);
+        }
+        if (endIndex === -1 || endIndex < startIndex) {
+          endIndex = startIndex;
+        }
+
+        const matchedStartItem = directoryItems[startIndex];
+        const matchedEndItem = directoryItems[endIndex];
+
+        const activeStartPrinted = parseInt(matchedStartItem.page || "", 10) || 1;
+
+        // === ACCORDION MODEL: Find the "next chapter" after endNums ===
+        // Rule 1: If there's a sibling b+1 at the same level → page(b+1) - 1
+        // Rule 2: If b is the last at its level → find parent's next sibling's first child
+        // Rule 3: If the whole tree ends → use document total pages
+        let nextPagePrinted = -1;
+
+        const endItemNums = getTitleSectionNumbers(matchedEndItem.title);
+
+        for (let k = endIndex + 1; k < directoryItems.length; k++) {
+          const nextItem = directoryItems[k];
+          const nextItemNums = getTitleSectionNumbers(nextItem.title);
+
+          if (nextItemNums.length === 0) continue;
+
+          // Skip all descendants of the end chapter
+          if (isSameOrDescendant(endItemNums, nextItemNums)) {
+            continue;
+          }
+
+          // Found the first non-descendant item → this is the "next chapter"
           const pVal = parseInt(nextItem.page || "", 10);
           if (!isNaN(pVal) && pVal > 0) {
             nextPagePrinted = pVal;
-            break;
+          }
+          break;
+        }
+
+        let activeEndPrinted: number;
+        if (nextPagePrinted !== -1) {
+          activeEndPrinted = Math.max(activeStartPrinted, nextPagePrinted - 1);
+        } else {
+          // Rule 3: whole tree ended → use document total pages
+          activeEndPrinted = Math.max(activeStartPrinted, pdfPagesText.length - pdfPageOffset);
+        }
+
+        // Compute physical bounds using offset calibration safely
+        const activeStartPhysical = Math.max(1, activeStartPrinted + pdfPageOffset);
+        const activeEndPhysical = Math.max(activeStartPhysical, Math.min(pdfPagesText.length, activeEndPrinted + pdfPageOffset));
+
+        let mdOutput = `### 📑 PDF 教材原文块同步对齐 (Verbatim Page Extract)\n\n`;
+        mdOutput += `> 💡 **真实物理定位**: PDF 物理页 [第 **${activeStartPhysical}** 页 - 第 **${activeEndPhysical}** 页]\n`;
+        mdOutput += `> 📖 **校准课本印刷页**: 印刷页码范围 [P.${activeStartPrinted} - P.${activeEndPrinted}] | 偏差偏移值 (Offset): \`${pdfPageOffset >= 0 ? "+" : ""}${pdfPageOffset}\` 页\n`;
+        mdOutput += `> 🎯 **核对对应大纲节点**: 从 \`${matchedStartItem.title} (P.${matchedStartItem.page})\` 至 \`${matchedEndItem.title} (P.${matchedEndItem.page})\`\n\n`;
+
+        let textRetrieved = false;
+        for (let pageNum = activeStartPhysical; pageNum <= activeEndPhysical; pageNum++) {
+          const rawContent = pdfPagesText[pageNum - 1];
+          if (rawContent && rawContent.trim()) {
+            textRetrieved = true;
+            // Apply line-by-line cleaner filters
+            const cleanedText = cleanAndFormatPageText(rawContent, pageNum);
+
+            mdOutput += `#### 📄 —— 第 ${pageNum} 页 原文 (PDF 物理页) ——\n\n${cleanedText || "*(经过智能降噪过滤，未包含非考点核心文本)*"}\n\n---\n\n`;
           }
         }
-      }
 
-      let activeEndPrinted = -1;
-      if (nextPagePrinted !== -1) {
-        activeEndPrinted = Math.max(activeStartPrinted, nextPagePrinted - 1);
-      } else {
-        // Fallback: read until the end of the PDF
-        activeEndPrinted = Math.max(activeStartPrinted, pdfPagesText.length - pdfPageOffset);
-      }
-
-      // Compute physical bounds using offset calibration safely
-      const activeStartPhysical = Math.max(1, activeStartPrinted + pdfPageOffset);
-      const activeEndPhysical = Math.max(activeStartPhysical, Math.min(pdfPagesText.length, activeEndPrinted + pdfPageOffset));
-
-      let mdOutput = `### 📑 PDF 教材原文块同步对齐 (Verbatim Page Extract)\n\n`;
-      mdOutput += `> 💡 **真实物理定位**: PDF 物理页 [第 **${activeStartPhysical}** 页 - 第 **${activeEndPhysical}** 页]\n`;
-      mdOutput += `> 📖 **校准课本印刷页**: 印刷页码范围 [P.${activeStartPrinted} - P.${activeEndPrinted}] | 偏差偏移值 (Offset): \`${pdfPageOffset >= 0 ? "+" : ""}${pdfPageOffset}\` 页\n`;
-      mdOutput += `> 🎯 **核对对应大纲节点**: 从 \`${matchedStartItem.title} (P.${matchedStartItem.page})\` 至 \`${matchedEndItem.title} (P.${matchedEndItem.page})\`\n\n`;
-
-      let textRetrieved = false;
-      for (let pageNum = activeStartPhysical; pageNum <= activeEndPhysical; pageNum++) {
-        const rawContent = pdfPagesText[pageNum - 1];
-        if (rawContent && rawContent.trim()) {
-          textRetrieved = true;
-          // Apply line-by-line cleaner filters
-          const cleanedText = cleanAndFormatPageText(rawContent, pageNum);
-
-          mdOutput += `#### 📄 —— 第 ${pageNum} 页 原文 (PDF 物理页) ——\n\n${cleanedText || "*(经过智能降噪过滤，未包含非考点核心文本)*"}\n\n---\n\n`;
+        if (textRetrieved) {
+          return {
+            mappedPages: `P.${activeStartPrinted}-${activeEndPrinted}`,
+            extractedOriginalText: mdOutput
+          };
         }
-      }
-
-      if (textRetrieved) {
-        return {
-          mappedPages: `P.${activeStartPrinted}-${activeEndPrinted}`,
-          extractedOriginalText: mdOutput
-        };
       }
     }
   }
