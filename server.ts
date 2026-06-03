@@ -38,9 +38,6 @@ async function callDeepSeek(prompt: string, systemPrompt: string = "", model: st
       throw new Error("DEEPSEEK_API_KEY is not configured");
     }
     
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 120秒超时
-    
     const response = await fetch("https://api.deepseek.com/chat/completions", {
       method: "POST",
       headers: {
@@ -56,11 +53,8 @@ async function callDeepSeek(prompt: string, systemPrompt: string = "", model: st
         temperature: 0.7,
         max_tokens: maxTokens,
         response_format: { type: "json_object" }
-      }),
-      signal: controller.signal
+      })
     });
-    
-    clearTimeout(timeoutId);
     
     if (!response.ok) {
       const errorText = await response.text();
@@ -226,31 +220,12 @@ function cleanCoveredChapters(covered: string, fallbackIndex: string): string {
   const matches = str.match(/\d+(?:\.\d+)?/g);
   if (matches && matches.length >= 2) {
     // If we have a list of numbers like ['6.1', '6.2'], represent it as first-last range, e.g., '6.1-6.2'
-    let first = matches[0];
+    const first = matches[0];
     let last = matches[matches.length - 1];
 
     if (first.includes('.') && !last.includes('.')) {
       const major = first.split('.')[0];
       last = `${major}.${last}`;
-    }
-
-    // Compare chapter numbers segment by segment to handle cases like 5.5 vs 5.3
-    const compareChapters = (a: string, b: string): number => {
-      const partsA = a.split('.').map(Number);
-      const partsB = b.split('.').map(Number);
-      const maxLen = Math.max(partsA.length, partsB.length);
-      for (let i = 0; i < maxLen; i++) {
-        const pa = partsA[i] || 0;
-        const pb = partsB[i] || 0;
-        if (pa < pb) return -1;
-        if (pa > pb) return 1;
-      }
-      return 0;
-    };
-
-    // Auto-fix reversed chapter ranges (e.g., 5.5-5.3 -> 5.3-5.5)
-    if (compareChapters(first, last) > 0) {
-      [first, last] = [last, first];
     }
 
     if (first === last) {
@@ -295,10 +270,7 @@ function convertOldMockToNewFormat(oldMock: any) {
       mechanism: mod.cohesionDetail || "该切片内的知识点围绕同一教学主题组织，逻辑递进关联，形成完整学习单元。",
       coreQuestion: `如何掌握${mod.title || "本节"}的核心知识并应用于实践？`
     },
-    designRationale: mod.designRationale || {
-      learnedPoints: `1. 能理解${mod.title || "核心概念"}的核心概念\n2. 能描述${mod.title || "核心概念"}的关键特征\n3. 能运用${mod.title || "核心概念"}知识解决实际问题`,
-      practicalProblems: `1. 当遇到${mod.title || "核心概念"}相关场景时，能运用核心知识进行分析\n2. 当需要应用${mod.title || "核心概念"}概念时，能做出正确决策`
-    }
+    designRationale: mod.designRationale || `学生通过本切片学习${mod.title || "核心概念"}，理解知识点之间的关联，并能运用这些知识分析和解决实际问题。`
   }));
   
   return {
@@ -421,56 +393,51 @@ app.post("/api/projects/:id/scripts", async (req, res) => {
  * 1) Parsing TOC & Module Blueprinting API
  */
 app.post("/api/parse-book", async (req, res) => {
-  const { title, fullText, directoryStructure } = req.body;
+  try {
+    const { title, fullText, directoryStructure } = req.body;
 
-  // Log the dynamic data being received from frontend
-  console.log("\n📚 ========== PARSE BOOK API CALL ==========");
-  console.log("📕 Book Title (dynamic from frontend):", title);
-  console.log("📂 Directory Structure length:", directoryStructure?.length || 0);
-  if (directoryStructure && directoryStructure.length > 0) {
-    console.log("📋 First 5 directory items:", JSON.stringify(directoryStructure.slice(0, 5), null, 2));
-  }
-  console.log("📏 fullText length:", fullText?.length || 0);
-  console.log("🤖 AI Provider:", process.env.AI_PROVIDER || "deepseek");
-  console.log("🧠 Model:", process.env.DEEPSEEK_MODEL || "deepseek-chat");
-  console.log("==========================================\n");
+    // Log the dynamic data being received from frontend
+    console.log("\n📚 ========== PARSE BOOK API CALL ==========");
+    console.log("📕 Book Title (dynamic from frontend):", title);
+    console.log("📂 Directory Structure length:", directoryStructure?.length || 0);
+    if (directoryStructure && directoryStructure.length > 0) {
+      console.log("📋 First 5 directory items:", JSON.stringify(directoryStructure.slice(0, 5), null, 2));
+    }
+    console.log("📏 fullText length:", fullText?.length || 0);
+    console.log("🤖 AI Provider:", process.env.AI_PROVIDER || "deepseek");
+    console.log("🧠 Model:", process.env.DEEPSEEK_MODEL || "deepseek-chat");
+    console.log("==========================================\n");
 
-  if (!title) {
-    return res.status(400).json({ error: "Missing book title." });
-  }
+    if (!title) {
+      return res.status(400).json({ error: "Missing book title." });
+    }
 
-  let directoryText = "";
-  if (directoryStructure && directoryStructure.length > 0) {
-    directoryText = "目录 & 课本章节提要：\n";
-    directoryStructure.forEach((item: any) => {
-      const pageStr = item.page ? ` (P.${item.page})` : '';
-      if (item.type === 'chapter') {
-        directoryText += `${item.title}${pageStr}\n`;
-      } else {
-        directoryText += `  - ${item.title}${pageStr}\n`;
-      }
-    });
-  } else {
-    return res.status(400).json({ error: "未提供有效的目录数据，无法进行切片。请先上传或选择课本。" });
-  }
+    let directoryText = "";
+    if (directoryStructure && directoryStructure.length > 0) {
+      directoryText = "【教材目录 - 手风琴层级结构】\n";
+      directoryText += "说明：以下是教材的完整目录，采用手风琴层级结构（父级 → 子级 → 孙级）。\n";
+      directoryText += "缩进层级表示父子关系：无缩进 = 顶级(Topic/章)，2空格缩进 = 节(1.1/1.2)，4空格缩进 = 小节(1.1.1/1.1.2)。\n";
+      directoryText += "每个章节后面的 (P.X) 是该章节的起始页码。\n\n";
+      
+      directoryStructure.forEach((item: any) => {
+        const pageStr = item.page ? ` (P.${item.page})` : '';
+        const indent = item.type === 'chapter' ? '' : 
+                       item.type === 'section' ? '  ' : 
+                       '    ';
+        directoryText += `${indent}${item.title}${pageStr}\n`;
+      });
+    } else {
+      return res.status(400).json({ error: "未提供有效的目录数据，无法进行切片。请先上传或选择课本。" });
+    }
 
-  const systemInstruction = `你是一名为教师/课程设计者提供服务的教学切片专家。我将给你一本书的目录，请你帮我将其切分成多个教学切片，每个切片用于后续设计互动内容。
+    const systemInstruction = `你是一名为教师/课程设计者提供服务的教学切片专家。我将给你一本书的目录，请你帮我将其切分成多个教学切片，每个切片用于后续设计互动内容。
  
-### 一、核心切片原则
-- 信息负荷控制：每个切片包含 3-7 个核心概念（或 5-10 条具体策略/事实），对应 8-18 分钟的学习时长
-- 知识内聚性：每个切片内的知识点必须能共同回答一个完整的子问题或完成一个闭环的子任务
-- 章节覆盖格式：使用 a-b 格式表示连续章节（如 2.1-2.3），单个章节写成 a（如 5.2）。**范围格式中较小的章节号必须在前，较大的在后，绝不允许出现 5.5-5.3 这种倒序写法**
-- 章节覆盖范围（强制约束）：所有切片拼接后必须无遗漏、无重叠地覆盖原始目录中的所有正文章节（Summary、Key Terms、Self-Test、References 等附录内容可以不单独成片）
-
-### 二、切片划分的强制约束规则
-1. **禁止跳过**：每个正文章节编号必须出现在且仅出现在一个切片的 coveredChapters 中（示例错误：目录有 1.1, 1.2, 1.3，切片只覆盖了 1.1-1.2 → ❌ 漏掉了 1.3）
-2. **禁止重叠**：不同切片的 coveredChapters 展开后，不能包含相同的章节编号（示例错误：切片A覆盖 1.1-1.3，切片B覆盖 1.3-2.1 → ❌ 1.3 被重复覆盖）
-3. **顺序连续**：切片按目录顺序排列，后一切片的起始 = 前一切片结束的下一个章节（示例：切片A覆盖 1.1-1.3，则切片B必须从 1.4 或 2.1 开始（取决于目录中 1.3 之后是什么））
-4. **层级处理**：父章节有子章节时，只覆盖子章节；父章节无子章节时，作为独立单元
-
-### 三、输出格式要求
-输出纯 JSON，结构如下：
-
+一、核心切片原则
+信息负荷控制：每个切片包含 3-7 个核心概念（或 5-10 条具体策略/事实），对应 8-18 分钟的学习时长
+知识内聚性：每个切片内的知识点必须能共同回答一个完整的子问题或完成一个闭环的子任务
+章节覆盖格式：使用 a-b 格式表示连续章节（如 2.1-2.3），单个章节写成 a（如 5.2）
+二、输出格式要求
+请输出纯 JSON 格式，结构如下：
 {
   "bookTitle": "从目录中提取的书名",
   "totalSlices": 22,
@@ -479,38 +446,61 @@ app.post("/api/parse-book", async (req, res) => {
       "sliceId": "S1",
       "title": "切片主题名称（一句话，让学生知道这个切片在讲什么）",
       "coveredChapters": "1.1-1.2",
-      "summary": "**X个核心概念**：\\n1. 概念名称\\n2. 概念名称",
+      "summary": {
+        "learnedPoints": [
+          "能说出/理解/区分XXX（具体可陈述的知识点）",
+          "能描述XXX的X个阶段/类型",
+          "能解释XXX与XXX的关系"
+        ],
+        "practicalProblems": [
+          "当...时，你能...（具体场景化描述）",
+          "当...时，你能..."
+        ]
+      },
       "infoDensity": {
         "conceptCount": 4,
         "factCount": 2,
         "abstractLevel": "低/中/高",
         "nestingLevel": "无/两层/三层",
         "suggestedMinutes": "8-12",
-        "rationale": "用1-2句话说明为什么这个负荷是合理的"
+        "rationale": "用2-3句话说明：为什么这个负荷是合理的？如果超限，建议如何拆分？"
       },
       "cohesionDetail": {
         "cohesionType": "因果链/时序递进/对比争鸣/问题-解决链/分类并列/工具性内聚/解释性递进",
         "mechanism": "用3-4句话说明知识点之间的具体连接方式（如：A导致B，B决定C；前3个概念共同支撑第4个；两个考点并列但共同服务于一个目的）",
-        "coreQuestion": "用一句话概括：这个切片，几个知识点共同指向的同一个核心问题是什么？"
+        "coreQuestion": "用一句话概括：这个切片最终要回答的核心问题是什么？"
       },
-      "designRationale": {
-        "learnedPoints": "列出 3-5 条可陈述的知识点",
-        "practicalProblems": "结合本切片所有知识点，描述 2-3 个综合应用场景：当学习者在什么具体情境下，需要同时运用这些知识点来解决什么实际问题。要描述完整的问题场景，而非孤立地对应单个知识点。"
-      }
+      "designRationale": "用1-2句话说明为什么把这些章节/概念切在一起，以及它与前后切片的逻辑关系"
     }
   ]
 }
+三、字段详细填写规范
+字段 	 填写要求
+sliceId 	 S1, S2, S3… 按顺序编号
+title 	 一句话主题，建议用"动词+名词"或"核心问题"形式
+coveredChapters 	 使用 a-b 格式，如 2.1-2.3；单节写 3.5
+			⚠️ 极其重要：coveredChapters 中的章节编号必须严格来自上方目录中实际存在的章节！
+			例如：如果目录中只有 3.1 到 3.7，那么 coveredChapters 最多只能写到 3.7，绝对不能写 3.8 或 3.9！
+			请先在目录中找到你要覆盖的章节范围，确认起止章节都真实存在于目录中，再填写 coveredChapters。
+summary.learnedPoints 	 3-5条，每条以"能…"开头，可验证
+summary.practicalProblems 	 2-3条，格式为"当【具体场景】时，你能【具体行动】"
+infoDensity.conceptCount 	 纯理论概念的数量（如"关键期假说""ZPD"）
+infoDensity.factCount 	 具体事实/策略/步骤的数量（如"9类ESL活动"）
+infoDensity.abstractLevel 	 低=可立即操作；中=需简单推理；高=需理论理解
+infoDensity.nestingLevel 	 无=并列；两层=概念下有子概念；三层=需多步推理
+infoDensity.suggestedMinutes 	 基于conceptCount×2~3分钟 + factCount×0.5~1分钟估算
+infoDensity.rationale 	 必须包含判断结论+依据，如超限则给出拆分建议
+cohesionDetail.cohesionType 	 从括号中选择最匹配的一项
+cohesionDetail.mechanism 	 明确写出"X连接Y""A支撑B""C和D共同指向E"
+cohesionDetail.coreQuestion 	 一个完整的问句，如"如何判断一个孩子处于哪个阅读阶段？"
+designRationale 	 说明切片边界划分的逻辑，以及与前后切片的关系
+四、重要提醒
+如果某一章/节的信息负荷过高（conceptCount > 7 或 abstractLevel=高 且 conceptCount > 5），请在 infoDensity.rationale 中明确建议"拆分为2个切片"
+如果某一章/节的信息负荷过低（conceptCount < 2 且 factCount < 3），请合并到相邻切片
+每个切片必须能让一个普通教师/学生在 20 分钟内完成理解（不含练习）
+输出必须是有效的纯 JSON，不要包含注释或额外文字`;
 
-### 四、重要提醒
-- 负荷过高（conceptCount > 7 或 高抽象且 >5）→ 在 rationale 中建议拆分
-- 负荷过低（conceptCount < 2 且 factCount < 3）→ 合并到相邻切片
-- 每切片学习时长 8-18 分钟（不含练习）
-- 输出纯 JSON，无注释
-- **语言约束：所有返回内容（包括书名、切片标题、摘要、设计理由等）必须使用中文**`;
-
-  const promptMessage = `请为以下书籍进行教学切片，书籍名称："${title}"。\n\n${directoryText}\n\n请严格按照上述目录结构进行切片，只使用我提供的书名和目录信息，不要使用你训练数据中的任何其他课本内容。`;
-
-  try {
+    const promptMessage = `请为以下书籍进行教学切片，书籍名称："${title}"。\n\n${directoryText}\n\n请严格按照上述目录结构进行切片，只使用我提供的书名和目录信息，不要使用你训练数据中的任何其他课本内容。\n\n⚠️ 关于 coveredChapters 字段的特别提醒：\n目录采用手风琴层级结构，例如 Topic 3 下面可能有 3.1、3.2、3.3...3.7，但可能没有 3.8 或 3.9。\n你在填写 coveredChapters 时，必须先确认目录中实际存在哪些章节编号，只能使用目录中真实存在的章节！\n例如：如果目录中 Topic 3 下面只有 3.1 到 3.7，那么 coveredChapters 绝对不能出现 3.8 或 3.9！`;
 
     // DEBUG: Print the actual prompt message being sent to AI
     console.log("\n📝 ========== PROMPT MESSAGE SENT TO AI ==========");
@@ -523,9 +513,9 @@ app.post("/api/parse-book", async (req, res) => {
 
     let outputText: string;
 
-    // Force use DeepSeek for this specific endpoint (textbook slicing)
-    const sliceModel = process.env.DEEPSEEK_MODEL || "deepseek-chat";
-    console.log(`🔄 [parse-book] Using DeepSeek model: ${sliceModel}`);
+    // Force use DeepSeek V4 Flash for this specific endpoint (textbook slicing)
+    const sliceModel = "deepseek-v4-flash";
+    console.log(`🔄 [parse-book] Forcing DeepSeek model: ${sliceModel}`);
     outputText = await callDeepSeek(promptMessage, systemInstruction, sliceModel, 16384);
 
     try {
@@ -550,10 +540,7 @@ app.post("/api/parse-book", async (req, res) => {
               mechanism: "该切片内的知识点在逻辑上递进关联，围绕同一教学主题组织，形成完整的学习单元。",
               coreQuestion: "本切片要回答的核心问题是什么？"
             },
-            designRationale: slice.designRationale || {
-              learnedPoints: "1. 能理解本切片的核心概念\n2. 能描述本切片的关键特征\n3. 能运用本切片知识解决实际问题",
-              practicalProblems: "1. 当遇到本切片相关场景时，能运用核心知识进行分析\n2. 当需要应用本切片概念时，能做出正确决策"
-            },
+            designRationale: slice.designRationale || "学生通过本切片学习核心概念，理解知识点之间的关联，并能运用这些知识分析和解决实际问题。",
             summary: slice.summary || {
               learnedPoints: ["本切片涵盖的核心知识点"],
               practicalProblems: ["当...时，你能..."]
@@ -571,13 +558,7 @@ app.post("/api/parse-book", async (req, res) => {
         }
       });
     } catch (parseErr) {
-      console.error("\n❌ ========== JSON PARSING FAILED ==========");
-      console.error("outputText length:", outputText?.length || 0);
-      console.error("outputText isEmpty:", !outputText || outputText.trim().length === 0);
-      console.error("outputText first 3000 chars:", outputText?.substring(0, 3000));
-      console.error("outputText last 1000 chars:", outputText?.substring(Math.max(0, (outputText?.length || 0) - 1000)));
-      console.error("parseErr:", parseErr);
-      console.error("==========================================\n");
+      console.error("JSON parsing failed, raw response was:", outputText);
       const blueprint = getHeuristicOrMockBlueprint(title, fullText, directoryStructure);
       res.json({
         ...blueprint,
@@ -606,8 +587,8 @@ app.post("/api/parse-book", async (req, res) => {
         _meta: {
           model: "deepseek-v4-flash",
           provider: "deepseek",
-          systemInstruction,
-          userPrompt: promptMessage,
+          systemInstruction: "",
+          userPrompt: "",
           error: `AI API调用失败: ${error.message}，使用启发式fallback`
         }
       });
@@ -707,10 +688,7 @@ function getHeuristicOrMockBlueprint(title: string, fullText: string, directoryS
         gameTitle,
         gameRules,
         duration: "10分钟",
-        designRationale: {
-          learnedPoints: `1. 能理解${slice.title}的核心概念\n2. 能描述${slice.title}的关键特征\n3. 能运用${slice.title}知识解决实际问题`,
-          practicalProblems: `1. 当遇到${slice.title}相关场景时，能运用核心知识进行分析\n2. 当需要应用${slice.title}概念时，能做出正确决策`
-        },
+        designRationale: `通过场景式交互，将 [${slice.title}] 抽象规律转化为紧迫的系统级决策，强化深层应用认知。`,
         infoDensity: {
           conceptCount: 3,
           factCount: 2,
@@ -777,13 +755,15 @@ function getHeuristicOrMockBlueprint(title: string, fullText: string, directoryS
     }
   }
 
-  // If we couldn't parse enough slices from raw text, fallback to dynamic chunking of fullText lines
+  // If we couldn't parse enough slices from raw text, fallback to standard mock template structures
   if (sectionLines.length < 3) {
-    return buildDynamicBlueprint(title, directoryStructure, fullText);
+    const rawMock = getMockBlueprint(title);
+    return convertOldMockToNewFormat(rawMock);
   }
 
-  // Partition sections dynamically to guarantee comprehensive coverage from first to last section with no truncation!
-  const baseModules = getMockBlueprint(title).modules;
+  // Partition sections dynamically to guarantee comprehensive coverage from 1st to last section with no truncation!
+  const baseBlueprint = getMockBlueprint(title);
+  const baseModules = baseBlueprint.modules;
 
   let chunkSize = 1;
   if (sectionLines.length > 18) {
@@ -861,10 +841,7 @@ function getHeuristicOrMockBlueprint(title: string, fullText: string, directoryS
       gameTitle,
       gameRules,
       duration: "10分钟",
-      designRationale: {
-        learnedPoints: `1. 能理解${slice.title}的核心概念\n2. 能描述${slice.title}的关键特征\n3. 能运用${slice.title}知识解决实际问题`,
-        practicalProblems: `1. 当遇到${slice.title}相关场景时，能运用核心知识进行分析\n2. 当需要应用${slice.title}概念时，能做出正确决策`
-      },
+      designRationale: `通过场景式交互，将 [${slice.title}] 抽象规律转化为紧迫的系统级决策，强化深层应用认知。`,
       infoDensity: "经过信息密度裁切，本单元核心学习负荷已被精简控制为 3 个关键级差，确保不产生认知过度疲劳。",
       cohesionDetail: `本切片的关键知识因子在结构上具有极强的物理因果 or 逻辑链条依赖。设计统一挑战能极大凸显这一内聚结构。`
     };
@@ -1153,73 +1130,6 @@ Reply in Chinese, keep answers insightful and focused on scenario design.`
     res.status(500).json({ error: error.message || "Failed to engage Gemini chat." });
   }
 });
-
-function buildDynamicBlueprint(title: string, directoryStructure: any[] = [], fullText: string = "") {
-  const items = (directoryStructure && directoryStructure.length > 0)
-    ? directoryStructure
-    : (fullText || "").split(/\r?\n/).map((l, i) => ({
-        id: `line-${i}`,
-        type: "section",
-        title: l.trim().substring(0, 80),
-        page: ""
-      })).filter(it => it.title && it.title.length > 3);
-
-  if (items.length === 0) {
-    items.push({ id: "fallback-1", type: "chapter", title: title || "教材核心内容", page: "" });
-  }
-
-  let chunkSize = 1;
-  if (items.length > 18) chunkSize = Math.ceil(items.length / 16);
-
-  const slices: any[] = [];
-  let seqIdx = 1;
-  for (let i = 0; i < items.length; i += chunkSize) {
-    const chunk = items.slice(i, i + chunkSize);
-    const first = chunk[0];
-    const last = chunk[chunk.length - 1];
-    const firstNum = (first.title.match(/(\d+(?:\.\d+)?)/) || [])[1] || `${seqIdx}.1`;
-    const lastNum = (last.title.match(/(\d+(?:\.\d+)?)/) || [])[1] || firstNum;
-    const covered = firstNum === lastNum ? firstNum : `${firstNum}-${lastNum}`;
-    const titleParts = chunk.map((c: any) => {
-      const cleaned = c.title.replace(/^\d+(?:\.\d+)?\s*[-–—.:：、\s]+/, '').trim();
-      return cleaned || c.title;
-    });
-    const combinedTitle = titleParts.join(" 与 ");
-    const cleanTitle = combinedTitle.length > 50 ? combinedTitle.substring(0, 47) + "..." : combinedTitle;
-
-    slices.push({
-      sliceId: `S${seqIdx}`,
-      chapterIndex: String(seqIdx).padStart(2, '0'),
-      title: cleanTitle,
-      coveredChapters: cleanCoveredChapters(covered, firstNum),
-      summary: {
-        learnedPoints: [`能理解${cleanTitle}的核心概念`, `能描述${cleanTitle}的关键特征`, `能运用${cleanTitle}知识解决实际问题`],
-        practicalProblems: [`当遇到${cleanTitle}相关场景时，你能运用核心知识进行分析`, `当需要应用${cleanTitle}概念时，你能做出正确决策`]
-      },
-      infoDensity: {
-        conceptCount: 3,
-        factCount: 2,
-        abstractLevel: "中",
-        nestingLevel: "两层",
-        suggestedMinutes: "10-15",
-        rationale: "该切片涵盖3-4个紧密相关的核心概念，信息量适中，可在10-15分钟内完成学习，不会造成认知过载。"
-      },
-      cohesionDetail: {
-        cohesionType: "时序递进",
-        mechanism: `该切片内的知识点围绕"${cleanTitle}"这一教学主题组织，逻辑递进关联，形成完整学习单元。`,
-        coreQuestion: `如何掌握${cleanTitle}的核心知识并应用于实践？`
-      },
-      designRationale: `学生通过本切片学习${cleanTitle}，理解知识点之间的关联，并能运用这些知识分析和解决实际问题。`
-    });
-    seqIdx++;
-  }
-
-  return {
-    bookTitle: title || "Custom Textbook",
-    totalSlices: slices.length,
-    slices
-  };
-}
 
 function getMockBlueprint(title: string) {
   const normTitle = (title || "").toLowerCase();
