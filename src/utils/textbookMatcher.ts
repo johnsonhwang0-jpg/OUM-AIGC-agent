@@ -1,6 +1,149 @@
 import { BookModule, DirectoryItem } from "../types";
 
 /**
+ * 从 Base64 PDF 按需提取指定页的文本+格式信息
+ * 使用 pdfjs-dist 从 PDF 中提取指定页面，保留 fontSize、fontWeight 等格式信息
+ */
+export interface PdfPageItem {
+  text: string;
+  fontSize: number;
+  fontWeight: number;
+  hasBold: boolean;
+}
+
+export async function extractPdfPageWithFormat(
+  pdfData: string,
+  pageNumber: number
+): Promise<PdfPageItem[]> {
+  const pdfjsLib = (window as any)['pdfjs-dist/build/pdf'];
+  if (!pdfjsLib) {
+    throw new Error("PDF.js 未加载");
+  }
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+  // 将 Base64 转为 Uint8Array
+  const binaryString = atob(pdfData);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+
+  const loadingTask = pdfjsLib.getDocument({ data: bytes });
+  const pdf = await loadingTask.promise;
+
+  if (pageNumber < 1 || pageNumber > pdf.numPages) {
+    throw new Error(`页码 ${pageNumber} 超出范围 (1-${pdf.numPages})`);
+  }
+
+  const page = await pdf.getPage(pageNumber);
+  const textContent = await page.getTextContent();
+
+  const items: PdfPageItem[] = textContent.items.map((item: any) => ({
+    text: item.str || "",
+    fontSize: item.transform ? item.transform[0] : 12,
+    fontWeight: item.fontName ? (item.fontName.includes('Bold') || item.fontName.includes('bold') ? 700 : 400) : 400,
+    hasBold: item.fontName ? (item.fontName.includes('Bold') || item.fontName.includes('bold')) : false,
+  }));
+
+  return items;
+}
+
+/**
+ * 将带格式的 PDF 页面内容转换为带 Markdown 格式的文本
+ * 根据 fontSize 判断标题层级，根据 fontWeight 判断加粗
+ */
+export function formatPdfPageToMarkdown(
+  items: PdfPageItem[],
+  absolutePage: number
+): string {
+  // 计算该页的平均字号，用于区分标题和正文
+  const fontSizes = items.filter(i => i.text.trim()).map(i => i.fontSize);
+  if (fontSizes.length === 0) return "*(该页无文本内容)*";
+
+  const avgFontSize = fontSizes.reduce((a, b) => a + b, 0) / fontSizes.length;
+  const maxFontSize = Math.max(...fontSizes);
+  const minFontSize = Math.min(...fontSizes);
+
+  // 标题阈值：大于平均字号 1.3 倍的视为标题
+  const headingThreshold = avgFontSize * 1.3;
+  // 大标题阈值：大于最大字号的 0.85 倍
+  const bigHeadingThreshold = maxFontSize * 0.85;
+
+  const lines: string[] = [];
+  let currentParagraph: string[] = [];
+  let lastItemWasHeading = false;
+
+  const flushParagraph = () => {
+    if (currentParagraph.length > 0) {
+      lines.push(currentParagraph.join(''));
+      currentParagraph = [];
+    }
+  };
+
+  for (const item of items) {
+    if (!item.text.trim()) continue;
+
+    const trimmed = item.text.trim();
+
+    // 跳过纯页码行
+    if (/^[•\-]?\s*\d+\s*[•\-]?$/.test(trimmed)) continue;
+    if (/^(?:第\s*\d+\s*页|page\s*\d+)/i.test(trimmed)) continue;
+
+    // 跳过页脚（版权、URL、ISBN 等）
+    const footerPatterns = [
+      /(?:出版社|Publishing|Copyright|All\s+rights\s+reserved|版权所有|©)/i,
+      /(?:www\.|http:\/\/|https:\/\/)/i,
+      /(?:ISBN|ISSN)\s*[\d\-]+/i,
+    ];
+    if (footerPatterns.some(pat => pat.test(trimmed)) && trimmed.length < 80) continue;
+
+    // 跳过页眉（短行 + 数字结尾）
+    if (trimmed.length < 60 && /\d{1,3}\s*$/.test(trimmed)) {
+      if (/^(Topic|Chapter|Unit|Section|Requirements)/i.test(trimmed)) continue;
+    }
+
+    // 判断是否为标题
+    const isHeading = item.fontSize >= headingThreshold;
+    const isBigHeading = item.fontSize >= bigHeadingThreshold;
+
+    if (isHeading) {
+      flushParagraph();
+      const level = isBigHeading ? 2 : 3;
+      // 检查是否已有章节编号格式（如 "1.1 xxx"）
+      if (/^\d+\.\d+(?:\.\d+)?\s/.test(trimmed)) {
+        lines.push(`${'#'.repeat(level)} ${trimmed}`);
+      } else {
+        lines.push(`${'#'.repeat(level)} ${trimmed}`);
+      }
+      lastItemWasHeading = true;
+    } else {
+      // 正文
+      if (lastItemWasHeading && currentParagraph.length === 0) {
+        // 标题后的新段落
+      }
+      // 加粗文本用 ** 包裹
+      const formattedText = item.hasBold ? `**${trimmed}**` : trimmed;
+      currentParagraph.push(formattedText + ' ');
+      lastItemWasHeading = false;
+    }
+  }
+
+  flushParagraph();
+
+  // 合并和清理
+  let result = lines.join('\n\n');
+
+  // 中文文本清理：去除中文字符间多余空格
+  result = result.replace(/([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])/g, '$1$2');
+  // 标点符号后加换行
+  result = result.replace(/([。？！；])\s*\n/g, '$1\n\n');
+  result = result.replace(/([。？！；])\s+/g, '$1\n\n');
+
+  return result.trim() || "*(经过智能降噪过滤，未包含非考点核心文本)*";
+}
+
+/**
  * High-fidelity, scholarly textbook paragraphs in Markdown for default curriculum templates
  * to serve as perfect high-fidelity examples if no custom PDF has been uploaded yet.
  */
@@ -357,6 +500,121 @@ function calculatePageRange(
   }
 
   return { startPage, endPage, found: true };
+}
+
+/**
+ * 异步版本：从 PDF Base64 数据按需提取指定页的带格式内容
+ * 解决了 pdfPagesText 只提取前 150 页导致后面切片内容为空的问题
+ */
+export async function getExtractedTextForModuleAsync(
+  mod: BookModule,
+  directoryItems: DirectoryItem[],
+  fullText: string,
+  pdfData: string | null,
+  pdfPagesText?: string[],
+  pdfPageOffset: number = 0,
+  onProgress?: (msg: string) => void
+): Promise<{ mappedPages: string; extractedOriginalText: string }> {
+  const covered = (mod.coveredChapters || "").trim();
+  if (!covered) {
+    return { mappedPages: "暂未关联到页码", extractedOriginalText: "### 📑 章节覆盖信息缺失\n\n请先在第二阶段配置该单元对应的教材章节覆盖范围（例如：`1.1` 或 `2.1-2.2`）。" };
+  }
+
+  // 1. 优先使用手动设置的页码范围
+  let mappedPages = mod.pageRange || "暂未关联到页码";
+  let startPrinted: number;
+  let endPrinted: number;
+
+  if (mod.pageRange) {
+    const match = mod.pageRange.match(/P\.(\d+)(?:-(\d+))?/);
+    if (match) {
+      startPrinted = parseInt(match[1], 10);
+      endPrinted = match[2] ? parseInt(match[2], 10) : startPrinted;
+    } else {
+      const pageRange = calculatePageRange(covered, directoryItems);
+      startPrinted = parseInt(pageRange.startPage, 10) || 1;
+      endPrinted = pageRange.endPage ? (parseInt(pageRange.endPage, 10) || startPrinted) : startPrinted;
+      mappedPages = pageRange.found && pageRange.startPage
+        ? (pageRange.endPage && pageRange.endPage !== pageRange.startPage ? `P.${pageRange.startPage}-${pageRange.endPage}` : `P.${pageRange.startPage}`)
+        : "暂未关联到页码";
+    }
+  } else {
+    const pageRange = calculatePageRange(covered, directoryItems);
+    if (pageRange.found && pageRange.startPage) {
+      mappedPages = pageRange.endPage && pageRange.endPage !== pageRange.startPage
+        ? `P.${pageRange.startPage}-${pageRange.endPage}`
+        : `P.${pageRange.startPage}`;
+    }
+    startPrinted = parseInt(pageRange.startPage, 10) || 1;
+    endPrinted = pageRange.endPage ? (parseInt(pageRange.endPage, 10) || startPrinted) : startPrinted;
+  }
+
+  // 2. 如果有 PDF Base64 数据，按需提取原文（带格式）
+  if (pdfData && startPrinted > 0) {
+    const activeStartPhysical = Math.max(1, startPrinted + pdfPageOffset);
+    // 不再限制于 pdfPagesText.length，而是提取所有需要的页
+    const activeEndPhysical = Math.max(activeStartPhysical, endPrinted + pdfPageOffset);
+
+    let mdOutput = `### 📑 PDF 教材原文块同步对齐 (Verbatim Page Extract)\n\n`;
+    mdOutput += `> 💡 **真实物理定位**: PDF 物理页 [第 **${activeStartPhysical}** 页 - 第 **${activeEndPhysical}** 页]\n`;
+    mdOutput += `> 📖 **校准课本印刷页**: 印刷页码范围 [P.${startPrinted} - P.${endPrinted}] | 偏差偏移值 (Offset): \`${pdfPageOffset >= 0 ? "+" : ""}${pdfPageOffset}\` 页\n\n`;
+
+    let textRetrieved = false;
+    const totalPages = activeEndPhysical - activeStartPhysical + 1;
+
+    for (let pageNum = activeStartPhysical; pageNum <= activeEndPhysical; pageNum++) {
+      if (onProgress) {
+        onProgress(`正在提取第 ${pageNum - activeStartPhysical + 1}/${totalPages} 页...`);
+      }
+      try {
+        const items = await extractPdfPageWithFormat(pdfData, pageNum);
+        const formattedText = formatPdfPageToMarkdown(items, pageNum);
+        textRetrieved = true;
+        mdOutput += `#### 📄 —— 第 ${pageNum} 页 原文 (PDF 物理页) ——\n\n${formattedText}\n\n---\n\n`;
+      } catch (err) {
+        mdOutput += `#### 📄 —— 第 ${pageNum} 页 原文 (PDF 物理页) ——\n\n*(提取失败: ${(err as Error).message})*\n\n---\n\n`;
+      }
+    }
+
+    if (textRetrieved) {
+      return { mappedPages, extractedOriginalText: mdOutput };
+    }
+  }
+
+  // 3. 回退到旧的 pdfPagesText 方式（兼容）
+  if (pdfPagesText && pdfPagesText.length > 0 && startPrinted > 0) {
+    const activeStartPhysical = Math.max(1, startPrinted + pdfPageOffset);
+    const activeEndPhysical = Math.max(activeStartPhysical, Math.min(pdfPagesText.length, endPrinted + pdfPageOffset));
+
+    let mdOutput = `### 📑 PDF 教材原文块同步对齐 (Verbatim Page Extract)\n\n`;
+    mdOutput += `> 💡 **真实物理定位**: PDF 物理页 [第 **${activeStartPhysical}** 页 - 第 **${activeEndPhysical}** 页]\n`;
+    mdOutput += `> 📖 **校准课本印刷页**: 印刷页码范围 [P.${startPrinted} - P.${endPrinted}] | 偏差偏移值 (Offset): \`${pdfPageOffset >= 0 ? "+" : ""}${pdfPageOffset}\` 页\n\n`;
+
+    let textRetrieved = false;
+    for (let pageNum = activeStartPhysical; pageNum <= activeEndPhysical; pageNum++) {
+      const rawContent = pdfPagesText[pageNum - 1];
+      if (rawContent && rawContent.trim()) {
+        textRetrieved = true;
+        const cleanedText = cleanAndFormatPageText(rawContent, pageNum);
+        mdOutput += `#### 📄 —— 第 ${pageNum} 页 原文 (PDF 物理页) ——\n\n${cleanedText || "*(经过智能降噪过滤，未包含非考点核心文本)*"}\n\n---\n\n`;
+      }
+    }
+
+    if (textRetrieved) {
+      return { mappedPages, extractedOriginalText: mdOutput };
+    }
+  }
+
+  // 4. 没有 PDF 时，返回页码范围 + 提示
+  if (mappedPages !== "暂未关联到页码") {
+    return {
+      mappedPages,
+      extractedOriginalText: `### 📑 教材章节页码映射\n\n> 🎯 **覆盖章节**: ${covered}\n> 📖 **对应页码**: ${mappedPages}\n\n> 💡 提示：请在第一步上传 PDF 教材以查看原文内容。`
+    };
+  }
+
+  // 5. 完全无法匹配
+  return { mappedPages: "暂无绑定页码", extractedOriginalText: "### ⚠️ 暂未提取教材原文\n\n请在第一步中上传您的 PDF 教材文档，系统将以此建立点对点的页码与原文章节文本索引。" };
 }
 
 /**

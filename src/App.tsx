@@ -12,7 +12,7 @@ import {
   SummaryInfo, InfoDensity, CohesionDetail
 } from "./types";
 import { parseTextToDirectory, serializeDirectoryToText } from "./utils/directoryParser";
-import { getExtractedTextForModule, calculateAutoPageOffset } from "./utils/textbookMatcher";
+import { getExtractedTextForModule, getExtractedTextForModuleAsync, calculateAutoPageOffset } from "./utils/textbookMatcher";
 import StandalonePreview from "./components/StandalonePreview";
 import ReactMarkdown from "react-markdown";
 
@@ -112,6 +112,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'simulator' | 'code' | 'original' | 'edit'>('simulator');
   const [scriptCopySuccess, setScriptCopySuccess] = useState<boolean>(false);
   const [recommendingId, setRecommendingId] = useState<string | null>(null);
+  const [extractedContent, setExtractedContent] = useState<string>("");
+  const [extractingModuleId, setExtractingModuleId] = useState<string | null>(null);
+  const [extractedModules, setExtractedModules] = useState<Record<string, string>>({});
 
   // Step 4 States: UI Preference and App Generation
   const [uiTheme, setUiTheme] = useState<'minimal' | 'cyberpunk' | 'cartoon' | 'retro'>('minimal');
@@ -186,6 +189,44 @@ export default function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, chatLoading]);
+
+  // 进入第三步时，自动批量提取所有切片的原文内容（有缓存，不重复提取）
+  useEffect(() => {
+    if (activeStep !== 3 || !pdfData || modules.length === 0) return;
+
+    const extractAll = async () => {
+      for (const mod of modules) {
+        // 已缓存的跳过
+        if (extractedModules[mod.id]) continue;
+
+        setExtractingModuleId(mod.id);
+        try {
+          const result = await getExtractedTextForModuleAsync(
+            mod, directoryItems, bookContentText,
+            pdfData,
+            pdfPagesText.length > 0 ? pdfPagesText : undefined,
+            pdfPageOffset
+          );
+          setExtractedModules(prev => ({ ...prev, [mod.id]: result.extractedOriginalText }));
+        } catch (err) {
+          setExtractedModules(prev => ({ ...prev, [mod.id]: `⚠️ 提取失败: ${(err as Error).message}` }));
+        } finally {
+          setExtractingModuleId(prev => prev === mod.id ? null : prev);
+        }
+      }
+    };
+
+    extractAll();
+  }, [activeStep, pdfData, modules]);
+
+  // 当切换选中模块时，从缓存中读取原文内容
+  useEffect(() => {
+    if (activeModuleId && extractedModules[activeModuleId]) {
+      setExtractedContent(extractedModules[activeModuleId]);
+    } else if (activeModuleId && !extractingModuleId) {
+      setExtractedContent("⏳ 正在提取中...");
+    }
+  }, [activeModuleId, extractedModules, extractingModuleId]);
 
   // Load template helper
   const handleSelectTemplate = (id: string) => {
@@ -936,8 +977,9 @@ export default function App() {
     setModules(prev => prev.map(m => m.id === moduleId ? { ...m, scriptStatus: 'generating' } : m));
 
     try {
-      const { extractedOriginalText } = getExtractedTextForModule(
+      const { extractedOriginalText } = await getExtractedTextForModuleAsync(
         mod, directoryItems, bookContentText,
+        pdfData,
         pdfPagesText.length > 0 ? pdfPagesText : undefined,
         pdfPageOffset
       );
@@ -2877,6 +2919,8 @@ API地址：https://api.deepseek.com/chat/completions`}
                   const isActive = activeModuleId === mod.id;
                   const isDone = mod.scriptStatus === 'completed';
                   const isGen = mod.scriptStatus === 'generating';
+                  const isExtracting = extractingModuleId === mod.id;
+                  const isExtracted = !!extractedModules[mod.id];
                   
                   return (
                     <button 
@@ -2893,16 +2937,27 @@ API地址：https://api.deepseek.com/chat/completions`}
                           {mod.chapterIndex}
                         </span>
 
-                        {/* Script load badge */}
-                        {isDone ? (
-                          <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
-                            <Check className="w-2.5 h-2.5" /> Playable
-                          </span>
-                        ) : isGen ? (
-                          <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-amber-500/20">
-                            <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Coding...
-                          </span>
-                        ) : null}
+                        {/* Status badges */}
+                        <div className="flex items-center gap-1">
+                          {isExtracting ? (
+                            <span className="text-[9px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-cyan-500/20">
+                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> 提取中...
+                            </span>
+                          ) : isExtracted ? (
+                            <span className="text-[9px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 border border-blue-500/20">
+                              <BookOpen className="w-2.5 h-2.5" /> 已提取
+                            </span>
+                          ) : null}
+                          {isDone ? (
+                            <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
+                              <Check className="w-2.5 h-2.5" /> Playable
+                            </span>
+                          ) : isGen ? (
+                            <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-amber-500/20">
+                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Coding...
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
 
                       <h5 className={`font-semibold text-xs leading-normal line-clamp-1 ${isActive ? 'text-cyan-400 font-bold' : 'text-slate-300'}`}>
@@ -2982,14 +3037,16 @@ API地址：https://api.deepseek.com/chat/completions`}
                             li: ({ node, ...props }) => (<li className="text-xs text-slate-300 leading-relaxed" {...props} />),
                             hr: ({ node, ...props }) => (<hr className="border-t border-white/5 my-4" {...props} />),
                             code: ({ node, ...props }) => (<code className="bg-white/10 px-1 py-0.5 rounded font-mono text-[10.5px] text-cyan-200 font-bold" {...props} />),
-                          }}>{getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).extractedOriginalText}</ReactMarkdown>
+                          }}>{activeModuleId && extractingModuleId === activeModuleId ? "⏳ 正在从 PDF 提取内容..." : (extractedContent || "请点击左侧列表选择章节查看原文")}</ReactMarkdown>
                         </div>
+                      {activeModule && (
                       <div className="p-3.5 bg-cyan-500/5 rounded-xl border border-cyan-500/10 flex items-start gap-2.5 mt-4">
                         <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
                         <div className="text-[11px] text-slate-400 leading-relaxed">
                           <span className="font-semibold text-slate-300">智能对齐提示：</span> 系统通过在教材大纲中模糊匹配该知识切片的 <strong>"覆盖章节"</strong> 属性（此处为 <code>{activeModule.coveredChapters}</code>），从而锚定了原始教材中的对应章节主题及其前后的课本段落原文。
                         </div>
                       </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -3033,6 +3090,8 @@ API地址：https://api.deepseek.com/chat/completions`}
                   const isActive = activeModuleId === mod.id;
                   const isDone = mod.scriptStatus === 'completed';
                   const isGen = mod.scriptStatus === 'generating';
+                  const isExtracting = extractingModuleId === mod.id;
+                  const isExtracted = !!extractedModules[mod.id];
                   
                   return (
                     <button 
@@ -3049,20 +3108,31 @@ API地址：https://api.deepseek.com/chat/completions`}
                           {mod.chapterIndex}
                         </span>
 
-                        {/* Script load badge */}
-                        {isDone ? (
-                          <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
-                            <Check className="w-2.5 h-2.5" /> Playable
-                          </span>
-                        ) : isGen ? (
-                          <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-amber-500/20">
-                            <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Coding...
-                          </span>
-                        ) : (
-                          <span className="text-[9px] bg-white/5 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-white/5 italic">
-                            Pending
-                          </span>
-                        )}
+                        {/* Status badges */}
+                        <div className="flex items-center gap-1">
+                          {isExtracting ? (
+                            <span className="text-[9px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-cyan-500/20">
+                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> 提取中...
+                            </span>
+                          ) : isExtracted ? (
+                            <span className="text-[9px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 border border-blue-500/20">
+                              <BookOpen className="w-2.5 h-2.5" /> 已提取
+                            </span>
+                          ) : null}
+                          {isDone ? (
+                            <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
+                              <Check className="w-2.5 h-2.5" /> Playable
+                            </span>
+                          ) : isGen ? (
+                            <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-amber-500/20">
+                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Coding...
+                            </span>
+                          ) : !isExtracted ? (
+                            <span className="text-[9px] bg-white/5 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-white/5 italic">
+                              Pending
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
 
                       <h5 className={`font-semibold text-xs leading-normal line-clamp-1 ${isActive ? 'text-cyan-400 font-bold' : 'text-slate-300'}`}>
@@ -3212,7 +3282,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                         <div className="bg-[#030305]/60 border border-white/5 rounded-xl p-3.5 space-y-2">
                           <div className="flex items-center justify-between">
                             <span className="text-cyan-400 font-bold block text-[10px] uppercase tracking-wider">
-                              📖 匹配对齐本单元的教材原文段落 ({getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).mappedPages})
+                              📖 匹配对齐本单元的教材原文段落 ({activeModule ? getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).mappedPages : ""})
                             </span>
                           </div>
                           <div className="text-[11px] text-slate-300 bg-black/50 border border-white/5 p-3 rounded-xl max-h-40 overflow-y-auto select-text leading-relaxed font-sans scrollbar-thin scrollbar-thumb-white/10">
@@ -3250,7 +3320,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                                 ),
                               }}
                             >
-                              {getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).extractedOriginalText}
+                              {activeModuleId && extractingModuleId === activeModuleId ? "⏳ 正在提取..." : (extractedContent || "暂无原文内容")}
                             </ReactMarkdown>
                           </div>
                         </div>
