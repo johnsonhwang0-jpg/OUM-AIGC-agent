@@ -176,12 +176,18 @@ export function parseTextToDirectory(text: string): DirectoryItem[] {
 
     if (integerIndices.length > 0) {
       const pageIndex = integerIndices[integerIndices.length - 1];
-      page = tokens[pageIndex];
+      const candidatePage = tokens[pageIndex];
+      const pageNum = parseInt(candidatePage, 10);
+
+      // 页码合理性检查：教材页码不应超过 1201
+      if (!isNaN(pageNum) && pageNum > 0 && pageNum < 1201) {
+        page = candidatePage;
+      }
 
       // Remove the page number and wrap-around page indicators from the segment title
       const titleTokens = tokens.filter((t, idx) => {
         if (idx === pageIndex) return false;
-        if (/^\d+$/.test(t) && t === page) return false;
+        if (/^\d+$/.test(t) && t === candidatePage) return false;
         return true;
       });
       title = titleTokens.join(' ');
@@ -193,8 +199,9 @@ export function parseTextToDirectory(text: string): DirectoryItem[] {
     if (page) {
       const pageNum = parseInt(page, 10);
       if (!isNaN(pageNum)) {
-        // If the parsed page decreases significantly below our peak
-        if (maxPageNumSeen > 20 && pageNum < maxPageNumSeen && (pageNum < 10 || pageNum < maxPageNumSeen - 15)) {
+        // 页码回退检查：只有当页码回退非常显著（回到个位数或回退超过50页）时才中断
+        // 放宽条件以兼容目录页码非严格递增的教材
+        if (maxPageNumSeen > 50 && pageNum < maxPageNumSeen && (pageNum < 5 || pageNum < maxPageNumSeen - 50)) {
           break; // Page resets indicates we are inside the book body! Break.
         }
         maxPageNumSeen = Math.max(maxPageNumSeen, pageNum);
