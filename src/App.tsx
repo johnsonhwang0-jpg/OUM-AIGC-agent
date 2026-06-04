@@ -268,6 +268,19 @@ export default function App() {
         setModules([]);
       }
 
+      if (project.aiMeta) {
+        try {
+          const parsedAiMeta = JSON.parse(project.aiMeta);
+          setAiMeta(parsedAiMeta);
+        } catch (e) {
+          console.error("Failed to parse aiMeta:", e);
+        }
+      }
+
+      if (project.rawBlueprintData) {
+        setRawBlueprintData(project.rawBlueprintData);
+      }
+
       const scriptsResponse = await fetch(`/api/projects/${projectId}/scripts`);
       if (scriptsResponse.ok) {
         const scripts = await scriptsResponse.json();
@@ -369,14 +382,16 @@ export default function App() {
           directoryItems: JSON.stringify(directoryItems),
           modules: JSON.stringify(modulesToSave),
           pdfFileName,
-          pdfData
+          pdfData,
+          aiMeta: aiMeta ? JSON.stringify(aiMeta) : "",
+          rawBlueprintData: rawBlueprintData || ""
         })
       });
       console.log("✅ saveCurrentProject: response status", response.status);
     } catch (err) {
       console.error("Failed to save project:", err);
     }
-  }, [currentProjectId, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData]);
+  }, [currentProjectId, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData]);
 
   // Save script to project
   const saveScriptToProject = useCallback(async (moduleId: string, script: any) => {

@@ -14,6 +14,8 @@ export interface Project {
   bookContentText: string;
   directoryItems: string;
   modules: string;
+  aiMeta: string; // AI调用元数据 JSON
+  rawBlueprintData: string; // AI返回的原始切片数据 JSON
   createdAt: string;
   updatedAt: string;
 }
@@ -50,6 +52,8 @@ async function initDatabase(): Promise<Database> {
       bookContentText TEXT,
       directoryItems TEXT,
       modules TEXT,
+      aiMeta TEXT,
+      rawBlueprintData TEXT,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     )
@@ -93,15 +97,17 @@ export async function createProject(
   bookTitle?: string,
   bookContentText?: string,
   directoryItems?: string,
-  modules?: string
+  modules?: string,
+  aiMeta?: string,
+  rawBlueprintData?: string
 ): Promise<Project> {
   const database = await getDatabase();
   const id = `proj-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   const now = new Date().toISOString();
 
   database.run(
-    `INSERT INTO projects (id, name, pdfFileName, pdfData, bookTitle, bookContentText, directoryItems, modules, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO projects (id, name, pdfFileName, pdfData, bookTitle, bookContentText, directoryItems, modules, aiMeta, rawBlueprintData, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       name,
@@ -111,6 +117,8 @@ export async function createProject(
       bookContentText || "",
       directoryItems || "",
       modules || "",
+      aiMeta || "",
+      rawBlueprintData || "",
       now,
       now
     ]
@@ -127,6 +135,8 @@ export async function createProject(
     bookContentText: bookContentText || "",
     directoryItems: directoryItems || "",
     modules: modules || "",
+    aiMeta: aiMeta || "",
+    rawBlueprintData: rawBlueprintData || "",
     createdAt: now,
     updatedAt: now
   };
@@ -134,7 +144,7 @@ export async function createProject(
 
 export async function updateProject(
   id: string,
-  updates: Partial<Pick<Project, "name" | "bookTitle" | "bookContentText" | "directoryItems" | "modules" | "pdfFileName" | "pdfData">>
+  updates: Partial<Pick<Project, "name" | "bookTitle" | "bookContentText" | "directoryItems" | "modules" | "pdfFileName" | "pdfData" | "aiMeta" | "rawBlueprintData">>
 ): Promise<void> {
   const database = await getDatabase();
   const now = new Date().toISOString();
@@ -169,6 +179,14 @@ export async function updateProject(
   if (updates.pdfData !== undefined) {
     fields.push("pdfData = ?");
     values.push(updates.pdfData);
+  }
+  if (updates.aiMeta !== undefined) {
+    fields.push("aiMeta = ?");
+    values.push(updates.aiMeta);
+  }
+  if (updates.rawBlueprintData !== undefined) {
+    fields.push("rawBlueprintData = ?");
+    values.push(updates.rawBlueprintData);
   }
 
   if (fields.length === 0) return;
@@ -218,6 +236,8 @@ export async function getProject(id: string): Promise<Project | null> {
     bookContentText: (matchingRow[columns.indexOf("bookContentText")] as string) || "",
     directoryItems: (matchingRow[columns.indexOf("directoryItems")] as string) || "",
     modules: (matchingRow[columns.indexOf("modules")] as string) || "",
+    aiMeta: (matchingRow[columns.indexOf("aiMeta")] as string) || "",
+    rawBlueprintData: (matchingRow[columns.indexOf("rawBlueprintData")] as string) || "",
     createdAt: matchingRow[columns.indexOf("createdAt")] as string,
     updatedAt: matchingRow[columns.indexOf("updatedAt")] as string
   };
@@ -244,6 +264,8 @@ export async function getAllProjects(): Promise<Project[]> {
     bookContentText: (row[columns.indexOf("bookContentText")] as string) || "",
     directoryItems: (row[columns.indexOf("directoryItems")] as string) || "",
     modules: (row[columns.indexOf("modules")] as string) || "",
+    aiMeta: (row[columns.indexOf("aiMeta")] as string) || "",
+    rawBlueprintData: (row[columns.indexOf("rawBlueprintData")] as string) || "",
     createdAt: row[columns.indexOf("createdAt")] as string,
     updatedAt: row[columns.indexOf("updatedAt")] as string
   }));
