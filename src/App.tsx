@@ -2840,7 +2840,7 @@ API地址：https://api.deepseek.com/chat/completions`}
           {activeStep === 3 && (
             <div className="flex-1 flex flex-col h-full z-10 w-full overflow-hidden animate-fadeIn">
               <div className="flex-1 overflow-y-auto p-6">
-                <div className="max-w-[1300px] mx-auto space-y-6">
+                <div className="w-full space-y-6">
               
               <div className="flex flex-col md:flex-row gap-4">
               {/* Left sidebar: Modules list */}
@@ -2878,11 +2878,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                           <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-amber-500/20">
                             <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Coding...
                           </span>
-                        ) : (
-                          <span className="text-[9px] bg-white/5 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-white/5 italic">
-                            Pending
-                          </span>
-                        )}
+                        ) : null}
                       </div>
 
                       <h5 className={`font-semibold text-xs leading-normal line-clamp-1 ${isActive ? 'text-cyan-400 font-bold' : 'text-slate-300'}`}>
