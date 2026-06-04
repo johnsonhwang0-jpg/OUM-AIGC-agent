@@ -160,9 +160,10 @@ export function calculateAutoPageOffset(
     const cleanTitle = item.title.replace(/[\s\.\-\:：、，。§§]+/g, "").trim().toLowerCase();
     if (cleanTitle.length < 3) return;
 
-    // Scan the first 35 pages of the PDF for this title
-    const searchLimit = Math.min(35, pdfPagesText.length);
-    for (let pIdx = 0; pIdx < searchLimit; pIdx++) {
+    // 跳过前 5 页（封面、版权页、目录等），从第 6 页开始搜索正文中的章节标题
+    const searchStart = 5;
+    const searchLimit = Math.min(40, pdfPagesText.length);
+    for (let pIdx = searchStart; pIdx < searchLimit; pIdx++) {
       const pageTextClean = pdfPagesText[pIdx].replace(/[\s\.\-\:：、，。§§]+/g, "").trim().toLowerCase();
       if (pageTextClean.includes(cleanTitle)) {
         const physicalPage = pIdx + 1; // 1-indexed page
@@ -197,10 +198,28 @@ export function calculateAutoPageOffset(
  * - Headers, footers, page numbers
  * - Repetitive metadata and textbook title repetition.
  * - Restructures clean, double-spaced paragraphs in neat Markdown formatting.
+ * - Detects section headings and formats them as Markdown headings.
  */
 export function cleanAndFormatPageText(rawContent: string, absolutePage: number): string {
   const lines = rawContent.split(/\r?\n/);
   const cleanedLines: string[] = [];
+
+  // 标题模式：匹配 "1.1 xxx"、"Topic 1"、"Chapter 1"、"Summary"、"Key Terms" 等
+  const headingPatterns = [
+    /^\d+\.\d+(?:\.\d+)?\s+.+/,           // "1.1 Introduction"
+    /^(Topic|Chapter|Unit|Section)\s+\d+.*/i, // "Topic 1 xxx"
+    /^(Summary|Key Terms|References|Further Reading|Self-Test)$/i,
+    /^第\s*[\d一二三四五六七八九十百]+\s*[章节单元].+/, // "第一章 xxx"
+    /^\d+\.\s+.+/,                          // "1. xxx"
+  ];
+
+  // 页脚模式：版权信息、出版社、URL 等
+  const footerPatterns = [
+    /(?:出版社|Publishing|Copyright|All\s+rights\s+reserved|版权所有|©)/i,
+    /(?:www\.|http:\/\/|https:\/\/)/i,
+    /(?:ISBN|ISSN)\s*[\d\-]+/i,
+    /^(?:Printed\s+in|Published\s+by|©\s*\d{4})/i,
+  ];
 
   lines.forEach(line => {
     const trimmed = line.trim();
@@ -212,24 +231,48 @@ export function cleanAndFormatPageText(rawContent: string, absolutePage: number)
     // 2. Skip full written page markings (e.g. "第 45 页", "Page 45", "第 45 页/共 200 页")
     if (/^(?:第\s*\d+\s*页|page\s*\d+|\b\d+\s*[-—]\s*页\b)(?:\/共\s*\d+\s*页)?$/i.test(trimmed)) return;
 
-    // 3. Skip typical publishing footers / stamps/ metadata (e.g. "XX大学出版社", "Copyright", "All Rights Reserved")
-    if (/(?:出版社|Publishing|Copyright|All\s+rights\s+reserved|版权所有|©)/i.test(trimmed) && trimmed.length < 60) {
+    // 3. Skip footers: copyright, publisher, URL, etc.
+    if (footerPatterns.some(pat => pat.test(trimmed)) && trimmed.length < 80) {
       return;
     }
 
-    // 4. Skip typical header repetition (e.g. "Chapter 1", "课程大纲", textbook title)
+    // 4. Skip headers: short text + page number at end (e.g. "Topic 1 xxx 185")
+    // 页眉通常是短行（< 60 字符），且以数字结尾
+    if (trimmed.length < 60 && /\d{1,3}\s*$/.test(trimmed)) {
+      // 检查是否包含 Topic/Chapter 等关键词
+      if (/^(Topic|Chapter|Unit|Section|Requirements)/i.test(trimmed)) {
+        return;
+      }
+    }
+
+    // 5. Skip typical header repetition (e.g. "Chapter 1", "课程大纲", textbook title) - only short ones
     if (/^(?:第\s*\d+\s*[章节单元]|\bTopic\s+\d+|\bChapter\s+\d+|[A-Za-z\u4e00-\u9fa5\s\(\)《》]+教材)$/i.test(trimmed) && trimmed.length < 35) {
       return;
     }
 
-    cleanedLines.push(trimmed);
+    // 6. Detect headings and format as Markdown
+    let isHeading = false;
+    for (const pattern of headingPatterns) {
+      if (pattern.test(trimmed)) {
+        // 判断层级：带小数点的（如 1.1.1）是三级标题，否则是二级
+        const level = /\d+\.\d+\.\d+/.test(trimmed) ? 3 : 2;
+        cleanedLines.push(`${'#'.repeat(level)} ${trimmed}`);
+        isHeading = true;
+        break;
+      }
+    }
+
+    if (!isHeading) {
+      cleanedLines.push(trimmed);
+    }
   });
 
-  const parsedMerged = cleanedLines.join(' ');
+  const parsedMerged = cleanedLines.join('\n');
   // Clean spacing and formatting for Chinese text output
   let processed = parsedMerged
     .replace(/([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])/g, '$1$2')
-    .replace(/([。？！；])\s*/g, '$1\n\n')
+    .replace(/([。？！；])\s*\n/g, '$1\n\n')
+    .replace(/([。？！；])\s+/g, '$1\n\n')
     .trim();
 
   return processed;

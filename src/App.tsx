@@ -2908,6 +2908,17 @@ API地址：https://api.deepseek.com/chat/completions`}
                           <input type="number" value={pdfPageOffset} onChange={(e) => setPdfPageOffset(parseInt(e.target.value, 10) || 0)} className="w-7 bg-black/80 border border-white/10 text-center font-mono text-[9px] font-bold text-cyan-200 py-0 rounded outline-none focus:border-cyan-400" />
                           <button type="button" onClick={() => setPdfPageOffset(prev => prev + 1)} className="w-4 h-4 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-white/5 font-bold cursor-pointer" title="向后偏移一页">+</button>
                         </div>
+                        <button 
+                          type="button" 
+                          onClick={() => {
+                            const autoOffset = calculateAutoPageOffset(directoryItems, pdfPagesText);
+                            setPdfPageOffset(autoOffset);
+                          }} 
+                          className="w-4 h-4 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-cyan-500/30 cursor-pointer" 
+                          title="重新计算偏移量"
+                        >
+                          <RefreshCw className="w-2.5 h-2.5" />
+                        </button>
                       </div>
                     )}
                     <div className="flex items-center gap-1.5 bg-cyan-500/10 border border-cyan-500/30 px-2 py-0.5 rounded-full">
@@ -2936,7 +2947,8 @@ API地址：https://api.deepseek.com/chat/completions`}
                     <div className="animate-fadeIn p-5">
                       <div className="text-xs text-slate-300 leading-relaxed font-sans overflow-y-auto select-text selection:bg-cyan-500/30 selection:text-white scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                           <ReactMarkdown components={{
-                            h3: () => null,
+                            h2: ({ node, ...props }) => (<h2 className="text-sm font-bold text-cyan-400 bg-cyan-500/5 border-l-2 border-cyan-500/50 px-3 py-1.5 mt-6 mb-3 font-mono tracking-wide" {...props} />),
+                            h3: ({ node, ...props }) => (<h3 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-4 mb-2 inline-block font-mono tracking-wider" {...props} />),
                             h4: ({ node, ...props }) => (<h4 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-5 mb-3 inline-block font-mono tracking-wider" {...props} />),
                             p: ({ node, ...props }) => (<p className="text-xs text-slate-300 leading-relaxed mb-3 font-sans opacity-95" {...props} />),
                             strong: ({ node, ...props }) => (<strong className="text-white font-extrabold" {...props} />),
