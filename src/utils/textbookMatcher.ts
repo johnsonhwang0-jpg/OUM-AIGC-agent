@@ -236,9 +236,90 @@ export function cleanAndFormatPageText(rawContent: string, absolutePage: number)
 }
 
 /**
+ * 根据目录结构和章节切分信息计算页码范围
+ * 输入：1) 目录（章节 → 页码映射） 2) coveredChapters（如 "1.1-1.3"）
+ * 逻辑：起始页码 = 起始章节在目录中的页码
+ *       结束页码 = 结束章节下一个非子章节节点的页码
+ */
+function calculatePageRange(
+  covered: string,
+  directoryItems: DirectoryItem[]
+): { startPage: string; endPage: string; found: boolean } {
+  const parseSectionNumbers = (str: string): number[] | null => {
+    const match = str.trim().match(/(\d+(?:\.\d+)*)/);
+    if (!match) return null;
+    return match[1].split('.').map(x => parseInt(x, 10));
+  };
+
+  const isDescendant = (target: number[], item: number[]): boolean => {
+    if (item.length < target.length) return false;
+    for (let i = 0; i < target.length; i++) {
+      if (item[i] !== target[i]) return false;
+    }
+    return true;
+  };
+
+  const findIndex = (nums: number[]): number => {
+    for (let i = 0; i < directoryItems.length; i++) {
+      const itemNums = parseSectionNumbers(directoryItems[i].title);
+      if (!itemNums) continue;
+      if (itemNums.length === nums.length && itemNums.every((n, j) => n === nums[j])) {
+        return i;
+      }
+    }
+    return -1;
+  };
+
+  const coveredTrimmed = covered.trim();
+  const rangeMatch = coveredTrimmed.match(/(\d+(?:\.\d+)*)\s*[-~—至]\s*(\d+(?:\.\d+)*)/);
+  
+  let startNums: number[] | null;
+  let endNums: number[] | null;
+
+  if (rangeMatch) {
+    startNums = parseSectionNumbers(rangeMatch[1]);
+    endNums = parseSectionNumbers(rangeMatch[2]);
+  } else {
+    startNums = parseSectionNumbers(coveredTrimmed);
+    endNums = startNums;
+  }
+
+  if (!startNums || !endNums) {
+    return { startPage: "", endPage: "", found: false };
+  }
+
+  const startIndex = findIndex(startNums);
+  if (startIndex === -1) {
+    return { startPage: "", endPage: "", found: false };
+  }
+
+  const endIndex = findIndex(endNums);
+  if (endIndex === -1) {
+    return { startPage: "", endPage: "", found: false };
+  }
+
+  const startPage = directoryItems[startIndex].page || "";
+
+  let endPage = "";
+  for (let k = endIndex + 1; k < directoryItems.length; k++) {
+    const nextNums = parseSectionNumbers(directoryItems[k].title);
+    if (!nextNums) continue;
+    if (isDescendant(endNums, nextNums)) continue;
+    endPage = directoryItems[k].page || "";
+    break;
+  }
+
+  if (!endPage && directoryItems[endIndex].page) {
+    endPage = directoryItems[endIndex].page;
+  }
+
+  return { startPage, endPage, found: true };
+}
+
+/**
  * Clean & accurate textbook extraction module matching.
- * Leverages structured Directory page indices & pdfPagesText dynamically extracted from PDF
- * to extract exactly matching pages. Falls back to pre-authored scholarly text if on template.
+ * Uses directory structure + coveredChapters to calculate page range.
+ * If PDF is available, extracts verbatim page content.
  */
 export function getExtractedTextForModule(
   mod: BookModule,
@@ -247,364 +328,55 @@ export function getExtractedTextForModule(
   pdfPagesText?: string[],
   pdfPageOffset: number = 0
 ): { mappedPages: string; extractedOriginalText: string } {
-  // 1. Basic sanitization check
   const covered = (mod.coveredChapters || "").trim();
   if (!covered) {
     return { mappedPages: "暂未关联到页码", extractedOriginalText: "### 📑 章节覆盖信息缺失\n\n请先在第二阶段配置该单元对应的教材章节覆盖范围（例如：`1.1` 或 `2.1-2.2`）。" };
   }
 
-  // Parse numeric parts or ranges from coveredChapters (e.g. "1.1-1.3" -> ["1.1", "1.2", "1.3"])
-  const parseCoveredChapters = (coveredStr: string): string[] => {
-    const cleanStr = coveredStr.trim();
-    
-    // Support section range like "1.1-1.3" -> ["1.1", "1.2", "1.3"]
-    const rangeMatch = cleanStr.match(/(\d+\.\d+)\s*[-~—至]\s*(\d+\.\d+)/);
-    if (rangeMatch) {
-      const startNum = parseFloat(rangeMatch[1]);
-      const endNum = parseFloat(rangeMatch[2]);
-      const majorStart = Math.floor(startNum);
-      const majorEnd = Math.floor(endNum);
-      
-      if (majorStart === majorEnd) {
-        const startMinor = Math.round((startNum - majorStart) * 10);
-        const endMinor = Math.round((endNum - majorStart) * 10);
-        const results: string[] = [];
-        for (let m = startMinor; m <= endMinor; m++) {
-          results.push(`${majorStart}.${m}`);
-        }
-        return results;
-      }
-    }
-    
-    // Support integer chapter range like "1-3" or "第1-3章" -> ["1", "2", "3"]
-    const chRangeMatch = cleanStr.match(/第?\s*(\d+)\s*[-~—至]\s*第?\s*(\d+)\s*(?:章|单元)?/i);
-    if (chRangeMatch) {
-      const start = parseInt(chRangeMatch[1], 10);
-      const end = parseInt(chRangeMatch[2], 10);
-      if (!isNaN(start) && !isNaN(end) && start <= end) {
-        const results: string[] = [];
-        for (let c = start; c <= end; c++) {
-          results.push(`${c}`);
-        }
-        return results;
+  // 1. 基于目录结构计算页码范围
+  const pageRange = calculatePageRange(covered, directoryItems);
+  let mappedPages = "暂未关联到页码";
+  if (pageRange.found && pageRange.startPage) {
+    mappedPages = pageRange.endPage && pageRange.endPage !== pageRange.startPage
+      ? `P.${pageRange.startPage}-${pageRange.endPage}`
+      : `P.${pageRange.startPage}`;
+  }
+
+  // 2. 如果有 PDF，提取原文内容
+  if (pdfPagesText && pdfPagesText.length > 0 && pageRange.found && pageRange.startPage) {
+    const startPrinted = parseInt(pageRange.startPage, 10) || 1;
+    const endPrinted = pageRange.endPage ? (parseInt(pageRange.endPage, 10) || startPrinted) : startPrinted;
+
+    const activeStartPhysical = Math.max(1, startPrinted + pdfPageOffset);
+    const activeEndPhysical = Math.max(activeStartPhysical, Math.min(pdfPagesText.length, endPrinted + pdfPageOffset));
+
+    let mdOutput = `### 📑 PDF 教材原文块同步对齐 (Verbatim Page Extract)\n\n`;
+    mdOutput += `> 💡 **真实物理定位**: PDF 物理页 [第 **${activeStartPhysical}** 页 - 第 **${activeEndPhysical}** 页]\n`;
+    mdOutput += `> 📖 **校准课本印刷页**: 印刷页码范围 [P.${startPrinted} - P.${endPrinted}] | 偏差偏移值 (Offset): \`${pdfPageOffset >= 0 ? "+" : ""}${pdfPageOffset}\` 页\n\n`;
+
+    let textRetrieved = false;
+    for (let pageNum = activeStartPhysical; pageNum <= activeEndPhysical; pageNum++) {
+      const rawContent = pdfPagesText[pageNum - 1];
+      if (rawContent && rawContent.trim()) {
+        textRetrieved = true;
+        const cleanedText = cleanAndFormatPageText(rawContent, pageNum);
+        mdOutput += `#### 📄 —— 第 ${pageNum} 页 原文 (PDF 物理页) ——\n\n${cleanedText || "*(经过智能降噪过滤，未包含非考点核心文本)*"}\n\n---\n\n`;
       }
     }
 
-    // Split by comma, separator, or spaces
-    return cleanStr.split(/[,;\s、+至\-—~]+/).filter(Boolean);
-  };
-
-  const parts = parseCoveredChapters(covered);
-
-  // Helper matcher comparing book headings to our parsed section parts
-  const checkIfMatch = (title: string, part: string): boolean => {
-    const cleanTitle = title.toLowerCase();
-    const cleanPart = part.toLowerCase().trim();
-    if (!cleanPart) return false;
-
-    // Pattern matching e.g., "1.1" (needs boundaries so "11.1" or "1.11" doesn't falsely match)
-    if (/^\d+\.\d+$/.test(cleanPart)) {
-      const escaped = cleanPart.replace('.', '\\.');
-      const r = new RegExp(`(?:\\b|[^\\d])${escaped}(?:\\b|[^\\d])`);
-      return r.test(cleanTitle);
-    }
-    // Pattern matching e.g., integer "1" (must not match "11" or "21")
-    if (/^\d+$/.test(cleanPart)) {
-      const r = new RegExp(`(?:\\b|[^\\d])${cleanPart}(?:\\b|[^\\d])`);
-      return r.test(cleanTitle);
-    }
-    return cleanTitle.includes(cleanPart);
-  };
-
-  // Helper to parse chapter/section numbers from a title (e.g. "1.1 Introduction" -> [1, 1])
-  const getTitleSectionNumbers = (title: string): number[] => {
-    const temp = title.trim();
-    // Match "Topic 1", "Chapter 3.4.1", "1.1" etc.
-    const match = temp.match(/(?:Topic|Chapter|Unit|Section|第)?\s*(\d+(?:\.\d+)*)/i);
-    if (match) {
-      return match[1].split('.').map(x => parseInt(x, 10));
-    }
-    const simpleMatch = temp.match(/^(\d+(?:\.\d+)*)/);
-    if (simpleMatch) {
-      return simpleMatch[1].split('.').map(x => parseInt(x, 10));
-    }
-    return [];
-  };
-
-  // Helper to extract digit sequence from a raw segment part input (e.g. "1.1" -> [1, 1])
-  const parsePartToNumbers = (part: string): number[] => {
-    const clean = part.trim();
-    const matches = clean.match(/\d+/g);
-    if (!matches) return [];
-    return matches.map(m => parseInt(m, 10));
-  };
-
-  // Check if item's section numbers match target's numbers exactly
-  const isMatchNums = (target: number[], item: number[]): boolean => {
-    if (target.length === 0 || item.length === 0) return false;
-    if (item.length < target.length) return false;
-    for (let i = 0; i < target.length; i++) {
-      if (item[i] !== target[i]) return false;
-    }
-    return true;
-  };
-
-  // Check if child is same or descendant of parent
-  const isSameOrDescendantArray = (parent: number[], child: number[]): boolean => {
-    if (parent.length === 0 || child.length === 0) return false;
-    if (child.length < parent.length) return false;
-    for (let i = 0; i < parent.length; i++) {
-      if (child[i] !== parent[i]) return false;
-    }
-    return true;
-  };
-
-  // 2. High-precision dynamic PDF textbook page range matching
-  if (pdfPagesText && pdfPagesText.length > 0) {
-    const startPart = parts[0] || "";
-    const endPart = parts[parts.length - 1] || "";
-
-    const startNums = parsePartToNumbers(startPart);
-    const endNums = parsePartToNumbers(endPart);
-
-    let startIndex = -1;
-
-    // Find first precise start index match based on section numbers
-    if (startNums.length > 0) {
-      for (let i = 0; i < directoryItems.length; i++) {
-        const itemNums = getTitleSectionNumbers(directoryItems[i].title);
-        if (isMatchNums(startNums, itemNums)) {
-          startIndex = i;
-          break;
-        }
-      }
-    }
-
-    // Fallbacks for start index if strictly no precise TOC match hit
-    if (startIndex === -1 && startPart) {
-      startIndex = directoryItems.findIndex(item => checkIfMatch(item.title, startPart));
-    }
-    if (startIndex === -1 && mod.chapterIndex) {
-      startIndex = directoryItems.findIndex(item => checkIfMatch(item.title, mod.chapterIndex));
-    }
-    if (startIndex === -1 && mod.title) {
-      startIndex = directoryItems.findIndex(item => item.title.toLowerCase().includes(mod.title.toLowerCase()));
-    }
-
-    if (startIndex !== -1) {
-      // Find end match index (first match of endPart AFTER startIndex)
-      let endMatchIndex = startIndex; 
-      if (endPart && endPart !== startPart) {
-        if (endNums.length > 0) {
-          for (let k = startIndex; k < directoryItems.length; k++) {
-            const itemNums = getTitleSectionNumbers(directoryItems[k].title);
-            if (isMatchNums(endNums, itemNums)) {
-              endMatchIndex = k;
-              break; // CRITICAL: Stop at the first logical match of endPart!
-            }
-          }
-        }
-        if (endMatchIndex === startIndex) {
-          // Fallback string matching after startIndex
-          for (let k = startIndex; k < directoryItems.length; k++) {
-            if (checkIfMatch(directoryItems[k].title, endPart)) {
-              endMatchIndex = k;
-              break;
-            }
-          }
-        }
-      }
-
-      const matchedStartItem = directoryItems[startIndex];
-      const matchedEndItem = directoryItems[endMatchIndex];
-
-      const activeStartPrinted = parseInt(matchedStartItem.page || "", 10) || 1;
-      
-      // Calculate activeEndPrinted based on the first section after endMatchIndex that is NOT a descendant of the target end chapter.
-      const boundNums = endNums.length > 0 ? endNums : startNums;
-      let nextPagePrinted = -1;
-
-      for (let k = endMatchIndex + 1; k < directoryItems.length; k++) {
-        const nextItem = directoryItems[k];
-        const nextItemNums = getTitleSectionNumbers(nextItem.title);
-        
-        const isDesc = boundNums.length > 0 && isSameOrDescendantArray(boundNums, nextItemNums);
-        
-        if (!isDesc) {
-          const pVal = parseInt(nextItem.page || "", 10);
-          if (!isNaN(pVal) && pVal > 0) {
-            nextPagePrinted = pVal;
-            break;
-          }
-        }
-      }
-
-      let activeEndPrinted = -1;
-      if (nextPagePrinted !== -1) {
-        const matchedEndPrinted = parseInt(matchedEndItem.page || "", 10) || activeStartPrinted;
-        // If the next non-descendant section starts on the same page as the end section,
-        // it means the end section hasn't spanned to a new page yet, so use the end section's page.
-        // Otherwise, the end page extends to the page before the next section starts.
-        if (nextPagePrinted <= matchedEndPrinted) {
-          activeEndPrinted = matchedEndPrinted;
-        } else {
-          activeEndPrinted = Math.max(activeStartPrinted, nextPagePrinted);
-        }
-      } else {
-        // Fallback: read until the end of the PDF
-        activeEndPrinted = Math.max(activeStartPrinted, pdfPagesText.length - pdfPageOffset);
-      }
-
-      // Compute physical bounds using offset calibration safely
-      const activeStartPhysical = Math.max(1, activeStartPrinted + pdfPageOffset);
-      const activeEndPhysical = Math.max(activeStartPhysical, Math.min(pdfPagesText.length, activeEndPrinted + pdfPageOffset));
-
-      let mdOutput = `### 📑 PDF 教材原文块同步对齐 (Verbatim Page Extract)\n\n`;
-      mdOutput += `> 💡 **真实物理定位**: PDF 物理页 [第 **${activeStartPhysical}** 页 - 第 **${activeEndPhysical}** 页]\n`;
-      mdOutput += `> 📖 **校准课本印刷页**: 印刷页码范围 [P.${activeStartPrinted} - P.${activeEndPrinted}] | 偏差偏移值 (Offset): \`${pdfPageOffset >= 0 ? "+" : ""}${pdfPageOffset}\` 页\n`;
-      mdOutput += `> 🎯 **核对对应大纲节点**: 从 \`${matchedStartItem.title} (P.${matchedStartItem.page})\` 至 \`${matchedEndItem.title} (P.${matchedEndItem.page})\`\n\n`;
-
-      let textRetrieved = false;
-      for (let pageNum = activeStartPhysical; pageNum <= activeEndPhysical; pageNum++) {
-        const rawContent = pdfPagesText[pageNum - 1];
-        if (rawContent && rawContent.trim()) {
-          textRetrieved = true;
-          // Apply line-by-line cleaner filters
-          const cleanedText = cleanAndFormatPageText(rawContent, pageNum);
-
-          mdOutput += `#### 📄 —— 第 ${pageNum} 页 原文 (PDF 物理页) ——\n\n${cleanedText || "*(经过智能降噪过滤，未包含非考点核心文本)*"}\n\n---\n\n`;
-        }
-      }
-
-      if (textRetrieved) {
-        return {
-          mappedPages: `P.${activeStartPrinted}-${activeEndPrinted}`,
-          extractedOriginalText: mdOutput
-        };
-      }
+    if (textRetrieved) {
+      return { mappedPages, extractedOriginalText: mdOutput };
     }
   }
 
-  // 3. Fallback high-fidelity curriculum templates (scholarly structured sections)
-  let templateCombinedText = "";
-  let templateMappedPagesList: string[] = [];
-  
-  parts.forEach(part => {
-    if (ASTRO_PHYSICS_MD_SECTIONS[part]) {
-      const pageInfo = part === "1.1" ? "P.2-3" : part === "1.2" ? "P.5-6" : part === "1.3" ? "P.8-9" : part === "2.1" ? "P.19-20" : part === "2.2" ? "P.22-23" : "P.25-26";
-      templateMappedPagesList.push(pageInfo);
-      templateCombinedText += ASTRO_PHYSICS_MD_SECTIONS[part] + "\n\n---\n\n";
-    } else if (GREEK_MYTHS_MD_SECTIONS[part]) {
-      const pageInfo = part === "1.1" ? "P.2-3" : "P.5-6";
-      templateMappedPagesList.push(pageInfo);
-      templateCombinedText += GREEK_MYTHS_MD_SECTIONS[part] + "\n\n---\n\n";
-    }
-  });
-
-  if (templateCombinedText) {
-    const pagesLabel = templateMappedPagesList.length > 0 ? templateMappedPagesList.join(", ") : "P.2-4";
+  // 3. 没有 PDF 时，返回页码范围 + 提示
+  if (pageRange.found) {
     return {
-      mappedPages: pagesLabel,
-      extractedOriginalText: `### 🪐 预置教材原物对齐映射 (Built-in Courseware Alignment)\n\n> 🎯 **核对关卡章节**: ${covered} | 对应页码: ${pagesLabel}\n\n${templateCombinedText.trim()}`
+      mappedPages,
+      extractedOriginalText: `### 📑 教材章节页码映射\n\n> 🎯 **覆盖章节**: ${covered}\n> 📖 **对应页码**: ${mappedPages}\n\n> 💡 提示：请在第一步上传 PDF 教材以查看原文内容。`
     };
   }
 
-  // 4. Default Heuristic extraction fallback (based on text-split parsing searching)
-  if (!fullText) {
-    return { mappedPages: "暂无绑定页码", extractedOriginalText: "### ⚠️ 暂未提取教材原文\n\n请在第一步中上传您的 PDF 教材文档，系统将以此建立点对点的页码与原文章节文本索引。" };
-  }
-
-  const matchedItemsFallback: DirectoryItem[] = [];
-  parts.forEach(part => {
-    directoryItems.forEach(item => {
-      if (checkIfMatch(item.title, part)) {
-        matchedItemsFallback.push(item);
-      }
-    });
-  });
-
-  let pageRangeStr = "";
-  let textBlock = "";
-
-  const indices = matchedItemsFallback
-    .map(m => directoryItems.findIndex(item => item.id === m.id))
-    .filter(idx => idx !== -1);
-
-  if (indices.length > 0) {
-    const minIndex = Math.min(...indices);
-    const maxIndex = Math.max(...indices);
-
-    const firstItem = directoryItems[minIndex];
-    const lastItem = directoryItems[maxIndex];
-
-    const pageStart = firstItem.page || "";
-    const pageEnd = lastItem.page || "";
-
-    if (pageStart && pageEnd) {
-      pageRangeStr = pageStart === pageEnd ? `P.${pageStart}` : `P.${pageStart}-${pageEnd}`;
-    } else if (pageStart || pageEnd) {
-      pageRangeStr = `P.${pageStart || pageEnd}`;
-    }
-
-    const headingStart = firstItem.title;
-    const nextItem = directoryItems[maxIndex + 1];
-    const headingEnd = nextItem ? nextItem.title : null;
-
-    const findHeadingIndex = (text: string, heading: string) => {
-      let idx = text.indexOf(heading);
-      if (idx !== -1) return idx;
-
-      const prefix = heading.substring(0, Math.min(25, heading.length));
-      idx = text.indexOf(prefix);
-      if (idx !== -1) return idx;
-
-      const numMatch = heading.match(/\d+(?:\.\d+)?/);
-      if (numMatch) {
-        idx = text.indexOf(numMatch[0]);
-        if (idx !== -1) return idx;
-      }
-      return -1;
-    };
-
-    const startPos = findHeadingIndex(fullText, headingStart);
-    let endPos = -1;
-    if (headingEnd) {
-      endPos = findHeadingIndex(fullText, headingEnd);
-    }
-
-    if (startPos !== -1) {
-      if (endPos !== -1 && endPos > startPos) {
-        textBlock = fullText.substring(startPos, endPos).trim();
-      } else {
-        textBlock = fullText.substring(startPos, startPos + 3000).trim();
-      }
-    }
-  }
-
-  if (textBlock.length < 50) {
-    const targetPart = parts[0] || covered;
-    const cleanSearch = targetPart.replace('.', '\\.');
-    const regex = new RegExp(`(?:\\b|\\s|第)${cleanSearch}(?:\\b|\\s|章|节|单元)`);
-    const matchPos = fullText.search(regex);
-
-    if (matchPos !== -1) {
-      textBlock = fullText.substring(matchPos, matchPos + 2500).trim();
-    } else {
-      const indexInList = directoryItems.length > 0 ? parts[0] ? parseInt(parts[0], 10) || 1 : 1 : 1;
-      const pieceSize = Math.floor(fullText.length / 8);
-      const calculatedStart = Math.max(0, Math.min((indexInList - 1) * pieceSize, fullText.length - 1800));
-      textBlock = fullText.substring(calculatedStart, calculatedStart + 2200).trim();
-    }
-  }
-
-  let cleanedText = textBlock
-    .replace(/\s+/g, ' ')
-    .replace(/([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])/g, '$1$2')
-    .replace(/([。？！；])\s*/g, '$1\n\n')
-    .trim();
-
-  return {
-    mappedPages: pageRangeStr || "暂未关联到页码",
-    extractedOriginalText: `### 📝 智能切片原文提取 (Heuristic Segment Export)\n\n> 🔍 **检测覆盖章节**: ${covered}\n\n${cleanedText || "暂未在大纲库中定位到高热度匹配段落，请切换至第二阶段进行章节索引校准。"}`
-  };
+  // 4. 完全无法匹配
+  return { mappedPages: "暂无绑定页码", extractedOriginalText: "### ⚠️ 暂未提取教材原文\n\n请在第一步中上传您的 PDF 教材文档，系统将以此建立点对点的页码与原文章节文本索引。" };
 }

@@ -2769,46 +2769,69 @@ API地址：https://api.deepseek.com/chat/completions`}
 
           {/* Step 3: Slice Content Extraction */}
           {activeStep === 3 && (
-            <div className="p-4 flex-1 flex flex-col md:flex-row gap-4 overflow-hidden h-full z-10 animate-fadeIn">
+            <div className="flex-1 flex flex-col h-full z-10 w-full overflow-hidden animate-fadeIn">
+              <div className="flex-1 overflow-y-auto p-6">
+                <div className="max-w-[1300px] mx-auto space-y-6">
+              
+              <div className="flex flex-col md:flex-row gap-4">
               {/* Left sidebar: Modules list */}
-              <div className="w-full md:w-64 border border-white/10 rounded-2xl bg-[#0a0a0f] p-3 space-y-2 shrink-0 flex flex-col overflow-y-auto max-h-[220px] md:max-h-none">
+              <div className="w-full md:w-64 border border-white/10 rounded-2xl bg-[#0a0a0f] p-3 space-y-2 shrink-0 flex flex-col overflow-y-auto">
                 <div className="text-[11px] font-bold text-slate-500 px-2 tracking-wider uppercase mb-1 shrink-0">
                   教材学习关卡 (Chapter List)
                 </div>
+
                 {modules.map((mod) => {
                   const isActive = activeModuleId === mod.id;
+                  const isDone = mod.scriptStatus === 'completed';
+                  const isGen = mod.scriptStatus === 'generating';
+                  
                   return (
                     <button 
                       key={mod.id}
                       onClick={() => handleSelectModuleForSimulator(mod.id)}
                       className={`text-left p-2.5 rounded-xl border transition flex flex-col gap-1 w-full shrink-0 cursor-pointer ${
-                        isActive ? 'border-cyan-500 bg-cyan-500/10 shadow-[0_0_15px_rgba(6,182,212,0.15)]' : 'border-white/5 bg-white/5 hover:border-cyan-500/30 hover:bg-white/10'
+                        isActive 
+                          ? 'border-cyan-500 bg-cyan-500/10 shadow-[0_0_15px_rgba(6,182,212,0.15)]' 
+                          : 'border-white/5 bg-white/5 hover:border-cyan-500/30 hover:bg-white/10'
                       }`}
                     >
                       <div className="flex items-center justify-between w-full shrink-0">
-                        <span className="text-[10px] font-bold text-slate-400 font-mono tracking-wide">{mod.chapterIndex}</span>
+                        <span className="text-[10px] font-bold text-slate-400 font-mono tracking-wide">
+                          {mod.chapterIndex}
+                        </span>
+
+                        {/* Script load badge */}
+                        {isDone ? (
+                          <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
+                            <Check className="w-2.5 h-2.5" /> Playable
+                          </span>
+                        ) : isGen ? (
+                          <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-amber-500/20">
+                            <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Coding...
+                          </span>
+                        ) : (
+                          <span className="text-[9px] bg-white/5 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-white/5 italic">
+                            Pending
+                          </span>
+                        )}
                       </div>
-                      <h5 className={`font-semibold text-xs leading-normal line-clamp-1 ${isActive ? 'text-cyan-400 font-bold' : 'text-slate-300'}`}>{mod.title}</h5>
+
+                      <h5 className={`font-semibold text-xs leading-normal line-clamp-1 ${isActive ? 'text-cyan-400 font-bold' : 'text-slate-300'}`}>
+                        {mod.title}
+                      </h5>
+
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[10px] text-slate-450 text-slate-400 line-clamp-1">📖 {mod.coveredChapters}</span>
+                      </div>
                     </button>
                   );
                 })}
-                <div className="pt-2 shrink-0 border-t border-white/10 mt-auto">
-                  <button onClick={() => setActiveStep(2)} className="w-full text-center text-xs font-semibold py-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl block border border-white/10 transition cursor-pointer">⚙️ 返工修改大纲设定</button>
-                </div>
               </div>
               {/* Right: Original Text Mapping View */}
-              <div className="flex-1 border border-white/10 rounded-2xl bg-[#0a0a0f] flex flex-col h-full overflow-hidden">
-                <div className="bg-[#0a0a0f] px-5 py-3 border-b border-white/10 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs bg-cyan-500 text-white font-extrabold px-2 py-0.5 rounded shadow-[0_0_10px_rgba(6,182,212,0.4)]">ORIGINAL TEXT</span>
-                    <h4 className="font-semibold text-sm text-white font-display">{activeModule ? `《${activeModule.chapterIndex} · ${activeModule.title}》` : "等待载入章节"}</h4>
-                  </div>
-                  <button 
-                    onClick={() => { setActiveStep(4); addAgentMessage("✅ **已进入第四阶段：互动脚本生成！**\n\n现在您可以为每个章节生成仿真剧本、编辑参数、查看代码。"); }}
-                    className="px-4 py-2 bg-cyan-500 hover:bg-cyan-600 text-white rounded-lg transition text-xs font-bold shrink-0 flex items-center gap-2 cursor-pointer shadow-[0_0_10px_rgba(6,182,212,0.3)] hover:scale-[1.02] active:scale-95"
-                  >
-                    <Sparkles className="w-4 h-4" />✨ 进入互动脚本生成
-                  </button>
+              <div className="flex-1 border border-white/10 rounded-2xl bg-[#0a0a0f] flex flex-col overflow-hidden">
+                <div className="bg-[#0a0a0f] px-5 py-3 border-b border-white/10 shrink-0 flex items-center gap-2">
+                  <span className="text-xs bg-cyan-500 text-white font-extrabold px-2 py-0.5 rounded shadow-[0_0_10px_rgba(6,182,212,0.4)]">ORIGINAL TEXT</span>
+                  <h4 className="font-semibold text-sm text-white font-display">{activeModule ? `《${activeModule.chapterIndex} · ${activeModule.title}》` : "等待载入章节"}</h4>
                 </div>
                 <div className="flex-1 overflow-y-auto p-6">
                   {!activeModule ? (
@@ -2817,7 +2840,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                       <p className="text-sm">尚未选定任何章节，请点击左侧列表的章节查看教材原文。</p>
                     </div>
                   ) : (
-                    <div className="max-w-2xl mx-auto bg-[#0a0a0f] border border-white/10 rounded-3xl p-6 space-y-5 animate-fadeIn">
+                    <div className="space-y-5 animate-fadeIn">
                       <div className="flex items-center justify-between border-b border-white/10 pb-4">
                         <div className="flex items-center gap-2.5">
                           <BookOpen className="w-5 h-5 text-cyan-400" />
@@ -2826,46 +2849,68 @@ API地址：https://api.deepseek.com/chat/completions`}
                             <p className="text-[10px] text-slate-500">本单元关卡基于以下物理/学术教材考点片段自适应合成</p>
                           </div>
                         </div>
-                        {pdfPagesText && pdfPagesText.length > 0 && (
-                          <div className="flex items-center gap-2 bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/15 p-1.5 px-2.5 rounded-xl transition">
-                            <span className="text-[10px] text-cyan-300 font-semibold block select-none">页码修正 (Offset)</span>
-                            <div className="flex items-center gap-1">
-                              <button type="button" onClick={() => setPdfPageOffset(prev => prev - 1)} className="w-5 h-5 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-xs border border-white/5 font-bold cursor-pointer" title="向前偏移一页">-</button>
-                              <input type="number" value={pdfPageOffset} onChange={(e) => setPdfPageOffset(parseInt(e.target.value, 10) || 0)} className="w-9 bg-black/80 border border-white/10 text-center font-mono text-[10px] font-bold text-cyan-200 py-0.5 rounded outline-none focus:border-cyan-400" />
-                              <button type="button" onClick={() => setPdfPageOffset(prev => prev + 1)} className="w-5 h-5 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-xs border border-white/5 font-bold cursor-pointer" title="向后偏移一页">+</button>
+                        <div className="flex items-center gap-3">
+                          {pdfPagesText && pdfPagesText.length > 0 && (
+                            <div className="flex items-center gap-2 bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/15 p-1.5 px-2.5 rounded-xl transition">
+                              <span className="text-[10px] text-cyan-300 font-semibold block select-none">页码修正 (Offset)</span>
+                              <div className="flex items-center gap-1">
+                                <button type="button" onClick={() => setPdfPageOffset(prev => prev - 1)} className="w-5 h-5 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-xs border border-white/5 font-bold cursor-pointer" title="向前偏移一页">-</button>
+                                <input type="number" value={pdfPageOffset} onChange={(e) => setPdfPageOffset(parseInt(e.target.value, 10) || 0)} className="w-9 bg-black/80 border border-white/10 text-center font-mono text-[10px] font-bold text-cyan-200 py-0.5 rounded outline-none focus:border-cyan-400" />
+                                <button type="button" onClick={() => setPdfPageOffset(prev => prev + 1)} className="w-5 h-5 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-xs border border-white/5 font-bold cursor-pointer" title="向后偏移一页">+</button>
+                              </div>
+                              <span className="text-[9px] text-slate-500 hidden sm:inline select-none">(P.1 ➔ 物理 {1 + pdfPageOffset} 页)</span>
                             </div>
-                            <span className="text-[9px] text-slate-500 hidden sm:inline select-none">(P.1 ➔ 物理 {1 + pdfPageOffset} 页)</span>
-                          </div>
-                        )}
-                        <div className="bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 px-3 py-1 rounded-full text-xs font-mono font-bold">{getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).mappedPages}</div>
-                      </div>
-                      <div className="space-y-4">
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-400 block mb-1.5 uppercase tracking-wide">📑 匹配的教材原文段落</span>
-                          <div className="bg-[#030305] border border-white/10 rounded-2xl p-5 text-xs text-slate-300 leading-relaxed font-sans max-h-[380px] overflow-y-auto select-text selection:bg-cyan-500/30 selection:text-white scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-                            <ReactMarkdown components={{
-                              h3: ({ node, ...props }) => (<h3 className="text-sm font-bold text-cyan-400 mt-2 mb-3 pb-1.5 border-b border-white/10 flex items-center gap-1.5 font-display" {...props} />),
-                              h4: ({ node, ...props }) => (<h4 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-5 mb-3 inline-block font-mono tracking-wider" {...props} />),
-                              p: ({ node, ...props }) => (<p className="text-xs text-slate-300 leading-relaxed mb-3 font-sans opacity-95" {...props} />),
-                              strong: ({ node, ...props }) => (<strong className="text-white font-extrabold" {...props} />),
-                              blockquote: ({ node, ...props }) => (<blockquote className="border-l-2 border-cyan-500/50 bg-cyan-500/5 px-3 py-2 rounded-r-xl my-2 text-[11px] text-slate-300 leading-relaxed font-sans" {...props} />),
-                              ul: ({ node, ...props }) => (<ul className="list-disc pl-4 space-y-1 my-2.5 text-xs text-slate-300" {...props} />),
-                              ol: ({ node, ...props }) => (<ol className="list-decimal pl-4 space-y-1 my-2.5 text-xs text-slate-300" {...props} />),
-                              li: ({ node, ...props }) => (<li className="text-xs text-slate-300 leading-relaxed" {...props} />),
-                              hr: ({ node, ...props }) => (<hr className="border-t border-white/5 my-4" {...props} />),
-                              code: ({ node, ...props }) => (<code className="bg-white/10 px-1 py-0.5 rounded font-mono text-[10.5px] text-cyan-200 font-bold" {...props} />),
-                            }}>{getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).extractedOriginalText}</ReactMarkdown>
-                          </div>
+                          )}
+                          <div className="bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 px-3 py-1 rounded-full text-xs font-mono font-bold">{getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).mappedPages}</div>
                         </div>
-                        <div className="p-3.5 bg-cyan-500/5 rounded-xl border border-cyan-500/10 flex items-start gap-2.5">
-                          <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-                          <div className="text-[11px] text-slate-400 leading-relaxed">
-                            <span className="font-semibold text-slate-300">智能对齐提示：</span> 系统通过在教材大纲中模糊匹配该知识切片的 <strong>"覆盖章节"</strong> 属性（此处为 <code>{activeModule.coveredChapters}</code>），从而锚定了原始教材中的对应章节主题及其前后的课本段落原文。
-                          </div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 block mb-1.5 uppercase tracking-wide">📑 匹配的教材原文段落</span>
+                        <div className="bg-[#030305] border border-white/10 rounded-2xl p-5 text-xs text-slate-300 leading-relaxed font-sans max-h-[500px] overflow-y-auto select-text selection:bg-cyan-500/30 selection:text-white scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                          <ReactMarkdown components={{
+                            h3: ({ node, ...props }) => (<h3 className="text-sm font-bold text-cyan-400 mt-2 mb-3 pb-1.5 border-b border-white/10 flex items-center gap-1.5 font-display" {...props} />),
+                            h4: ({ node, ...props }) => (<h4 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-5 mb-3 inline-block font-mono tracking-wider" {...props} />),
+                            p: ({ node, ...props }) => (<p className="text-xs text-slate-300 leading-relaxed mb-3 font-sans opacity-95" {...props} />),
+                            strong: ({ node, ...props }) => (<strong className="text-white font-extrabold" {...props} />),
+                            blockquote: ({ node, ...props }) => (<blockquote className="border-l-2 border-cyan-500/50 bg-cyan-500/5 px-3 py-2 rounded-r-xl my-2 text-[11px] text-slate-300 leading-relaxed font-sans" {...props} />),
+                            ul: ({ node, ...props }) => (<ul className="list-disc pl-4 space-y-1 my-2.5 text-xs text-slate-300" {...props} />),
+                            ol: ({ node, ...props }) => (<ol className="list-decimal pl-4 space-y-1 my-2.5 text-xs text-slate-300" {...props} />),
+                            li: ({ node, ...props }) => (<li className="text-xs text-slate-300 leading-relaxed" {...props} />),
+                            hr: ({ node, ...props }) => (<hr className="border-t border-white/5 my-4" {...props} />),
+                            code: ({ node, ...props }) => (<code className="bg-white/10 px-1 py-0.5 rounded font-mono text-[10.5px] text-cyan-200 font-bold" {...props} />),
+                          }}>{getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).extractedOriginalText}</ReactMarkdown>
+                        </div>
+                      </div>
+                      <div className="p-3.5 bg-cyan-500/5 rounded-xl border border-cyan-500/10 flex items-start gap-2.5">
+                        <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                        <div className="text-[11px] text-slate-400 leading-relaxed">
+                          <span className="font-semibold text-slate-300">智能对齐提示：</span> 系统通过在教材大纲中模糊匹配该知识切片的 <strong>"覆盖章节"</strong> 属性（此处为 <code>{activeModule.coveredChapters}</code>），从而锚定了原始教材中的对应章节主题及其前后的课本段落原文。
                         </div>
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+              </div>
+
+                </div>
+              </div>
+
+              {/* Stage Navigation Buttons (Fixed Bottom) */}
+              <div className="shrink-0 bg-[#050508]/90 backdrop-blur-md border-t border-white/10 p-5 z-20">
+                <div className="max-w-[1300px] mx-auto flex items-center justify-between">
+                  <button 
+                    onClick={() => setActiveStep(2)}
+                    className="px-5 py-2 border border-white/10 text-slate-300 bg-white/5 hover:bg-white/10 font-semibold rounded-xl text-sm transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    ⚙️ 返工修改大纲设定
+                  </button>
+                  <button 
+                    onClick={() => { setActiveStep(4); addAgentMessage("✅ **已进入第四阶段：互动脚本生成！**\n\n现在您可以为每个章节生成仿真剧本、编辑参数、查看代码。"); }}
+                    className="px-6 py-2.5 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-xl text-sm flex items-center gap-1.5 transition shadow-[0_0_20px_rgba(6,182,212,0.4)] border border-cyan-400/25 cursor-pointer"
+                  >
+                    ✨ 进入互动脚本生成 <ArrowRight className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             </div>
