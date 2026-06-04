@@ -444,11 +444,11 @@ export function getExtractedTextForModule(
         const matchedEndPrinted = parseInt(matchedEndItem.page || "", 10) || activeStartPrinted;
         // If the next non-descendant section starts on the same page as the end section,
         // it means the end section hasn't spanned to a new page yet, so use the end section's page.
-        // Otherwise, the end page is nextPagePrinted - 1.
+        // Otherwise, the end page extends to the page before the next section starts.
         if (nextPagePrinted <= matchedEndPrinted) {
           activeEndPrinted = matchedEndPrinted;
         } else {
-          activeEndPrinted = Math.max(activeStartPrinted, nextPagePrinted - 1);
+          activeEndPrinted = Math.max(activeStartPrinted, nextPagePrinted);
         }
       } else {
         // Fallback: read until the end of the PDF
