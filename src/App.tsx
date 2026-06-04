@@ -326,11 +326,13 @@ export default function App() {
   const createNewProject = useCallback(async (
     name: string,
     pdfFile?: string,
-    pdfData?: string,
+    pdfDataVal?: string,
     bTitle?: string,
     bContent?: string,
     dirItems?: any[],
-    mods?: any[]
+    mods?: any[],
+    aiMetaVal?: typeof aiMeta,
+    rawBlueprintVal?: string
   ) => {
     console.log("🔵 createNewProject called:", name);
     try {
@@ -340,11 +342,13 @@ export default function App() {
         body: JSON.stringify({
           name,
           pdfFileName: pdfFile,
-          pdfData,
+          pdfData: pdfDataVal,
           bookTitle: bTitle || "",
           bookContentText: bContent || "",
           directoryItems: dirItems ? JSON.stringify(dirItems) : "",
-          modules: mods ? JSON.stringify(mods) : ""
+          modules: mods ? JSON.stringify(mods) : "",
+          aiMeta: aiMetaVal ? JSON.stringify(aiMetaVal) : "",
+          rawBlueprintData: rawBlueprintVal || ""
         })
       });
       console.log("📡 createNewProject response status:", response.status);
@@ -364,10 +368,12 @@ export default function App() {
   }, [loadProjectList]);
 
   // Save current project state
-  const saveCurrentProject = useCallback(async (overrideModules?: any[]) => {
+  const saveCurrentProject = useCallback(async (overrideModules?: any[], overrideAiMeta?: typeof aiMeta, overrideRawBlueprint?: string) => {
     if (!currentProjectId) return;
     try {
       const modulesToSave = overrideModules || modules;
+      const aiMetaToSave = overrideAiMeta || aiMeta;
+      const rawBlueprintToSave = overrideRawBlueprint || rawBlueprintData;
       console.log("💾 saveCurrentProject: saving", {
         projectId: currentProjectId,
         modulesCount: modulesToSave.length,
@@ -383,8 +389,8 @@ export default function App() {
           modules: JSON.stringify(modulesToSave),
           pdfFileName,
           pdfData,
-          aiMeta: aiMeta ? JSON.stringify(aiMeta) : "",
-          rawBlueprintData: rawBlueprintData || ""
+          aiMeta: aiMetaToSave ? JSON.stringify(aiMetaToSave) : "",
+          rawBlueprintData: rawBlueprintToSave || ""
         })
       });
       console.log("✅ saveCurrentProject: response status", response.status);
@@ -777,23 +783,24 @@ export default function App() {
       const rawResponse: any = await response.json();
       const { _meta, ...data } = rawResponse;
       
-      if (_meta) {
-        setAiMeta({
-          ..._meta,
-          callTime: new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          status: 'success'
-        });
-      }
+      const currentAiMeta = _meta ? {
+        ..._meta,
+        callTime: new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        status: 'success' as const
+      } : null;
       
-      setRawBlueprintData(
-        "========== 实际发送给AI模型的 Prompt ==========\n\n" +
+      const currentRawBlueprint = "========== 实际发送给AI模型的 Prompt ==========\n\n" +
         "【系统指令 (System Instruction)】:\n" +
         (_meta?.systemInstruction || "无") +
         "\n\n【用户指令 (User Prompt)】:\n" +
         (_meta?.userPrompt || "无") +
         "\n\n========== AI模型返回的原始响应 ==========\n" +
-        JSON.stringify(data, null, 2)
-      );
+        JSON.stringify(data, null, 2);
+      
+      if (currentAiMeta) {
+        setAiMeta(currentAiMeta);
+      }
+      setRawBlueprintData(currentRawBlueprint);
       console.log("\n📥 ========== RECEIVED FROM API ==========");
       console.log("📕 bookTitle from AI:", data.bookTitle);
       console.log("📊 totalSlices from AI:", data.totalSlices);
@@ -876,14 +883,16 @@ export default function App() {
             responseTitle || bookTitle,
             bookContentText,
             directoryItems,
-            formattedModules
+            formattedModules,
+            currentAiMeta,
+            currentRawBlueprint
           );
         } catch (e) {
           console.error("Failed to create project:", e);
         }
       } else {
         console.log("💾 Project exists, updating modules to DB");
-        await saveCurrentProject(formattedModules);
+        await saveCurrentProject(formattedModules, currentAiMeta, currentRawBlueprint);
         await loadProjectList();
       }
 
