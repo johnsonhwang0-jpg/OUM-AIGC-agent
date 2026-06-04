@@ -722,9 +722,9 @@ export default function App() {
     setIsParsing(true);
     setParseError("");
     setModules([]);
-    setCurrentProjectId(null);
 
-    const shouldCreateNewProject = true;
+    // Don't reset currentProjectId - we want to update the existing project if one exists
+    const existingProjectId = currentProjectId;
 
     addAgentMessage(
       `🪐 正在为《${bookTitle}》生成 AI 切片方案...\n\n` +
@@ -849,9 +849,9 @@ export default function App() {
       setActiveStep(2);
 
       console.log("✅ Modules set successfully, count:", formattedModules.length);
-      console.log("📦 handleSplitBook: currentProjectId =", currentProjectId);
+      console.log("📦 handleSplitBook: existingProjectId =", existingProjectId);
 
-      if (shouldCreateNewProject) {
+      if (!existingProjectId) {
         console.log("🆕 No project ID, creating new project");
         try {
           await createNewProject(
