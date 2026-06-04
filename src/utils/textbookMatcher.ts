@@ -333,20 +333,40 @@ export function getExtractedTextForModule(
     return { mappedPages: "暂未关联到页码", extractedOriginalText: "### 📑 章节覆盖信息缺失\n\n请先在第二阶段配置该单元对应的教材章节覆盖范围（例如：`1.1` 或 `2.1-2.2`）。" };
   }
 
-  // 1. 基于目录结构计算页码范围
-  const pageRange = calculatePageRange(covered, directoryItems);
-  let mappedPages = "暂未关联到页码";
-  if (pageRange.found && pageRange.startPage) {
-    mappedPages = pageRange.endPage && pageRange.endPage !== pageRange.startPage
-      ? `P.${pageRange.startPage}-${pageRange.endPage}`
-      : `P.${pageRange.startPage}`;
+  // 1. 优先使用手动设置的页码范围
+  let mappedPages = mod.pageRange || "暂未关联到页码";
+  let startPrinted: number;
+  let endPrinted: number;
+
+  if (mod.pageRange) {
+    // 解析手动设置的页码，如 "P.2-16" 或 "P.5"
+    const match = mod.pageRange.match(/P\.(\d+)(?:-(\d+))?/);
+    if (match) {
+      startPrinted = parseInt(match[1], 10);
+      endPrinted = match[2] ? parseInt(match[2], 10) : startPrinted;
+    } else {
+      // 解析失败，回退到自动计算
+      const pageRange = calculatePageRange(covered, directoryItems);
+      startPrinted = parseInt(pageRange.startPage, 10) || 1;
+      endPrinted = pageRange.endPage ? (parseInt(pageRange.endPage, 10) || startPrinted) : startPrinted;
+      mappedPages = pageRange.found && pageRange.startPage
+        ? (pageRange.endPage && pageRange.endPage !== pageRange.startPage ? `P.${pageRange.startPage}-${pageRange.endPage}` : `P.${pageRange.startPage}`)
+        : "暂未关联到页码";
+    }
+  } else {
+    // 2. 基于目录结构计算页码范围
+    const pageRange = calculatePageRange(covered, directoryItems);
+    if (pageRange.found && pageRange.startPage) {
+      mappedPages = pageRange.endPage && pageRange.endPage !== pageRange.startPage
+        ? `P.${pageRange.startPage}-${pageRange.endPage}`
+        : `P.${pageRange.startPage}`;
+    }
+    startPrinted = parseInt(pageRange.startPage, 10) || 1;
+    endPrinted = pageRange.endPage ? (parseInt(pageRange.endPage, 10) || startPrinted) : startPrinted;
   }
 
   // 2. 如果有 PDF，提取原文内容
-  if (pdfPagesText && pdfPagesText.length > 0 && pageRange.found && pageRange.startPage) {
-    const startPrinted = parseInt(pageRange.startPage, 10) || 1;
-    const endPrinted = pageRange.endPage ? (parseInt(pageRange.endPage, 10) || startPrinted) : startPrinted;
-
+  if (pdfPagesText && pdfPagesText.length > 0 && startPrinted > 0) {
     const activeStartPhysical = Math.max(1, startPrinted + pdfPageOffset);
     const activeEndPhysical = Math.max(activeStartPhysical, Math.min(pdfPagesText.length, endPrinted + pdfPageOffset));
 
@@ -370,7 +390,7 @@ export function getExtractedTextForModule(
   }
 
   // 3. 没有 PDF 时，返回页码范围 + 提示
-  if (pageRange.found) {
+  if (mappedPages !== "暂未关联到页码") {
     return {
       mappedPages,
       extractedOriginalText: `### 📑 教材章节页码映射\n\n> 🎯 **覆盖章节**: ${covered}\n> 📖 **对应页码**: ${mappedPages}\n\n> 💡 提示：请在第一步上传 PDF 教材以查看原文内容。`

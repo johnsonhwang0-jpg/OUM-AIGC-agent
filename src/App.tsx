@@ -2910,7 +2910,20 @@ API地址：https://api.deepseek.com/chat/completions`}
                         </div>
                       </div>
                     )}
-                    <div className="bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold">{getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).mappedPages}</div>
+                    <div className="flex items-center gap-1.5 bg-cyan-500/10 border border-cyan-500/30 px-2 py-0.5 rounded-full">
+                      <span className="text-[9px] text-cyan-300 font-semibold select-none">页码</span>
+                      <input 
+                        type="text" 
+                        value={activeModule?.pageRange || getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).mappedPages}
+                        onChange={(e) => {
+                          if (activeModule) {
+                            handleUpdateModule(activeModule.id, { pageRange: e.target.value });
+                          }
+                        }}
+                        placeholder="P.X-Y"
+                        className="w-16 bg-transparent border-0 outline-none font-mono text-[10px] font-bold text-cyan-400 text-center placeholder:text-cyan-600"
+                      />
+                    </div>
                   </div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-6">
@@ -2921,7 +2934,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                     </div>
                   ) : (
                     <div className="animate-fadeIn p-5">
-                      <div className="text-xs text-slate-300 leading-relaxed font-sans max-h-[500px] overflow-y-auto select-text selection:bg-cyan-500/30 selection:text-white scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                      <div className="text-xs text-slate-300 leading-relaxed font-sans overflow-y-auto select-text selection:bg-cyan-500/30 selection:text-white scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                           <ReactMarkdown components={{
                             h3: () => null,
                             h4: ({ node, ...props }) => (<h4 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-5 mb-3 inline-block font-mono tracking-wider" {...props} />),

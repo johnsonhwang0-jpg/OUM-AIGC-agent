@@ -46,6 +46,7 @@ export interface BookModule {
   chapterIndex?: string; // e.g., "Chapter 1" or "01" (legacy)
   title: string;
   coveredChapters?: string;
+  pageRange?: string; // 手动设置的页码范围，如 "P.2-16"，覆盖自动计算的页码
   summary: SummaryInfo | string; // Support both new object and old string format
   infoDensity?: InfoDensity | string; // 信息量/负载合理性评估
   cohesionDetail?: CohesionDetail | string; // 核心考点关联性与内聚度说明
