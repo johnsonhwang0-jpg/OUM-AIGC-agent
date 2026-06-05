@@ -28,6 +28,14 @@ export interface ModuleScript {
   createdAt: string;
 }
 
+export interface ExtractedContent {
+  id: string;
+  projectId: string;
+  moduleId: string;
+  content: string;
+  createdAt: string;
+}
+
 async function initDatabase(): Promise<Database> {
   const SQL = await initSqlJs();
 
@@ -71,6 +79,19 @@ async function initDatabase(): Promise<Database> {
   `);
 
   database.run(`CREATE INDEX IF NOT EXISTS idx_scripts_project ON module_scripts(projectId)`);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS extracted_content (
+      id TEXT PRIMARY KEY,
+      projectId TEXT NOT NULL,
+      moduleId TEXT NOT NULL,
+      content TEXT,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
+    )
+  `);
+
+  database.run(`CREATE INDEX IF NOT EXISTS idx_extracted_project ON extracted_content(projectId)`);
 
   saveDatabase(database);
 
@@ -306,6 +327,38 @@ export async function getModuleScripts(projectId: string): Promise<ModuleScript[
     projectId: row[columns.indexOf("projectId")] as string,
     moduleId: row[columns.indexOf("moduleId")] as string,
     script: row[columns.indexOf("script")] as string,
+    createdAt: row[columns.indexOf("createdAt")] as string
+  }));
+}
+
+export async function saveExtractedContent(projectId: string, moduleId: string, content: string): Promise<void> {
+  const database = await getDatabase();
+  const id = `extracted-${projectId}-${moduleId}`;
+  const now = new Date().toISOString();
+
+  database.run(
+    `INSERT OR REPLACE INTO extracted_content (id, projectId, moduleId, content, createdAt)
+     VALUES (?, ?, ?, ?, ?)`,
+    [id, projectId, moduleId, content, now]
+  );
+  saveDatabase(database);
+}
+
+export async function getExtractedContents(projectId: string): Promise<ExtractedContent[]> {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM extracted_content WHERE projectId = ?`, [projectId]);
+
+  if (result.length === 0) {
+    return [];
+  }
+
+  const columns = result[0].columns;
+
+  return result[0].values.map(row => ({
+    id: row[columns.indexOf("id")] as string,
+    projectId: row[columns.indexOf("projectId")] as string,
+    moduleId: row[columns.indexOf("moduleId")] as string,
+    content: row[columns.indexOf("content")] as string,
     createdAt: row[columns.indexOf("createdAt")] as string
   }));
 }

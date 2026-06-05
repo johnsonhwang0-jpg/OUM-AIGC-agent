@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNode } from "react";
 import { 
   Upload, BookOpen, Sparkles, Play, Check, Plus, Trash2, Edit3, Layers, 
   MessageSquare, Send, RefreshCw, FileText, Settings, ArrowRight, Gamepad2, 
@@ -6,6 +6,40 @@ import {
   Award, Trophy, ChevronRight, CornerDownRight, Volume2, Gamepad, Lock, Code2, Terminal,
   Maximize2, Minimize2, X
 } from "lucide-react";
+
+// Error Boundary 组件 - 防止整个应用崩溃
+export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("React Error Boundary caught:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center p-8">
+          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-8 max-w-lg text-center">
+            <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-red-400 mb-2">应用发生错误</h2>
+            <p className="text-slate-400 text-sm mb-4">{this.state.error?.message}</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition"
+            >
+              刷新页面
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import { TEMPLATE_BOOKS } from "./data";
 import { 
   BookModule, BookBlueprint, GameScript, Message, GameSessionState, GameChallenge, GameType, DirectoryItem,
@@ -191,10 +225,13 @@ export default function App() {
   }, [messages, chatLoading]);
 
   // 进入第三步时，自动批量提取所有切片的原文内容（有缓存，不重复提取）
+  const batchExtractingRef = useRef(false);
+
   useEffect(() => {
-    if (activeStep !== 3 || !pdfData || modules.length === 0) return;
+    if (activeStep !== 3 || !pdfData || modules.length === 0 || batchExtractingRef.current) return;
 
     const extractAll = async () => {
+      batchExtractingRef.current = true;
       for (const mod of modules) {
         // 已缓存的跳过
         if (extractedModules[mod.id]) continue;
@@ -208,16 +245,26 @@ export default function App() {
             pdfPageOffset
           );
           setExtractedModules(prev => ({ ...prev, [mod.id]: result.extractedOriginalText }));
+
+          // 保存到数据库
+          if (currentProjectId) {
+            fetch(`/api/projects/${currentProjectId}/extracted`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ moduleId: mod.id, content: result.extractedOriginalText })
+            }).catch(err => console.error("保存提取内容失败:", err));
+          }
         } catch (err) {
           setExtractedModules(prev => ({ ...prev, [mod.id]: `⚠️ 提取失败: ${(err as Error).message}` }));
         } finally {
           setExtractingModuleId(prev => prev === mod.id ? null : prev);
         }
       }
+      batchExtractingRef.current = false;
     };
 
     extractAll();
-  }, [activeStep, pdfData, modules]);
+  }, [activeStep, pdfData, modules, currentProjectId]);
 
   // 当切换选中模块时，从缓存中读取原文内容
   useEffect(() => {
@@ -336,6 +383,17 @@ export default function App() {
         setSavedScripts(scriptsMap);
       }
 
+      // 加载已保存的提取内容
+      const extractedResponse = await fetch(`/api/projects/${projectId}/extracted`);
+      if (extractedResponse.ok) {
+        const extracted = await extractedResponse.json();
+        const extractedMap: Record<string, string> = {};
+        extracted.forEach((e: any) => {
+          extractedMap[e.moduleId] = e.content;
+        });
+        setExtractedModules(extractedMap);
+      }
+
       let msg = `📂 **已加载项目：${project.name}**\n\n`;
       if (project.pdfFileName) msg += `📄 PDF：${project.pdfFileName}\n`;
       if (project.bookTitle) msg += `📖 教材：《${project.bookTitle}》\n`;
@@ -354,12 +412,15 @@ export default function App() {
         } catch {}
       }
       msg += `\n您可以继续之前的编辑工作。`;
-      addAgentMessage(msg);
+      try { addAgentMessage(msg); } catch (e) { console.error("addAgentMessage error:", e); }
 
       setShowProjectList(false);
     } catch (err) {
       console.error("Failed to load project:", err);
-      alert("加载项目失败，请重试。");
+      // 即使出错，如果数据已经加载成功，不显示错误提示
+      if (!bookTitle && !modules.length) {
+        alert("加载项目失败，请重试。");
+      }
     }
   }, [addAgentMessage]);
 
@@ -3014,6 +3075,46 @@ API地址：https://api.deepseek.com/chat/completions`}
                         className="w-16 bg-transparent border-0 outline-none font-mono text-[10px] font-bold text-cyan-400 text-center placeholder:text-cyan-600"
                       />
                     </div>
+                    {activeModule && pdfData && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!activeModule || !pdfData) return;
+                          const modId = activeModule.id;
+                          // 设置提取中状态
+                          setExtractingModuleId(modId);
+                          setExtractedContent("⏳ 正在重新提取...");
+                          try {
+                            const result = await getExtractedTextForModuleAsync(
+                              activeModule, directoryItems, bookContentText,
+                              pdfData,
+                              pdfPagesText.length > 0 ? pdfPagesText : undefined,
+                              pdfPageOffset
+                            );
+                            // 更新缓存和内容
+                            setExtractedModules(prev => ({ ...prev, [modId]: result.extractedOriginalText }));
+                            setExtractedContent(result.extractedOriginalText);
+                            setExtractingModuleId(null);
+                            // 保存到数据库
+                            if (currentProjectId) {
+                              fetch(`/api/projects/${currentProjectId}/extracted`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ moduleId: modId, content: result.extractedOriginalText })
+                              }).catch(err => console.error("保存提取内容失败:", err));
+                            }
+                          } catch (err) {
+                            setExtractedContent(`⚠️ 提取失败: ${(err as Error).message}`);
+                            setExtractingModuleId(null);
+                          }
+                        }}
+                        className="flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 px-2 py-0.5 rounded-full transition text-[9px] font-semibold cursor-pointer"
+                        title="重新提取本切片原文"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        重新提取
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-6">

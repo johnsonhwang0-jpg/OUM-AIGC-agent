@@ -9,6 +9,7 @@ export interface PdfPageItem {
   fontSize: number;
   fontWeight: number;
   hasBold: boolean;
+  y: number; // Y 坐标，用于判断是否同行
 }
 
 export async function extractPdfPageWithFormat(
@@ -44,6 +45,7 @@ export async function extractPdfPageWithFormat(
     fontSize: item.transform ? item.transform[0] : 12,
     fontWeight: item.fontName ? (item.fontName.includes('Bold') || item.fontName.includes('bold') ? 700 : 400) : 400,
     hasBold: item.fontName ? (item.fontName.includes('Bold') || item.fontName.includes('bold')) : false,
+    y: item.transform ? item.transform[5] : 0,
   }));
 
   return items;
@@ -55,7 +57,8 @@ export async function extractPdfPageWithFormat(
  */
 export function formatPdfPageToMarkdown(
   items: PdfPageItem[],
-  absolutePage: number
+  absolutePage: number,
+  directoryItems?: DirectoryItem[]
 ): string {
   // 计算该页的平均字号，用于区分标题和正文
   const fontSizes = items.filter(i => i.text.trim()).map(i => i.fontSize);
@@ -63,69 +66,164 @@ export function formatPdfPageToMarkdown(
 
   const avgFontSize = fontSizes.reduce((a, b) => a + b, 0) / fontSizes.length;
   const maxFontSize = Math.max(...fontSizes);
-  const minFontSize = Math.min(...fontSizes);
 
   // 标题阈值：大于平均字号 1.3 倍的视为标题
   const headingThreshold = avgFontSize * 1.3;
   // 大标题阈值：大于最大字号的 0.85 倍
   const bigHeadingThreshold = maxFontSize * 0.85;
 
-  const lines: string[] = [];
-  let currentParagraph: string[] = [];
-  let lastItemWasHeading = false;
+  // ========== 第一步：预处理 —— 合并同一行的文本块 ==========
+  // PDF.js 会把一行文字拆成多个 item（如 "1.1" 和 "BACKGROUND..." 分开）
+  // 需要根据 Y 坐标合并，Y 坐标差值小于阈值视为同行
+  interface MergedLine {
+    text: string;
+    fontSize: number;
+    hasBold: boolean;
+    y: number;
+  }
 
-  const flushParagraph = () => {
-    if (currentParagraph.length > 0) {
-      lines.push(currentParagraph.join(''));
-      currentParagraph = [];
-    }
-  };
+  const mergedLines: MergedLine[] = [];
+  let currentLine: MergedLine | null = null;
+  const Y_THRESHOLD = 5; // 增大阈值，确保 "1.1" 和标题文字能合并
 
   for (const item of items) {
     if (!item.text.trim()) continue;
 
-    const trimmed = item.text.trim();
+    const y = item.y;
 
-    // 跳过纯页码行
-    if (/^[•\-]?\s*\d+\s*[•\-]?$/.test(trimmed)) continue;
-    if (/^(?:第\s*\d+\s*页|page\s*\d+)/i.test(trimmed)) continue;
+    if (currentLine && Math.abs(y - currentLine.y) < Y_THRESHOLD) {
+      // 同行，合并
+      currentLine.text += ' ' + item.text.trim();
+      currentLine.fontSize = Math.max(currentLine.fontSize, item.fontSize);
+      if (item.hasBold) currentLine.hasBold = true;
+    } else {
+      // 新行
+      if (currentLine) mergedLines.push(currentLine);
+      currentLine = {
+        text: item.text.trim(),
+        fontSize: item.fontSize,
+        hasBold: item.hasBold,
+        y,
+      };
+    }
+  }
+  if (currentLine) mergedLines.push(currentLine);
 
-    // 跳过页脚（版权、URL、ISBN 等）
-    const footerPatterns = [
-      /(?:出版社|Publishing|Copyright|All\s+rights\s+reserved|版权所有|©)/i,
-      /(?:www\.|http:\/\/|https:\/\/)/i,
-      /(?:ISBN|ISSN)\s*[\d\-]+/i,
-    ];
+  // ========== 第二步：过滤页眉页脚 ==========
+  const filteredLines: MergedLine[] = [];
+
+  // 页码模式
+  const pageNumPattern = /^[•\-]?\s*\d+\s*[•\-]?$/;
+  const pageNumPattern2 = /^(?:第\s*\d+\s*页|page\s*\d+)/i;
+
+  // 页脚模式
+  const footerPatterns = [
+    /(?:出版社|Publishing|Copyright|All\s+rights\s+reserved|版权所有|©)/i,
+    /(?:www\.|http:\/\/|https:\/\/)/i,
+    /(?:ISBN|ISSN)\s*[\d\-]+/i,
+  ];
+
+  // 从目录中提取所有 Topic 名称，用于构建页眉匹配正则
+  // 例如目录中有 "Topic 1 Establishing Common Ground"，则提取 "TOPIC 1 ESTABLISHING COMMON GROUND"
+  const topicNames: string[] = [];
+  if (Array.isArray(directoryItems)) {
+    for (const item of directoryItems) {
+      const title = item.title || "";
+      // 匹配 "Topic X xxx" 格式的目录项
+      const topicMatch = title.match(/^(Topic\s+\d+.*)$/i);
+      if (topicMatch) {
+        topicNames.push(topicMatch[1].toUpperCase());
+      }
+    }
+  }
+
+  // 构建页眉正则：
+  // 形式1：页码 + 空格 + 单元名称（如 "4 TOPIC 1 ESTABLISHING COMMON GROUND"）
+  // 形式2：单元名称 + 空格 + 页码（如 "TOPIC 1 ESTABLISHING COMMON GROUND 4"）
+  // 特征：整行只包含大写字母、数字、空格，无其他标点
+  const headerPatterns: RegExp[] = [];
+
+  if (topicNames.length > 0) {
+    for (const topicName of topicNames) {
+      // 转义正则特殊字符
+      const escapedName = topicName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // 形式1：页码开头 + 空格 + 单元名称
+      headerPatterns.push(new RegExp(`^\\d{1,3}\\s+${escapedName}$`));
+      // 形式2：单元名称 + 空格 + 页码结尾
+      headerPatterns.push(new RegExp(`^${escapedName}\\s+\\d{1,3}$`));
+    }
+  }
+
+  // 通用页眉兜底：Topic/Chapter + 数字 + 文字 + 页码（无标点）
+  headerPatterns.push(/^(?:Topic|Chapter|Unit|Section)\s+\d+\s+[A-Z\s]+\d{1,3}$/i);
+
+  for (const line of mergedLines) {
+    const trimmed = line.text.trim();
+
+    // 跳过纯页码
+    if (pageNumPattern.test(trimmed) || pageNumPattern2.test(trimmed)) continue;
+
+    // 跳过页脚（短行）
     if (footerPatterns.some(pat => pat.test(trimmed)) && trimmed.length < 80) continue;
 
-    // 跳过页眉（短行 + 数字结尾）
-    if (trimmed.length < 60 && /\d{1,3}\s*$/.test(trimmed)) {
-      if (/^(Topic|Chapter|Unit|Section|Requirements)/i.test(trimmed)) continue;
+    // 去除所有非字母、非数字、非空格的字符（包括项目符号、装饰符等）
+    // 例如 " TOPIC 1 ESTABLISHING COMMON GROUND 2" → "TOPIC 1 ESTABLISHING COMMON GROUND 2"
+    // 例如 "TOPIC 1 ESTABLISHING COMMON GROUND  3" → "TOPIC 1 ESTABLISHING COMMON GROUND 3"
+    const cleaned = trimmed.replace(/[^A-Za-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+
+    // 跳过页眉：清理后只包含字母、数字、空格，且匹配 Topic 模式
+    if (/^[A-Za-z0-9\s]+$/.test(cleaned)) {
+      if (headerPatterns.some(pat => pat.test(cleaned))) continue;
     }
 
+    filteredLines.push(line);
+  }
+
+  // ========== 第三步：生成 Markdown —— 按段落分组 ==========
+  // 关键：需要根据 Y 坐标的间距判断是否是新段落
+  // 同一段落内的行间距较小，段落之间的间距较大
+  const lines: string[] = [];
+  let currentParagraph: string[] = [];
+  let lastY: number | null = null;
+
+  // 计算该页的典型行间距（用于判断段落分隔）
+  const yCoords = mergedLines.map(l => l.y);
+  const yDiffs: number[] = [];
+  for (let i = 1; i < yCoords.length; i++) {
+    yDiffs.push(Math.abs(yCoords[i] - yCoords[i - 1]));
+  }
+  const avgYDiff = yDiffs.length > 0 ? yDiffs.reduce((a, b) => a + b, 0) / yDiffs.length : 10;
+  const paragraphThreshold = avgYDiff * 1.8; // 段落间距阈值：平均行间距的 1.8 倍
+
+  const flushParagraph = () => {
+    if (currentParagraph.length > 0) {
+      lines.push(currentParagraph.join(' ').trim());
+      currentParagraph = [];
+    }
+  };
+
+  for (const line of filteredLines) {
+    const trimmed = line.text.trim();
+    if (!trimmed) continue;
+
     // 判断是否为标题
-    const isHeading = item.fontSize >= headingThreshold;
-    const isBigHeading = item.fontSize >= bigHeadingThreshold;
+    const isHeading = line.fontSize >= headingThreshold;
+    const isBigHeading = line.fontSize >= bigHeadingThreshold;
 
     if (isHeading) {
       flushParagraph();
       const level = isBigHeading ? 2 : 3;
-      // 检查是否已有章节编号格式（如 "1.1 xxx"）
-      if (/^\d+\.\d+(?:\.\d+)?\s/.test(trimmed)) {
-        lines.push(`${'#'.repeat(level)} ${trimmed}`);
-      } else {
-        lines.push(`${'#'.repeat(level)} ${trimmed}`);
-      }
-      lastItemWasHeading = true;
+      lines.push(`${'#'.repeat(level)} ${trimmed}`);
+      lastY = line.y;
     } else {
-      // 正文
-      if (lastItemWasHeading && currentParagraph.length === 0) {
-        // 标题后的新段落
+      // 检查是否是新段落（Y 坐标间距较大）
+      if (lastY !== null && Math.abs(line.y - lastY) > paragraphThreshold) {
+        flushParagraph();
       }
       // 加粗文本用 ** 包裹
-      const formattedText = item.hasBold ? `**${trimmed}**` : trimmed;
-      currentParagraph.push(formattedText + ' ');
-      lastItemWasHeading = false;
+      const formattedText = line.hasBold ? `**${trimmed}**` : trimmed;
+      currentParagraph.push(formattedText);
+      lastY = line.y;
     }
   }
 
@@ -568,7 +666,7 @@ export async function getExtractedTextForModuleAsync(
       }
       try {
         const items = await extractPdfPageWithFormat(pdfData, pageNum);
-        const formattedText = formatPdfPageToMarkdown(items, pageNum);
+        const formattedText = formatPdfPageToMarkdown(items, pageNum, directoryItems);
         textRetrieved = true;
         mdOutput += `#### 📄 —— 第 ${pageNum} 页 原文 (PDF 物理页) ——\n\n${formattedText}\n\n---\n\n`;
       } catch (err) {

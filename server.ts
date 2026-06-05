@@ -12,6 +12,8 @@ import {
   deleteProject,
   saveModuleScript,
   getModuleScripts,
+  saveExtractedContent,
+  getExtractedContents,
   Project
 } from "./database.js";
 
@@ -386,6 +388,29 @@ app.post("/api/projects/:id/scripts", async (req, res) => {
   } catch (error) {
     console.error("Failed to save script:", error);
     res.status(500).json({ error: "Failed to save script" });
+  }
+});
+
+// 获取提取的原文内容
+app.get("/api/projects/:id/extracted", async (req, res) => {
+  try {
+    const contents = await getExtractedContents(req.params.id);
+    res.json(contents);
+  } catch (error) {
+    console.error("Failed to get extracted content:", error);
+    res.status(500).json({ error: "Failed to get extracted content" });
+  }
+});
+
+// 保存提取的原文内容
+app.post("/api/projects/:id/extracted", async (req, res) => {
+  try {
+    const { moduleId, content } = req.body;
+    await saveExtractedContent(req.params.id, moduleId, content);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to save extracted content:", error);
+    res.status(500).json({ error: "Failed to save extracted content" });
   }
 });
 
