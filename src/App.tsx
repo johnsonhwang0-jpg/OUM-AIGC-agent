@@ -242,7 +242,9 @@ export default function App() {
             mod, directoryItems, bookContentText,
             pdfData,
             pdfPagesText.length > 0 ? pdfPagesText : undefined,
-            pdfPageOffset
+            pdfPageOffset,
+            undefined,
+            currentProjectId
           );
           setExtractedModules(prev => ({ ...prev, [mod.id]: result.extractedOriginalText }));
 
@@ -1042,7 +1044,9 @@ export default function App() {
         mod, directoryItems, bookContentText,
         pdfData,
         pdfPagesText.length > 0 ? pdfPagesText : undefined,
-        pdfPageOffset
+        pdfPageOffset,
+        undefined,
+        currentProjectId
       );
 
       const payload = {
@@ -3089,7 +3093,9 @@ API地址：https://api.deepseek.com/chat/completions`}
                               activeModule, directoryItems, bookContentText,
                               pdfData,
                               pdfPagesText.length > 0 ? pdfPagesText : undefined,
-                              pdfPageOffset
+                              pdfPageOffset,
+                              undefined,
+                              currentProjectId
                             );
                             // 更新缓存和内容
                             setExtractedModules(prev => ({ ...prev, [modId]: result.extractedOriginalText }));

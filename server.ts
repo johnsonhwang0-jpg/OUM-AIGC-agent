@@ -414,6 +414,61 @@ app.post("/api/projects/:id/extracted", async (req, res) => {
   }
 });
 
+// 后端结构化 PDF 提取（使用 PyMuPDF Python 服务）
+app.post("/api/projects/:id/extract-pages", async (req, res) => {
+  try {
+    const { startPage, endPage } = req.body;
+    const project = await getProject(req.params.id);
+    if (!project || !project.pdfData) {
+      return res.status(404).json({ error: "PDF data not found" });
+    }
+
+    // 调用 Python 脚本提取 PDF 内容
+    const { exec } = await import("child_process");
+    const path = await import("path");
+    
+    const scriptPath = path.join(process.cwd(), "pdf_extractor.py");
+    const inputJson = JSON.stringify({
+      pdfData: project.pdfData,
+      startPage: startPage || 1,
+      endPage: endPage || 9999
+    });
+
+    // 通过 stdin 传递输入，通过 stdout 获取输出
+    const result = await new Promise<{ pages: { pageNum: number; content: string }[]; totalPages: number }>((resolve, reject) => {
+      const python = exec(`python3 "${scriptPath}"`, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) {
+          console.error("Python 提取错误:", stderr);
+          reject(new Error(`PDF 提取失败: ${stderr || error.message}`));
+          return;
+        }
+        if (stderr) {
+          console.error("Python stderr:", stderr);
+        }
+        try {
+          const data = JSON.parse(stdout);
+          if (data.error) {
+            reject(new Error(data.error));
+          } else {
+            resolve(data);
+          }
+        } catch (e) {
+          reject(new Error(`解析 Python 输出失败: ${stdout.substring(0, 200)}`));
+        }
+      });
+      
+      // 写入 stdin
+      python.stdin?.write(inputJson);
+      python.stdin?.end();
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error("Failed to extract pages:", error);
+    res.status(500).json({ error: `Failed to extract pages: ${(error as Error).message}` });
+  }
+});
+
 /**
  * 1) Parsing TOC & Module Blueprinting API
  */
