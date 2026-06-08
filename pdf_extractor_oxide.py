@@ -387,7 +387,7 @@ def fix_fragmented_tables(md_content: str) -> str:
                                 cells.append('')
                             cleaned_rows.append('|' + '|'.join(cells) + '|')
                     
-                    # 添加清理后的表格
+                    # 添加清理后的表格（前面一个空行，后面一个空行，但表格内部不能有）
                     result.append('')
                     result.extend(cleaned_rows)
                     result.append('')
