@@ -258,6 +258,17 @@ def is_bold_number_heading(text: str) -> tuple:
     return None
 
 
+def is_bold_number_only(text: str) -> str:
+    """检查是否是纯加粗数字编号（如 **1.1**）
+    返回数字编号或 None
+    """
+    stripped = text.strip()
+    m = re.match(r'^\*{1,2}\s*(\d+\.\d+(?:\.\d+)*)\s*\*{1,2}$', stripped)
+    if m:
+        return m.group(1)
+    return None
+
+
 def fix_headings_and_paragraphs(md_content: str) -> str:
     """修复标题和段落格式：
     1. 将 **1.1.2** **Title** 转换为 ### 1.1.2 Title
@@ -266,6 +277,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
     4. 修复段落合并问题
     5. 合并标题文本和数字编号（如 "Software Requirements..." + "1.1" -> "## 1.1 Software Requirements..."）
     6. 合并 Markdown 标题和加粗编号（如 "## SOFTWARE REQUIREMENTS AND" + "**1.1 REQUIREMENTS ENGINEERING**" -> "## 1.1 SOFTWARE REQUIREMENTS AND REQUIREMENTS ENGINEERING"）
+    7. 合并多段 Markdown 标题 + 中间加粗数字（如 "## BACKGROUND OF TEACHING YOUNG" + "**1.1**" + "## LEARNERS:..." + "## CHILDREN"）
     """
     lines = md_content.split('\n')
     result = []
@@ -309,8 +321,8 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
             continue
         
         # 2. 检查是否是 Markdown 标题 + 加粗编号的组合
-        # 例如: "## SOFTWARE REQUIREMENTS AND" + "**1.1 REQUIREMENTS ENGINEERING**"
-        # 合并成: "## 1.1 SOFTWARE REQUIREMENTS AND REQUIREMENTS ENGINEERING"
+        # 模式 A: "## SOFTWARE REQUIREMENTS AND" + "**1.1 REQUIREMENTS ENGINEERING**"
+        # 模式 B: "## BACKGROUND OF TEACHING YOUNG" + "**1.1**" + "## LEARNERS:..." + "## CHILDREN"
         if stripped.startswith('#'):
             # 提取标题级别和文本
             heading_match = re.match(r'^(#+)\s*(.+)$', stripped)
@@ -322,9 +334,11 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                 j = i + 1
                 while j < len(lines) and not lines[j].strip():
                     j += 1
+                
                 if j < len(lines):
                     next_line = lines[j].strip()
-                    # 检查下一行是否是加粗的数字编号标题
+                    
+                    # 模式 A: 下一行是加粗的数字编号标题（如 **1.1 REQUIREMENTS ENGINEERING**）
                     bold_match = is_bold_number_heading(next_line)
                     if bold_match:
                         bold_level, bold_text = bold_match
@@ -339,6 +353,36 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                             result.append(f"{level_prefix} {merged_text}")
                             i = j + 1
                             continue
+                    
+                    # 模式 B: 下一行是纯加粗数字编号（如 **1.1**）
+                    bold_number_only = is_bold_number_only(next_line)
+                    if bold_number_only:
+                        # 收集后续的 Markdown 标题片段
+                        heading_parts = [title_text]
+                        k = j + 1
+                        while k < len(lines):
+                            # 跳过空行
+                            while k < len(lines) and not lines[k].strip():
+                                k += 1
+                            if k >= len(lines):
+                                break
+                            
+                            next_line2 = lines[k].strip()
+                            # 检查是否是 Markdown 标题
+                            if next_line2.startswith('#'):
+                                heading_match2 = re.match(r'^(#+)\s*(.+)$', next_line2)
+                                if heading_match2:
+                                    heading_parts.append(heading_match2.group(2).strip())
+                                    k += 1
+                                    continue
+                            # 不是标题，停止收集
+                            break
+                        
+                        # 合并所有标题片段
+                        merged_text = f"{bold_number_only} {' '.join(heading_parts)}"
+                        result.append(f"{level_prefix} {merged_text}")
+                        i = k
+                        continue
         
         # 3. 检查是否是标题文本但没有数字前缀（需要与下一行合并）
         if is_title_text_without_number(stripped):
