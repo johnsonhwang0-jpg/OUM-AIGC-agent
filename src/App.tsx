@@ -3150,7 +3150,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                             h2: ({ node, ...props }) => (<h2 className="text-sm font-bold text-cyan-400 bg-cyan-500/5 border-l-2 border-cyan-500/50 px-3 py-1.5 mt-6 mb-3 font-mono tracking-wide" {...props} />),
                             h3: ({ node, ...props }) => (<h3 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-4 mb-2 inline-block font-mono tracking-wider" {...props} />),
                             h4: ({ node, ...props }) => (<h4 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-5 mb-3 inline-block font-mono tracking-wider" {...props} />),
-                            p: ({ node, ...props }) => (<p className="text-xs text-slate-300 leading-relaxed mb-3 font-sans opacity-95" {...props} />),
+                            p: ({ node, ...props }) => (<p className="text-xs text-slate-300 leading-relaxed mb-5 pb-3 border-b border-white/5 font-sans opacity-95 last:border-b-0 last:pb-0" {...props} />),
                             strong: ({ node, ...props }) => (<strong className="text-white font-extrabold" {...props} />),
                             blockquote: () => null,
                             ul: ({ node, ...props }) => (<ul className="list-disc pl-4 space-y-1 my-2.5 text-xs text-slate-300" {...props} />),
