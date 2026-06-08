@@ -270,10 +270,11 @@ def is_bold_number_only(text: str) -> str:
 
 
 def split_merged_paragraphs(text: str) -> str:
-    """分割被错误合并的段落（PDF 提取时多个段落被合并成一行，用双空格分隔）"""
-    # 匹配模式：句号/问号/感叹号 + 双空格 + 大写字母开头的新句子
+    """分割被错误合并的段落（PDF 提取时多个段落被合并成一行，用3个或更多空格分隔）"""
+    # 匹配模式：句号/问号/感叹号 + 3个或更多空格 + 大写字母开头的新句子
     # 例如: "...methods.   Teaching English..." -> "...methods.\n\nTeaching English..."
-    text = re.sub(r'([.!?])\s{2,}([A-Z])', r'\1\n\n\2', text)
+    # 注意：2个空格是正常句子分隔，不分割
+    text = re.sub(r'([.!?])\s{3,}([A-Z])', r'\1\n\n\2', text)
     return text
 
 
