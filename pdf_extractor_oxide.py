@@ -345,13 +345,9 @@ def filter_markdown_content(md_content: str, toc_titles: set) -> str:
             filtered.append(line)
             continue
         
-        # Markdown 标题行（# ## ### 等）需要特殊处理
+        # Markdown 标题行（# ## ### 等）全部保留，不过滤
+        # 因为 TOC 中包含所有章节标题，如果过滤会导致合法标题被误删
         if stripped.startswith('#'):
-            # 提取标题文本（去掉 # 和空格）
-            title_text = re.sub(r'^#+\s*', '', stripped).strip()
-            # 检查标题文本本身是否是页眉
-            if is_header_footer_line(title_text, toc_titles):
-                continue  # 跳过这个页眉标题
             filtered.append(line)
             continue
         
@@ -381,15 +377,15 @@ def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int,
             image_output_dir=image_output_dir
         )
         
-        # 后处理：过滤页眉页脚
-        filtered_content = filter_markdown_content(md_content, toc_titles)
+        # 后处理：先修复标题和段落格式（合并断裂标题、分割多标题行）
+        fixed_content = fix_headings_and_paragraphs(md_content)
         
-        # 后处理：修复标题和段落格式
-        fixed_content = fix_headings_and_paragraphs(filtered_content)
+        # 后处理：再过滤页眉页脚（此时标题已正确分割）
+        filtered_content = filter_markdown_content(fixed_content, toc_titles)
         
         page_info = {
             'pageNum': page_num + 1,
-            'content': fixed_content,
+            'content': filtered_content,
             'images': []
         }
         
