@@ -154,7 +154,59 @@ export default function App() {
   
   // Preview modal state
   const [showPreviewModal, setShowPreviewModal] = useState<boolean>(false);
-  const [previewContent, setPreviewContent] = useState<string>("");
+  
+  // Style guide demo content
+  const styleGuideDemo = `# 一级标题示例
+
+## 二级标题示例
+
+### 三级标题示例
+
+#### 四级标题示例
+
+这是一段普通段落文本。段落之间会有适当的间距。这是**加粗文字**的示例，这是*斜体文字*的示例。
+
+---
+
+### 表格示例
+
+| 阶段 | 情感发展 | 行为表现 |
+|---|---|---|
+| 三岁 | 他们对情绪的控制能力很弱。 | 如果看到有趣的东西会笑，如果难过或生气会哭。 |
+| 四岁 | 他们开始理解情绪爆发与负面后果之间的联系。 | 他们开始减少发脾气。 |
+| 五岁 | 他们展现出更好的情绪调节能力。 | 他们开始毫无困难地表达自己的感受。 |
+
+---
+
+### 列表示例
+
+**无序列表：**
+- 第一项内容
+- 第二项内容
+- 第三项内容
+
+**有序列表：**
+1. 第一步
+2. 第二步
+3. 第三步
+
+---
+
+### 代码示例
+
+行内代码：\`const x = 42;\`
+
+代码块：
+\`\`\`javascript
+function greet(name) {
+  return \`Hello, \${name}!\`;
+}
+\`\`\`
+
+---
+
+> 这是一个引用块示例。引用块通常用于强调重要内容或引用他人话语。
+`;
 
   // Step 4 States: UI Preference and App Generation
   const [uiTheme, setUiTheme] = useState<'minimal' | 'cyberpunk' | 'cartoon' | 'retro'>('minimal');
@@ -3058,12 +3110,9 @@ API地址：https://api.deepseek.com/chat/completions`}
                     {/* Preview button */}
                     {activeModuleId && extractedModules[activeModuleId] && (
                       <button
-                        onClick={() => {
-                          setPreviewContent(extractedModules[activeModuleId]);
-                          setShowPreviewModal(true);
-                        }}
+                        onClick={() => setShowPreviewModal(true)}
                         className="text-cyan-400 hover:text-cyan-300 transition cursor-pointer"
-                        title="预览原文渲染效果"
+                        title="查看渲染样式示例"
                       >
                         <Eye className="w-4 h-4" />
                       </button>
@@ -3343,12 +3392,9 @@ API地址：https://api.deepseek.com/chat/completions`}
                     {/* Preview button */}
                     {activeModuleId && extractedModules[activeModuleId] && (
                       <button
-                        onClick={() => {
-                          setPreviewContent(extractedModules[activeModuleId]);
-                          setShowPreviewModal(true);
-                        }}
+                        onClick={() => setShowPreviewModal(true)}
                         className="text-cyan-400 hover:text-cyan-300 transition cursor-pointer"
-                        title="预览原文渲染效果"
+                        title="查看渲染样式示例"
                       >
                         <Eye className="w-4 h-4" />
                       </button>
@@ -4379,7 +4425,7 @@ ${challenge.options ? `* 可选游戏决策卡:\n   ${challenge.options.map((opt
 
       </div>
 
-      {/* Preview Modal */}
+      {/* Style Guide Preview Modal */}
       {showPreviewModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowPreviewModal(false)}>
           <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl w-[90vw] max-w-4xl max-h-[85vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -4387,7 +4433,7 @@ ${challenge.options ? `* 可选游戏决策卡:\n   ${challenge.options.map((opt
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
               <h3 className="text-sm font-bold text-cyan-400 flex items-center gap-2">
                 <Eye className="w-4 h-4" />
-                原文渲染预览
+                Markdown 渲染样式示例
               </h3>
               <button
                 onClick={() => setShowPreviewModal(false)}
@@ -4400,17 +4446,26 @@ ${challenge.options ? `* 可选游戏决策卡:\n   ${challenge.options.map((opt
             <div className="flex-1 overflow-y-auto p-6">
               <div className="text-xs text-slate-300 leading-relaxed font-sans select-text selection:bg-cyan-500/30 selection:text-white">
                 <ReactMarkdown components={{
+                  h1: ({ node, ...props }) => (<h1 className="text-lg font-bold text-white mb-3 mt-4" {...props} />),
                   h2: ({ node, ...props }) => (<h2 className="text-sm font-bold text-cyan-400 bg-cyan-500/5 border-l-2 border-cyan-500/50 px-3 py-1.5 mt-6 mb-3 font-mono tracking-wide" {...props} />),
                   h3: ({ node, ...props }) => (<h3 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-4 mb-2 inline-block font-mono tracking-wider" {...props} />),
                   h4: ({ node, ...props }) => (<h4 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-5 mb-3 inline-block font-mono tracking-wider" {...props} />),
                   p: ({ node, ...props }) => (<p className="text-xs text-slate-300 leading-relaxed mb-3 font-sans opacity-95" {...props} />),
                   strong: ({ node, ...props }) => (<strong className="text-white font-extrabold" {...props} />),
-                  blockquote: () => null,
+                  em: ({ node, ...props }) => (<em className="text-slate-200 italic" {...props} />),
+                  blockquote: ({ node, ...props }) => (<blockquote className="border-l-2 border-cyan-500/30 pl-4 py-2 my-4 bg-cyan-500/5 rounded-r-lg" {...props} />),
                   ul: ({ node, ...props }) => (<ul className="list-disc pl-4 space-y-1 my-2.5 text-xs text-slate-300" {...props} />),
                   ol: ({ node, ...props }) => (<ol className="list-decimal pl-4 space-y-1 my-2.5 text-xs text-slate-300" {...props} />),
                   li: ({ node, ...props }) => (<li className="text-xs text-slate-300 leading-relaxed" {...props} />),
-                  hr: ({ node, ...props }) => (<hr className="border-t border-white/5 my-4" {...props} />),
-                  code: ({ node, ...props }) => (<code className="bg-white/10 px-1 py-0.5 rounded font-mono text-[10.5px] text-cyan-200 font-bold" {...props} />),
+                  hr: ({ node, ...props }) => (<hr className="border-t border-white/10 my-6" {...props} />),
+                  code: ({ node, className, ...props }) => {
+                    const isInline = !className;
+                    return isInline ? (
+                      <code className="bg-white/10 px-1.5 py-0.5 rounded font-mono text-[10.5px] text-cyan-200 font-bold" {...props} />
+                    ) : (
+                      <code className="block bg-black/30 border border-white/10 rounded-lg p-3 my-3 font-mono text-[11px] text-cyan-200 overflow-x-auto" {...props} />
+                    );
+                  },
                   img: ({ node, src, alt, ...props }) => src ? (<img src={src} alt={alt} className="max-w-full h-auto rounded-lg border border-white/10 my-4 shadow-lg" {...props} />) : null,
                   table: ({ node, ...props }) => (<table className="w-full border-collapse my-4 text-xs" {...props} />),
                   thead: ({ node, ...props }) => (<thead className="bg-cyan-500/10" {...props} />),
@@ -4418,7 +4473,7 @@ ${challenge.options ? `* 可选游戏决策卡:\n   ${challenge.options.map((opt
                   tr: ({ node, ...props }) => (<tr className="border-b border-white/10 hover:bg-white/5 transition" {...props} />),
                   th: ({ node, ...props }) => (<th className="text-left px-3 py-2 text-cyan-300 font-semibold border-r border-white/5 last:border-r-0" {...props} />),
                   td: ({ node, ...props }) => (<td className="px-3 py-2 text-slate-300 border-r border-white/5 last:border-r-0 align-top" {...props} />),
-                }}>{previewContent}</ReactMarkdown>
+                }}>{styleGuideDemo}</ReactMarkdown>
               </div>
             </div>
           </div>
