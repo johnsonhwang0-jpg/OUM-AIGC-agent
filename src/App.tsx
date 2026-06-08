@@ -3236,32 +3236,6 @@ API地址：https://api.deepseek.com/chat/completions`}
                           }}>{activeModuleId && extractingModuleId === activeModuleId ? "⏳ 正在从 PDF 提取内容..." : (extractedContent || "请点击左侧列表选择章节查看原文")}</ReactMarkdown>
                         </div>
                       
-                      {/* 显示提取的图片 */}
-                      {extractedImages.length > 0 && (
-                        <div className="mt-6">
-                          <h4 className="text-xs font-semibold text-slate-400 mb-3 flex items-center gap-2">
-                            <ImageIcon className="w-3.5 h-3.5" />
-                            提取的图片 ({extractedImages.length})
-                          </h4>
-                          <div className="grid grid-cols-2 gap-3">
-                            {extractedImages.map((img, idx) => (
-                              <div key={idx} className="relative group">
-                                <img
-                                  src={img.url}
-                                  alt={img.filename}
-                                  className="w-full h-auto rounded-lg border border-white/10 shadow-lg transition-transform group-hover:scale-[1.02]"
-                                  onError={(e) => {
-                                    (e.target as HTMLImageElement).style.display = 'none';
-                                  }}
-                                />
-                                <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[10px] text-white px-2 py-1 rounded-b-lg opacity-0 group-hover:opacity-100 transition-opacity">
-                                  {img.filename}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                       {activeModule && (
                       <div className="p-3.5 bg-cyan-500/5 rounded-xl border border-cyan-500/10 flex items-start gap-2.5 mt-4">
                         <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
@@ -3559,28 +3533,6 @@ API地址：https://api.deepseek.com/chat/completions`}
                               {activeModuleId && extractingModuleId === activeModuleId ? "⏳ 正在提取..." : (extractedContent || "暂无原文内容")}
                             </ReactMarkdown>
                           </div>
-                          
-                          {/* 移动端显示提取的图片 */}
-                          {extractedImages.length > 0 && (
-                            <div className="mt-3">
-                              <span className="text-cyan-400 font-bold block text-[10px] uppercase tracking-wider mb-2">
-                                🖼️ 提取的图片 ({extractedImages.length})
-                              </span>
-                              <div className="grid grid-cols-2 gap-2">
-                                {extractedImages.map((img, idx) => (
-                                  <img
-                                    key={idx}
-                                    src={img.url}
-                                    alt={img.filename}
-                                    className="w-full h-auto rounded-lg border border-white/10"
-                                    onError={(e) => {
-                                      (e.target as HTMLImageElement).style.display = 'none';
-                                    }}
-                                  />
-                                ))}
-                              </div>
-                            </div>
-                          )}
                         </div>
                       </div>
 

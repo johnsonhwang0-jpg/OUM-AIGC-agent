@@ -842,12 +842,19 @@ export async function getExtractedTextForModuleAsync(
           // 对后端返回的内容进行页眉页脚过滤和格式化
           const lines = page.content.split("\n");
           const formattedLines = filterAndFormatLines(lines, directoryItems);
-          mdOutput += formattedLines + "\n\n";
+          mdOutput += formattedLines;
           
-          // 收集图片信息
+          // 将图片内嵌到对应页的原文内容中
           if (page.images && page.images.length > 0) {
-            allImages.push(...page.images);
+            mdOutput += "\n\n";
+            for (const img of page.images) {
+              allImages.push(img);
+              // 插入图片的 Markdown 语法
+              mdOutput += `![${img.filename}](${img.url})\n\n`;
+            }
           }
+          
+          mdOutput += "\n\n";
         }
         return { mappedPages, extractedOriginalText: mdOutput, extractedImages: allImages.length > 0 ? allImages : undefined };
       }
