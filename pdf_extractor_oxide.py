@@ -979,24 +979,34 @@ def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int,
             'images': []
         }
         
-        # 收集图片信息
+        # 收集图片信息 - 使用 PyMuPDF 提取图片
         if image_output_dir:
             os.makedirs(image_output_dir, exist_ok=True)
             try:
-                page_images = doc.extract_images(page_num)
-                for idx, img in enumerate(page_images):
-                    img_data = img.get('data')
-                    if img_data:
-                        img_filename = f"page{page_num + 1}_img{idx + 1}.{img.get('format', 'png').lower()}"
-                        img_path = os.path.join(image_output_dir, img_filename)
-                        with open(img_path, 'wb') as f:
-                            f.write(img_data)
-                        page_info['images'].append({
-                            'filename': img_filename,
-                            'path': img_path,
-                            'width': img.get('width'),
-                            'height': img.get('height')
-                        })
+                fitz_page = fitz_doc[page_num]
+                image_list = fitz_page.get_images(full=True)
+                for idx, img_info in enumerate(image_list):
+                    xref = img_info[0]
+                    try:
+                        base_image = fitz_doc.extract_image(xref)
+                        if base_image:
+                            img_data = base_image["image"]
+                            img_ext = base_image["ext"]
+                            img_width = base_image.get("width", 0)
+                            img_height = base_image.get("height", 0)
+                            
+                            img_filename = f"page{page_num + 1}_img{idx + 1}.{img_ext}"
+                            img_path = os.path.join(image_output_dir, img_filename)
+                            with open(img_path, 'wb') as f:
+                                f.write(img_data)
+                            page_info['images'].append({
+                                'filename': img_filename,
+                                'path': img_path,
+                                'width': img_width,
+                                'height': img_height
+                            })
+                    except Exception as img_err:
+                        print(f"Warning: Failed to extract image {idx + 1} from page {page_num + 1}: {img_err}", file=sys.stderr)
             except Exception as e:
                 print(f"Warning: Image extraction failed for page {page_num + 1}: {e}", file=sys.stderr)
         
