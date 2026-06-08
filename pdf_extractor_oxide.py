@@ -200,12 +200,54 @@ def split_multiple_headings(text: str) -> list:
     return results
 
 
+def is_title_text_without_number(text: str) -> bool:
+    """检查是否是标题文本但没有数字前缀
+    例如: "Software Requirements and Requirements Engineering"
+    特征：大写字母开头，没有句号结尾，不包含数字编号
+    排除：包含 "Topic" 的行（通常是 TOC 标题）
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    # 不以数字开头
+    if re.match(r'^\d', stripped):
+        return False
+    # 不以 # 开头（不是 Markdown 标题）
+    if stripped.startswith('#'):
+        return False
+    # 不以标点结尾
+    if re.search(r'[.!?;:]$', stripped):
+        return False
+    # 排除包含 "Topic" 的行（通常是 TOC 标题，不是章节标题）
+    if 'topic' in stripped.lower():
+        return False
+    # 包含多个大写字母开头的单词（标题特征）
+    words = stripped.split()
+    if len(words) >= 2:
+        capitalized_count = sum(1 for w in words if w[0].isupper())
+        if capitalized_count >= 2:
+            return True
+    return False
+
+
+def extract_number_from_line(text: str) -> str:
+    """从行中提取第一个数字编号（如 "1.1"）
+    例如: "**1** 1.1  1.1.1 Software Requirements" -> "1.1"
+    """
+    # 匹配 "数字.数字" 模式
+    match = re.search(r'\b(\d+\.\d+)\b', text)
+    if match:
+        return match.group(1)
+    return None
+
+
 def fix_headings_and_paragraphs(md_content: str) -> str:
     """修复标题和段落格式：
     1. 将 **1.1.2** **Title** 转换为 ### 1.1.2 Title
     2. 合并断裂的标题行
     3. 分割同一行中的多个标题
     4. 修复段落合并问题
+    5. 合并标题文本和数字编号（如 "Software Requirements..." + "1.1" -> "## 1.1 Software Requirements..."）
     """
     lines = md_content.split('\n')
     result = []
@@ -248,7 +290,26 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
             i += 1
             continue
         
-        # 2. 检查是否是断裂的标题行（需要合并）
+        # 2. 检查是否是标题文本但没有数字前缀（需要与下一行合并）
+        if is_title_text_without_number(stripped):
+            # 跳过空行，找下一行非空内容
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j < len(lines):
+                next_line = lines[j].strip()
+                # 检查下一行是否包含数字编号
+                number = extract_number_from_line(next_line)
+                if number:
+                    # 合并：数字编号 + 标题文本
+                    dots = number.count('.')
+                    level = min(dots + 1, 4)
+                    prefix = '#' * level
+                    result.append(f"{prefix} {number} {stripped}")
+                    i = j + 1
+                    continue
+        
+        # 3. 检查是否是断裂的标题行（需要合并）
         if is_heading_fragment(stripped):
             # 跳过空行，找下一行非空内容
             j = i + 1
@@ -293,7 +354,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                         i = j + 1
                         continue
         
-        # 3. 处理普通行：修复段落合并
+        # 4. 处理普通行：修复段落合并
         # 如果当前行以连字符结尾（表示单词被断开），与下一行连接
         if stripped.endswith('-') and i + 1 < len(lines):
             next_stripped = lines[i + 1].strip()
@@ -303,7 +364,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                 i += 2
                 continue
         
-        # 4. 如果当前行不以标点结尾，且下一行是小写开头，可能是同一段落
+        # 5. 如果当前行不以标点结尾，且下一行是小写开头，可能是同一段落
         if (not re.search(r'[.!?;:]$', stripped) and 
             not stripped.endswith('-') and
             i + 1 < len(lines)):
