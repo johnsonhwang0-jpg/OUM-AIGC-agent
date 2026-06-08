@@ -269,6 +269,14 @@ def is_bold_number_only(text: str) -> str:
     return None
 
 
+def split_merged_paragraphs(text: str) -> str:
+    """分割被错误合并的段落（PDF 提取时多个段落被合并成一行，用双空格分隔）"""
+    # 匹配模式：句号/问号/感叹号 + 双空格 + 大写字母开头的新句子
+    # 例如: "...methods.   Teaching English..." -> "...methods.\n\nTeaching English..."
+    text = re.sub(r'([.!?])\s{2,}([A-Z])', r'\1\n\n\2', text)
+    return text
+
+
 def fix_headings_and_paragraphs(md_content: str) -> str:
     """修复标题和段落格式：
     1. 将 **1.1.2** **Title** 转换为 ### 1.1.2 Title
@@ -278,6 +286,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
     5. 合并标题文本和数字编号（如 "Software Requirements..." + "1.1" -> "## 1.1 Software Requirements..."）
     6. 合并 Markdown 标题和加粗编号（如 "## SOFTWARE REQUIREMENTS AND" + "**1.1 REQUIREMENTS ENGINEERING**" -> "## 1.1 SOFTWARE REQUIREMENTS AND REQUIREMENTS ENGINEERING"）
     7. 合并多段 Markdown 标题 + 中间加粗数字（如 "## BACKGROUND OF TEACHING YOUNG" + "**1.1**" + "## LEARNERS:..." + "## CHILDREN"）
+    8. 分割被错误合并的段落（双空格分隔的多个段落）
     """
     lines = md_content.split('\n')
     result = []
@@ -343,6 +352,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                         # 合并
                         merged_text = heading_text + ' ' + fragment_text
                         result.append(f"{prefix} {merged_text}")
+                        result.append('')  # 保留标题后的空行
                         i = j + 1
                         continue
             
@@ -382,6 +392,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                             # 合并：数字编号 + 标题文本 + 加粗标题文本
                             merged_text = f"{bold_number} {title_text} {bold_title}"
                             result.append(f"{level_prefix} {merged_text}")
+                            result.append('')  # 保留标题后的空行
                             i = j + 1
                             continue
                     
@@ -392,13 +403,11 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                         heading_parts = [title_text]
                         k = j + 1
                         while k < len(lines):
-                            # 跳过空行
-                            while k < len(lines) and not lines[k].strip():
-                                k += 1
-                            if k >= len(lines):
-                                break
-                            
                             next_line2 = lines[k].strip()
+                            # 如果是空行，跳过继续查找
+                            if not next_line2:
+                                k += 1
+                                continue
                             # 检查是否是 Markdown 标题
                             if next_line2.startswith('#'):
                                 heading_match2 = re.match(r'^(#+)\s*(.+)$', next_line2)
@@ -412,6 +421,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                         # 合并所有标题片段
                         merged_text = f"{bold_number_only} {' '.join(heading_parts)}"
                         result.append(f"{level_prefix} {merged_text}")
+                        result.append('')  # 保留标题后的空行
                         i = k
                         continue
         
@@ -431,6 +441,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                     level = min(dots + 1, 4)
                     prefix = '#' * level
                     result.append(f"{prefix} {number} {stripped}")
+                    result.append('')  # 保留标题后的空行
                     i = j + 1
                     continue
         
@@ -506,7 +517,10 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
         result.append(line)
         i += 1
     
-    return '\n'.join(result)
+    output = '\n'.join(result)
+    # 最后一步：分割被错误合并的段落
+    output = split_merged_paragraphs(output)
+    return output
 
 
 def filter_markdown_content(md_content: str, toc_titles: set) -> str:
