@@ -737,17 +737,20 @@ def clean_pymupdf_table(table) -> str:
     md_lines.append("|" + "|".join(header_cells) + "|")
     md_lines.append("|" + "|".join(["---"] * len(content_cols)) + "|")
     
-    # 处理数据行
+    # 处理数据行：填充合并单元格的空值
+    prev_values = [""] * len(content_cols)
     for row_idx in range(1, len(data)):
         row = data[row_idx]
         cells = []
-        for col_idx in content_cols:
+        for i, col_idx in enumerate(content_cols):
             cell = row[col_idx] if col_idx < len(row) else None
-            if cell is None:
-                cells.append("")
+            if cell is None or not cell.strip():
+                # 空单元格：使用前一行的值（合并单元格）
+                cells.append(prev_values[i])
             else:
                 cleaned = cell.strip()
                 cells.append(cleaned)
+                prev_values[i] = cleaned
         
         # 跳过全空的行
         if all(not c for c in cells):

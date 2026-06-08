@@ -3159,6 +3159,12 @@ API地址：https://api.deepseek.com/chat/completions`}
                             hr: ({ node, ...props }) => (<hr className="border-t border-white/5 my-4" {...props} />),
                             code: ({ node, ...props }) => (<code className="bg-white/10 px-1 py-0.5 rounded font-mono text-[10.5px] text-cyan-200 font-bold" {...props} />),
                             img: ({ node, src, alt, ...props }) => src ? (<img src={src} alt={alt} className="max-w-full h-auto rounded-lg border border-white/10 my-4 shadow-lg" {...props} />) : null,
+                            table: ({ node, ...props }) => (<table className="w-full border-collapse my-4 text-xs" {...props} />),
+                            thead: ({ node, ...props }) => (<thead className="bg-cyan-500/10" {...props} />),
+                            tbody: ({ node, ...props }) => (<tbody {...props} />),
+                            tr: ({ node, ...props }) => (<tr className="border-b border-white/10 hover:bg-white/5 transition" {...props} />),
+                            th: ({ node, ...props }) => (<th className="text-left px-3 py-2 text-cyan-300 font-semibold border-r border-white/5 last:border-r-0" {...props} />),
+                            td: ({ node, ...props }) => (<td className="px-3 py-2 text-slate-300 border-r border-white/5 last:border-r-0 align-top" {...props} />),
                           }}>{activeModuleId && extractingModuleId === activeModuleId ? "⏳ 正在从 PDF 提取内容..." : (extractedContent || "请点击左侧列表选择章节查看原文")}</ReactMarkdown>
                         </div>
                       
