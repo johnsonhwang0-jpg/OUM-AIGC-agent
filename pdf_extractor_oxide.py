@@ -996,7 +996,9 @@ def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int,
                             img_height = base_image.get("height", 0)
                             
                             # 检查图片区域是否有文字（通过图片的边界框）
-                            has_text = False
+                            # 如果图片区域有文字覆盖，说明是装饰性背景图，跳过
+                            # 如果图片区域没有文字，说明图片本身承载信息，保留
+                            is_decorative = False
                             try:
                                 # 获取图片在页面上的位置信息
                                 img_rects = fitz_page.get_image_rects(xref)
@@ -1010,18 +1012,18 @@ def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int,
                                             for line in block.get("lines", []):
                                                 for span in line.get("spans", []):
                                                     if span.get("text", "").strip():
-                                                        has_text = True
+                                                        is_decorative = True
                                                         break
-                                                if has_text:
+                                                if is_decorative:
                                                     break
-                                        if has_text:
+                                        if is_decorative:
                                             break
                             except Exception:
                                 # 如果无法获取图片位置，默认保留图片
-                                has_text = True
+                                is_decorative = False
                             
-                            # 只保留包含文字的图片
-                            if has_text:
+                            # 只保留非装饰性图片（图片区域内无文字）
+                            if not is_decorative:
                                 img_filename = f"page{page_num + 1}_img{idx + 1}.{img_ext}"
                                 img_path = os.path.join(image_output_dir, img_filename)
                                 with open(img_path, 'wb') as f:
