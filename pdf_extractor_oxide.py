@@ -241,6 +241,23 @@ def extract_number_from_line(text: str) -> str:
     return None
 
 
+def is_bold_number_heading(text: str) -> tuple:
+    """检查是否是加粗的数字编号标题
+    例如: "**1.1 REQUIREMENTS ENGINEERING**"
+    返回 (level, heading_text) 或 None
+    """
+    stripped = text.strip()
+    # 匹配 **数字.数字 文本** 模式
+    m = re.match(r'^\*{1,2}\s*(\d+\.\d+(?:\.\d+)*)\s+(.+?)\s*\*{1,2}$', stripped)
+    if m:
+        num_part = m.group(1)
+        title_part = m.group(2)
+        dots = num_part.count('.')
+        level = min(dots + 1, 4)
+        return (level, f"{num_part} {title_part}")
+    return None
+
+
 def fix_headings_and_paragraphs(md_content: str) -> str:
     """修复标题和段落格式：
     1. 将 **1.1.2** **Title** 转换为 ### 1.1.2 Title
@@ -248,6 +265,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
     3. 分割同一行中的多个标题
     4. 修复段落合并问题
     5. 合并标题文本和数字编号（如 "Software Requirements..." + "1.1" -> "## 1.1 Software Requirements..."）
+    6. 合并 Markdown 标题和加粗编号（如 "## SOFTWARE REQUIREMENTS AND" + "**1.1 REQUIREMENTS ENGINEERING**" -> "## 1.1 SOFTWARE REQUIREMENTS AND REQUIREMENTS ENGINEERING"）
     """
     lines = md_content.split('\n')
     result = []
@@ -290,7 +308,39 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
             i += 1
             continue
         
-        # 2. 检查是否是标题文本但没有数字前缀（需要与下一行合并）
+        # 2. 检查是否是 Markdown 标题 + 加粗编号的组合
+        # 例如: "## SOFTWARE REQUIREMENTS AND" + "**1.1 REQUIREMENTS ENGINEERING**"
+        # 合并成: "## 1.1 SOFTWARE REQUIREMENTS AND REQUIREMENTS ENGINEERING"
+        if stripped.startswith('#'):
+            # 提取标题级别和文本
+            heading_match = re.match(r'^(#+)\s*(.+)$', stripped)
+            if heading_match:
+                level_prefix = heading_match.group(1)
+                title_text = heading_match.group(2).strip()
+                
+                # 跳过空行，找下一行非空内容
+                j = i + 1
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                if j < len(lines):
+                    next_line = lines[j].strip()
+                    # 检查下一行是否是加粗的数字编号标题
+                    bold_match = is_bold_number_heading(next_line)
+                    if bold_match:
+                        bold_level, bold_text = bold_match
+                        # bold_text 格式: "1.1 REQUIREMENTS ENGINEERING"
+                        # 提取数字编号和标题文本
+                        bold_parts = bold_text.split(' ', 1)
+                        if len(bold_parts) == 2:
+                            bold_number = bold_parts[0]  # "1.1"
+                            bold_title = bold_parts[1]   # "REQUIREMENTS ENGINEERING"
+                            # 合并：数字编号 + 标题文本 + 加粗标题文本
+                            merged_text = f"{bold_number} {title_text} {bold_title}"
+                            result.append(f"{level_prefix} {merged_text}")
+                            i = j + 1
+                            continue
+        
+        # 3. 检查是否是标题文本但没有数字前缀（需要与下一行合并）
         if is_title_text_without_number(stripped):
             # 跳过空行，找下一行非空内容
             j = i + 1
@@ -309,7 +359,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                     i = j + 1
                     continue
         
-        # 3. 检查是否是断裂的标题行（需要合并）
+        # 4. 检查是否是断裂的标题行（需要合并）
         if is_heading_fragment(stripped):
             # 跳过空行，找下一行非空内容
             j = i + 1
@@ -354,7 +404,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                         i = j + 1
                         continue
         
-        # 4. 处理普通行：修复段落合并
+        # 5. 处理普通行：修复段落合并
         # 如果当前行以连字符结尾（表示单词被断开），与下一行连接
         if stripped.endswith('-') and i + 1 < len(lines):
             next_stripped = lines[i + 1].strip()
@@ -364,7 +414,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
                 i += 2
                 continue
         
-        # 5. 如果当前行不以标点结尾，且下一行是小写开头，可能是同一段落
+        # 6. 如果当前行不以标点结尾，且下一行是小写开头，可能是同一段落
         if (not re.search(r'[.!?;:]$', stripped) and 
             not stripped.endswith('-') and
             i + 1 < len(lines)):
