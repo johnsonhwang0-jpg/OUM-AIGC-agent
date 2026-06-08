@@ -133,6 +133,20 @@ def is_header_footer_line(text: str, toc_titles: set) -> bool:
     return False
 
 
+def is_page_number_line(text: str) -> bool:
+    """检查是否是单独的页码行（如 **2**、** 3**、**4** 等）"""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    # 匹配 Markdown 加粗的单独数字：**2**、** 3**、**4**、** 5 **
+    if re.match(r'^\*{1,2}\s*\d{1,4}\s*\*{1,2}$', stripped):
+        return True
+    # 匹配纯数字（很短的）
+    if re.match(r'^\d{1,4}$', stripped) and len(stripped) <= 4:
+        return True
+    return False
+
+
 def filter_markdown_content(md_content: str, toc_titles: set) -> str:
     """过滤 Markdown 内容中的页眉页脚行"""
     lines = md_content.split('\n')
@@ -144,6 +158,10 @@ def filter_markdown_content(md_content: str, toc_titles: set) -> str:
         # 空行保留
         if not stripped:
             filtered.append('')
+            continue
+        
+        # 过滤单独的页码行（**2**、** 3** 等）
+        if is_page_number_line(stripped):
             continue
         
         # Markdown 标题行（# ## ### 等）需要特殊处理
