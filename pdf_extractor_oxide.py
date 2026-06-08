@@ -147,6 +147,182 @@ def is_page_number_line(text: str) -> bool:
     return False
 
 
+def is_bold_heading_pattern(text: str) -> tuple:
+    """检查是否是加粗的标题模式（如 **1.1.2** **Development of Morality**）
+    返回 (level, heading_text) 或 None
+    """
+    stripped = text.strip()
+    # 匹配 **数字** **标题文本** 或 **数字.数字** **标题文本**
+    m = re.match(r'^\*{1,2}\s*(\d+(?:\.\d+)*)\s*\*{1,2}\s+\*{1,2}\s*(.+?)\s*\*{1,2}$', stripped)
+    if m:
+        num_part = m.group(1)
+        title_part = m.group(2)
+        # 根据数字层级判断标题级别
+        dots = num_part.count('.')
+        level = min(dots + 1, 4)  # 1.1.1 -> 3级, 1.1 -> 2级, 1 -> 1级
+        return (level, f"{num_part} {title_part}")
+    return None
+
+
+def is_heading_fragment(text: str) -> bool:
+    """检查是否是标题的片段（没有标点结尾，且包含标题关键词）"""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    # 以数字开头（如 1.1 Background...）
+    if re.match(r'^\d+\.\d+', stripped):
+        # 如果结尾没有句号、问号、感叹号，可能是片段
+        if not re.search(r'[.!?]$', stripped):
+            return True
+    return False
+
+
+def split_multiple_headings(text: str) -> list:
+    """将同一行中的多个标题分割成独立的标题行
+    例如: "Text  1.1.1 Title  1.1.2 Title" -> ["1.1.1 Title", "1.1.2 Title"]
+    """
+    # 匹配 "数字.数字.数字" 后跟标题文本的模式
+    pattern = r'(\d+\.\d+(?:\.\d+)*)\s+([A-Z][^\d]*(?=\s+\d+\.\d+|$))'
+    matches = list(re.finditer(pattern, text))
+    
+    if len(matches) < 2:
+        return None  # 不是多个标题
+    
+    results = []
+    for match in matches:
+        num_part = match.group(1)
+        title_part = match.group(2).strip()
+        dots = num_part.count('.')
+        level = min(dots + 1, 4)
+        prefix = '#' * level
+        results.append(f"{prefix} {num_part} {title_part}")
+    
+    return results
+
+
+def fix_headings_and_paragraphs(md_content: str) -> str:
+    """修复标题和段落格式：
+    1. 将 **1.1.2** **Title** 转换为 ### 1.1.2 Title
+    2. 合并断裂的标题行
+    3. 分割同一行中的多个标题
+    4. 修复段落合并问题
+    """
+    lines = md_content.split('\n')
+    result = []
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        
+        # 跳过空行
+        if not stripped:
+            result.append('')
+            i += 1
+            continue
+        
+        # 0. 先处理同一行中的多个标题（如 "Text  1.1.1 Title  1.1.2 Title"）
+        split_result = split_multiple_headings(stripped)
+        if split_result and not stripped.startswith('#'):
+            # 检查是否有前缀文本（如 "Approaches in Teaching English to Children"）
+            first_match = re.search(r'(\d+\.\d+(?:\.\d+)*)', stripped)
+            if first_match:
+                prefix_text = stripped[:first_match.start()].strip()
+                if prefix_text:
+                    # 前缀文本需要与前一行合并
+                    if result and result[-1] and not result[-1].startswith('#'):
+                        result[-1] = result[-1] + ' ' + prefix_text
+                    else:
+                        result.append(prefix_text)
+            # 添加分割后的标题
+            result.extend(split_result)
+            i += 1
+            continue
+        
+        # 1. 检查是否是加粗标题模式 **1.1.2** **Title**
+        heading_match = is_bold_heading_pattern(stripped)
+        if heading_match:
+            level, heading_text = heading_match
+            prefix = '#' * level
+            result.append(f"{prefix} {heading_text}")
+            i += 1
+            continue
+        
+        # 2. 检查是否是断裂的标题行（需要合并）
+        if is_heading_fragment(stripped):
+            # 跳过空行，找下一行非空内容
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j < len(lines):
+                next_line = lines[j].strip()
+                # 如果下一行不是标题、不是新段落开头
+                if next_line and not next_line.startswith('#') and not re.match(r'^\d+\.\d+', next_line):
+                    # 合并当前行和下一行
+                    merged = stripped + ' ' + next_line
+                    # 检查合并后是否包含多个标题
+                    split_result = split_multiple_headings(merged)
+                    if split_result:
+                        result.extend(split_result)
+                        i = j + 1
+                        continue
+                    # 检查合并后是否还是片段
+                    if not re.search(r'[.!?]$', merged):
+                        # 继续查找后续片段
+                        k = j + 1
+                        while k < len(lines) and not lines[k].strip():
+                            k += 1
+                        if k < len(lines):
+                            next_next = lines[k].strip()
+                            if next_next and not next_next.startswith('#') and not re.match(r'^\d+\.\d+', next_next):
+                                merged = merged + ' ' + next_next
+                                # 再次检查是否包含多个标题
+                                split_result = split_multiple_headings(merged)
+                                if split_result:
+                                    result.extend(split_result)
+                                    i = k + 1
+                                    continue
+                                result.append(merged)
+                                i = k + 1
+                                continue
+                        result.append(merged)
+                        i = j + 1
+                        continue
+                    else:
+                        result.append(merged)
+                        i = j + 1
+                        continue
+        
+        # 3. 处理普通行：修复段落合并
+        # 如果当前行以连字符结尾（表示单词被断开），与下一行连接
+        if stripped.endswith('-') and i + 1 < len(lines):
+            next_stripped = lines[i + 1].strip()
+            if next_stripped and not next_stripped.startswith('#'):
+                # 去掉连字符，直接连接
+                result.append(stripped[:-1] + next_stripped)
+                i += 2
+                continue
+        
+        # 4. 如果当前行不以标点结尾，且下一行是小写开头，可能是同一段落
+        if (not re.search(r'[.!?;:]$', stripped) and 
+            not stripped.endswith('-') and
+            i + 1 < len(lines)):
+            next_stripped = lines[i + 1].strip()
+            if (next_stripped and 
+                not next_stripped.startswith('#') and
+                not re.match(r'^\d+\.\d+', next_stripped) and
+                re.match(r'^[a-z]', next_stripped)):
+                # 合并为同一段落
+                result.append(stripped + ' ' + next_stripped)
+                i += 2
+                continue
+        
+        result.append(line)
+        i += 1
+    
+    return '\n'.join(result)
+
+
 def filter_markdown_content(md_content: str, toc_titles: set) -> str:
     """过滤 Markdown 内容中的页眉页脚行"""
     lines = md_content.split('\n')
@@ -162,6 +338,11 @@ def filter_markdown_content(md_content: str, toc_titles: set) -> str:
         
         # 过滤单独的页码行（**2**、** 3** 等）
         if is_page_number_line(stripped):
+            continue
+        
+        # 过滤加粗标题模式（会在后续 fix_headings_and_paragraphs 中处理）
+        if is_bold_heading_pattern(stripped):
+            filtered.append(line)
             continue
         
         # Markdown 标题行（# ## ### 等）需要特殊处理
@@ -203,9 +384,12 @@ def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int,
         # 后处理：过滤页眉页脚
         filtered_content = filter_markdown_content(md_content, toc_titles)
         
+        # 后处理：修复标题和段落格式
+        fixed_content = fix_headings_and_paragraphs(filtered_content)
+        
         page_info = {
             'pageNum': page_num + 1,
-            'content': filtered_content,
+            'content': fixed_content,
             'images': []
         }
         
