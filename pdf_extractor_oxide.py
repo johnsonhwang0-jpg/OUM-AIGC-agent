@@ -995,16 +995,43 @@ def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int,
                             img_width = base_image.get("width", 0)
                             img_height = base_image.get("height", 0)
                             
-                            img_filename = f"page{page_num + 1}_img{idx + 1}.{img_ext}"
-                            img_path = os.path.join(image_output_dir, img_filename)
-                            with open(img_path, 'wb') as f:
-                                f.write(img_data)
-                            page_info['images'].append({
-                                'filename': img_filename,
-                                'path': img_path,
-                                'width': img_width,
-                                'height': img_height
-                            })
+                            # 检查图片区域是否有文字（通过图片的边界框）
+                            has_text = False
+                            try:
+                                # 获取图片在页面上的位置信息
+                                img_rects = fitz_page.get_image_rects(xref)
+                                if img_rects:
+                                    # 取第一个矩形作为图片区域
+                                    rect = img_rects[0]
+                                    # 检查该区域内是否有文字
+                                    text_dict = fitz_page.get_text("dict", clip=rect)
+                                    for block in text_dict.get("blocks", []):
+                                        if block.get("type") == 0:  # 文字块
+                                            for line in block.get("lines", []):
+                                                for span in line.get("spans", []):
+                                                    if span.get("text", "").strip():
+                                                        has_text = True
+                                                        break
+                                                if has_text:
+                                                    break
+                                        if has_text:
+                                            break
+                            except Exception:
+                                # 如果无法获取图片位置，默认保留图片
+                                has_text = True
+                            
+                            # 只保留包含文字的图片
+                            if has_text:
+                                img_filename = f"page{page_num + 1}_img{idx + 1}.{img_ext}"
+                                img_path = os.path.join(image_output_dir, img_filename)
+                                with open(img_path, 'wb') as f:
+                                    f.write(img_data)
+                                page_info['images'].append({
+                                    'filename': img_filename,
+                                    'path': img_path,
+                                    'width': img_width,
+                                    'height': img_height
+                                })
                     except Exception as img_err:
                         print(f"Warning: Failed to extract image {idx + 1} from page {page_num + 1}: {img_err}", file=sys.stderr)
             except Exception as e:
