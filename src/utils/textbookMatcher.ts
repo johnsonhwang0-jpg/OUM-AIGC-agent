@@ -638,8 +638,60 @@ function calculatePageRange(
 
 /**
  * 对后端提取的纯文本进行页眉页脚过滤和格式化处理
+ * 支持两种模式：
+ * 1. pdf_oxide 模式：输入已包含 Markdown 格式（# ## ### 标题），只过滤页眉页脚
+ * 2. 旧版 PyMuPDF 模式：输入为纯文本，需要智能格式化
  */
 function filterAndFormatLines(lines: string[], directoryItems?: DirectoryItem[]): string {
+  // 检测是否为 pdf_oxide 输出（包含 Markdown 标题标记）
+  const hasMarkdownHeadings = lines.some(line => /^#{1,6}\s/.test(line.trim()));
+
+  if (hasMarkdownHeadings) {
+    // pdf_oxide 模式：只过滤页眉页脚，保留 Markdown 格式
+    const filteredLines: string[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      // 空行保留
+      if (!trimmed) {
+        filteredLines.push('');
+        continue;
+      }
+      // Markdown 标题行保留（# ## ### #### 等）
+      if (/^#{1,6}\s/.test(trimmed)) {
+        filteredLines.push(line);
+        continue;
+      }
+      // Markdown 列表项保留（- * 1. 等）
+      if (/^[-*]\s/.test(trimmed) || /^\d+\.\s/.test(trimmed)) {
+        filteredLines.push(line);
+        continue;
+      }
+      // Markdown 表格行保留
+      if (/^\|/.test(trimmed)) {
+        filteredLines.push(line);
+        continue;
+      }
+      // 跳过纯页码
+      if (/^[•\-]?\s*\d+\s*[•\-]?$/.test(trimmed)) continue;
+      if (/^(?:第\s*\d+\s*页|page\s*\d+|\b\d+\s*[-—]\s*页\b)/i.test(trimmed)) continue;
+      // 跳过页脚标记
+      if (/(?:出版社|Publishing|Copyright|All\s+rights\s+reserved|版权所有|©)/i.test(trimmed) && trimmed.length < 80) continue;
+      if (/(?:www\.|http:\/\/|https:\/\/)/i.test(trimmed) && trimmed.length < 80) continue;
+      if (/(?:ISBN|ISSN)\s*[\d\-]+/i.test(trimmed) && trimmed.length < 80) continue;
+      // 跳过典型页眉（如 "Topic 1  xxx  5" 格式）
+      if (/^(?:Topic|Chapter|Unit|Section)\s+\d+\s+[A-Z\s]+\d{1,3}$/i.test(trimmed)) continue;
+      // 跳过单独的页码数字（如果它很短且是纯数字）
+      if (/^\d{1,3}$/.test(trimmed) && trimmed.length <= 3) continue;
+
+      // 其他内容保留
+      filteredLines.push(line);
+    }
+
+    return filteredLines.join('\n').trim() || "*(经过智能降噪过滤，未包含非考点核心文本)*";
+  }
+
+  // 旧版 PyMuPDF 纯文本模式：使用原有逻辑
   // 从目录中提取 Topic 名称
   const topicNames: string[] = [];
   if (Array.isArray(directoryItems)) {
