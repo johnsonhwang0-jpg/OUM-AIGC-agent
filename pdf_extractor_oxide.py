@@ -320,6 +320,37 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
             i += 1
             continue
         
+        # 1.5 检查是否是加粗数字编号标题（如 **1.1.1 Emotional Development: Action, Communication**）
+        # 并检查后续是否有 Markdown 标题片段需要合并
+        bold_heading_match = is_bold_number_heading(stripped)
+        if bold_heading_match:
+            level, heading_text = bold_heading_match
+            prefix = '#' * level
+            
+            # 跳过空行，找下一行非空内容
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            
+            if j < len(lines):
+                next_line = lines[j].strip()
+                # 检查下一行是否是同级别的 Markdown 标题片段
+                if next_line.startswith(prefix + ' '):
+                    # 提取片段文本
+                    fragment_match = re.match(r'^(#+)\s*(.+)$', next_line)
+                    if fragment_match:
+                        fragment_text = fragment_match.group(2).strip()
+                        # 合并
+                        merged_text = heading_text + ' ' + fragment_text
+                        result.append(f"{prefix} {merged_text}")
+                        i = j + 1
+                        continue
+            
+            # 没有后续片段，直接输出
+            result.append(f"{prefix} {heading_text}")
+            i += 1
+            continue
+        
         # 2. 检查是否是 Markdown 标题 + 加粗编号的组合
         # 模式 A: "## SOFTWARE REQUIREMENTS AND" + "**1.1 REQUIREMENTS ENGINEERING**"
         # 模式 B: "## BACKGROUND OF TEACHING YOUNG" + "**1.1**" + "## LEARNERS:..." + "## CHILDREN"
