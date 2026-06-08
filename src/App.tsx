@@ -4,7 +4,7 @@ import {
   MessageSquare, Send, RefreshCw, FileText, Settings, ArrowRight, Gamepad2, 
   CheckCircle2, XCircle, Compass, HelpCircle, Info, Download, Copy, AlertCircle, 
   Award, Trophy, ChevronRight, CornerDownRight, Volume2, Gamepad, Lock, Code2, Terminal,
-  Maximize2, Minimize2, X
+  Maximize2, Minimize2, X, Image as ImageIcon
 } from "lucide-react";
 
 // Error Boundary 组件 - 防止整个应用崩溃
@@ -43,7 +43,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError
 import { TEMPLATE_BOOKS } from "./data";
 import { 
   BookModule, BookBlueprint, GameScript, Message, GameSessionState, GameChallenge, GameType, DirectoryItem,
-  SummaryInfo, InfoDensity, CohesionDetail
+  SummaryInfo, InfoDensity, CohesionDetail, ExtractedImage
 } from "./types";
 import { parseTextToDirectory, serializeDirectoryToText } from "./utils/directoryParser";
 import { getExtractedTextForModule, getExtractedTextForModuleAsync, calculateAutoPageOffset } from "./utils/textbookMatcher";
@@ -147,8 +147,10 @@ export default function App() {
   const [scriptCopySuccess, setScriptCopySuccess] = useState<boolean>(false);
   const [recommendingId, setRecommendingId] = useState<string | null>(null);
   const [extractedContent, setExtractedContent] = useState<string>("");
+  const [extractedImages, setExtractedImages] = useState<ExtractedImage[]>([]);
   const [extractingModuleId, setExtractingModuleId] = useState<string | null>(null);
   const [extractedModules, setExtractedModules] = useState<Record<string, string>>({});
+  const [moduleImages, setModuleImages] = useState<Record<string, ExtractedImage[]>>({});
 
   // Step 4 States: UI Preference and App Generation
   const [uiTheme, setUiTheme] = useState<'minimal' | 'cyberpunk' | 'cartoon' | 'retro'>('minimal');
@@ -247,6 +249,11 @@ export default function App() {
             currentProjectId
           );
           setExtractedModules(prev => ({ ...prev, [mod.id]: result.extractedOriginalText }));
+          
+          // 保存图片信息
+          if (result.extractedImages && result.extractedImages.length > 0) {
+            setModuleImages(prev => ({ ...prev, [mod.id]: result.extractedImages! }));
+          }
 
           // 保存到数据库
           if (currentProjectId) {
@@ -268,14 +275,16 @@ export default function App() {
     extractAll();
   }, [activeStep, pdfData, modules, currentProjectId]);
 
-  // 当切换选中模块时，从缓存中读取原文内容
+  // 当切换选中模块时，从缓存中读取原文内容和图片
   useEffect(() => {
     if (activeModuleId && extractedModules[activeModuleId]) {
       setExtractedContent(extractedModules[activeModuleId]);
+      setExtractedImages(moduleImages[activeModuleId] || []);
     } else if (activeModuleId && !extractingModuleId) {
       setExtractedContent("⏳ 正在提取中...");
+      setExtractedImages([]);
     }
-  }, [activeModuleId, extractedModules, extractingModuleId]);
+  }, [activeModuleId, extractedModules, extractingModuleId, moduleImages]);
 
   // Load template helper
   const handleSelectTemplate = (id: string) => {
@@ -3088,6 +3097,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                           // 设置提取中状态
                           setExtractingModuleId(modId);
                           setExtractedContent("⏳ 正在重新提取...");
+                          setExtractedImages([]);
                           try {
                             const result = await getExtractedTextForModuleAsync(
                               activeModule, directoryItems, bookContentText,
@@ -3100,6 +3110,10 @@ API地址：https://api.deepseek.com/chat/completions`}
                             // 更新缓存和内容
                             setExtractedModules(prev => ({ ...prev, [modId]: result.extractedOriginalText }));
                             setExtractedContent(result.extractedOriginalText);
+                            if (result.extractedImages && result.extractedImages.length > 0) {
+                              setExtractedImages(result.extractedImages);
+                              setModuleImages(prev => ({ ...prev, [modId]: result.extractedImages! }));
+                            }
                             setExtractingModuleId(null);
                             // 保存到数据库
                             if (currentProjectId) {
@@ -3144,8 +3158,36 @@ API地址：https://api.deepseek.com/chat/completions`}
                             li: ({ node, ...props }) => (<li className="text-xs text-slate-300 leading-relaxed" {...props} />),
                             hr: ({ node, ...props }) => (<hr className="border-t border-white/5 my-4" {...props} />),
                             code: ({ node, ...props }) => (<code className="bg-white/10 px-1 py-0.5 rounded font-mono text-[10.5px] text-cyan-200 font-bold" {...props} />),
+                            img: ({ node, src, alt, ...props }) => (<img src={src} alt={alt} className="max-w-full h-auto rounded-lg border border-white/10 my-4 shadow-lg" {...props} />),
                           }}>{activeModuleId && extractingModuleId === activeModuleId ? "⏳ 正在从 PDF 提取内容..." : (extractedContent || "请点击左侧列表选择章节查看原文")}</ReactMarkdown>
                         </div>
+                      
+                      {/* 显示提取的图片 */}
+                      {extractedImages.length > 0 && (
+                        <div className="mt-6">
+                          <h4 className="text-xs font-semibold text-slate-400 mb-3 flex items-center gap-2">
+                            <ImageIcon className="w-3.5 h-3.5" />
+                            提取的图片 ({extractedImages.length})
+                          </h4>
+                          <div className="grid grid-cols-2 gap-3">
+                            {extractedImages.map((img, idx) => (
+                              <div key={idx} className="relative group">
+                                <img
+                                  src={img.url}
+                                  alt={img.filename}
+                                  className="w-full h-auto rounded-lg border border-white/10 shadow-lg transition-transform group-hover:scale-[1.02]"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                  }}
+                                />
+                                <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[10px] text-white px-2 py-1 rounded-b-lg opacity-0 group-hover:opacity-100 transition-opacity">
+                                  {img.filename}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {activeModule && (
                       <div className="p-3.5 bg-cyan-500/5 rounded-xl border border-cyan-500/10 flex items-start gap-2.5 mt-4">
                         <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
@@ -3425,11 +3467,36 @@ API地址：https://api.deepseek.com/chat/completions`}
                                 code: ({ node, ...props }) => (
                                   <code className="bg-white/10 px-1 py-0.5 rounded font-mono text-[9.5px] text-cyan-200" {...props} />
                                 ),
+                                img: ({ node, src, alt, ...props }) => (
+                                  <img src={src} alt={alt} className="max-w-full h-auto rounded-lg border border-white/10 my-2" {...props} />
+                                ),
                               }}
                             >
                               {activeModuleId && extractingModuleId === activeModuleId ? "⏳ 正在提取..." : (extractedContent || "暂无原文内容")}
                             </ReactMarkdown>
                           </div>
+                          
+                          {/* 移动端显示提取的图片 */}
+                          {extractedImages.length > 0 && (
+                            <div className="mt-3">
+                              <span className="text-cyan-400 font-bold block text-[10px] uppercase tracking-wider mb-2">
+                                🖼️ 提取的图片 ({extractedImages.length})
+                              </span>
+                              <div className="grid grid-cols-2 gap-2">
+                                {extractedImages.map((img, idx) => (
+                                  <img
+                                    key={idx}
+                                    src={img.url}
+                                    alt={img.filename}
+                                    className="w-full h-auto rounded-lg border border-white/10"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
 

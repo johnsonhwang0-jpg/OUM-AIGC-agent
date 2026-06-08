@@ -27,6 +27,9 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 8080;
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Serve extracted PDF images statically
+app.use("/api/pdf-images", express.static(path.join(process.cwd(), "uploads", "pdf_images")));
+
 // AI Provider configuration
 const AI_PROVIDER = process.env.AI_PROVIDER || "deepseek"; // "deepseek", "dashscope", "gemini", "ollama", or "huggingface"
 
@@ -414,7 +417,7 @@ app.post("/api/projects/:id/extracted", async (req, res) => {
   }
 });
 
-// 后端结构化 PDF 提取（使用 PyMuPDF Python 服务）
+// 后端结构化 PDF 提取（使用 PyMuPDF + pdf_oxide 两阶段处理）
 app.post("/api/projects/:id/extract-pages", async (req, res) => {
   try {
     const { startPage, endPage } = req.body;
@@ -423,20 +426,23 @@ app.post("/api/projects/:id/extract-pages", async (req, res) => {
       return res.status(404).json({ error: "PDF data not found" });
     }
 
-    // 调用 Python 脚本提取 PDF 内容
+    // 调用 Python 脚本提取 PDF 内容（两阶段：PyMuPDF裁剪 + pdf_oxide结构化提取）
     const { exec } = await import("child_process");
     const path = await import("path");
     
-    const scriptPath = path.join(process.cwd(), "pdf_extractor.py");
+    const scriptPath = path.join(process.cwd(), "pdf_extractor_oxide.py");
+    const imageOutputDir = path.join(process.cwd(), "uploads", "pdf_images", req.params.id);
+    
     const inputJson = JSON.stringify({
       pdfData: project.pdfData,
       startPage: startPage || 1,
-      endPage: endPage || 9999
+      endPage: endPage || 9999,
+      imageOutputDir: imageOutputDir
     });
 
     // 通过 stdin 传递输入，通过 stdout 获取输出
-    const result = await new Promise<{ pages: { pageNum: number; content: string }[]; totalPages: number }>((resolve, reject) => {
-      const python = exec(`python3 "${scriptPath}"`, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const result = await new Promise<{ pages: { pageNum: number; content: string; images: { filename: string; path: string; width?: number; height?: number }[] }[]; totalPages: number }>((resolve, reject) => {
+      const python = exec(`python3 "${scriptPath}"`, { maxBuffer: 100 * 1024 * 1024 }, (error, stdout, stderr) => {
         if (error) {
           console.error("Python 提取错误:", stderr);
           reject(new Error(`PDF 提取失败: ${stderr || error.message}`));
@@ -462,10 +468,46 @@ app.post("/api/projects/:id/extract-pages", async (req, res) => {
       python.stdin?.end();
     });
 
-    res.json(result);
+    // Add URLs to images for frontend access
+    const baseUrl = `/api/pdf-images/${req.params.id}`;
+    const pagesWithUrls = result.pages.map((page: any) => ({
+      ...page,
+      images: (page.images || []).map((img: any) => ({
+        ...img,
+        url: `${baseUrl}/${img.filename}`
+      }))
+    }));
+
+    res.json({ ...result, pages: pagesWithUrls });
   } catch (error) {
     console.error("Failed to extract pages:", error);
     res.status(500).json({ error: `Failed to extract pages: ${(error as Error).message}` });
+  }
+});
+
+// 获取项目提取的图片列表
+app.get("/api/projects/:id/images", async (req, res) => {
+  try {
+    const imageDir = path.join(process.cwd(), "uploads", "pdf_images", req.params.id);
+    const fs = await import("fs");
+    
+    if (!fs.existsSync(imageDir)) {
+      return res.json({ images: [] });
+    }
+    
+    const files = fs.readdirSync(imageDir);
+    const images = files
+      .filter(f => /\.(png|jpg|jpeg|gif|webp)$/i.test(f))
+      .map(filename => ({
+        filename,
+        path: path.join(imageDir, filename),
+        url: `/api/pdf-images/${req.params.id}/${filename}`
+      }));
+    
+    res.json({ images });
+  } catch (error) {
+    console.error("Failed to list images:", error);
+    res.status(500).json({ error: `Failed to list images: ${(error as Error).message}` });
   }
 });
 

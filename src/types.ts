@@ -40,6 +40,14 @@ export interface CohesionDetail {
   coreQuestion: string;
 }
 
+export interface ExtractedImage {
+  filename: string;
+  path: string;
+  width?: number;
+  height?: number;
+  url?: string; // Frontend-accessible URL
+}
+
 export interface BookModule {
   id: string;
   sliceId?: string; // e.g., "S1", "S2"
@@ -56,6 +64,7 @@ export interface BookModule {
   duration?: string;
   designRationale?: string; // 教学设计逻辑/课业深度价值
   extractedContent?: string; // Content text utilized for generating this script
+  extractedImages?: ExtractedImage[]; // Images extracted alongside content
   scriptStatus: 'pending' | 'generating' | 'completed' | 'failed';
   script?: GameScript;
 }

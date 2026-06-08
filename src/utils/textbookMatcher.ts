@@ -1,4 +1,4 @@
-import { BookModule, DirectoryItem } from "../types";
+import { BookModule, DirectoryItem, ExtractedImage } from "../types";
 
 /**
  * 从 Base64 PDF 按需提取指定页的文本+格式信息
@@ -722,7 +722,7 @@ export async function getExtractedTextForModuleAsync(
   pdfPageOffset: number = 0,
   onProgress?: (msg: string) => void,
   projectId?: string
-): Promise<{ mappedPages: string; extractedOriginalText: string }> {
+): Promise<{ mappedPages: string; extractedOriginalText: string; extractedImages?: ExtractedImage[] }> {
   const covered = (mod.coveredChapters || "").trim();
   if (!covered) {
     return { mappedPages: "暂未关联到页码", extractedOriginalText: "### 📑 章节覆盖信息缺失\n\n请先在第二阶段配置该单元对应的教材章节覆盖范围（例如：`1.1` 或 `2.1-2.2`）。" };
@@ -781,17 +781,23 @@ export async function getExtractedTextForModuleAsync(
       }
 
       const result = await response.json();
-      const pages = result.pages as { pageNum: number; content: string }[];
+      const pages = result.pages as { pageNum: number; content: string; images?: ExtractedImage[] }[];
 
       if (pages && pages.length > 0) {
         let mdOutput = "";
+        const allImages: ExtractedImage[] = [];
         for (const page of pages) {
           // 对后端返回的内容进行页眉页脚过滤和格式化
           const lines = page.content.split("\n");
           const formattedLines = filterAndFormatLines(lines, directoryItems);
           mdOutput += formattedLines + "\n\n";
+          
+          // 收集图片信息
+          if (page.images && page.images.length > 0) {
+            allImages.push(...page.images);
+          }
         }
-        return { mappedPages, extractedOriginalText: mdOutput };
+        return { mappedPages, extractedOriginalText: mdOutput, extractedImages: allImages.length > 0 ? allImages : undefined };
       }
     } catch (err) {
       console.error("后端提取失败，回退到前端提取:", err);
