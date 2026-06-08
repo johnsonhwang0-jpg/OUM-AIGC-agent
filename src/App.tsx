@@ -3055,6 +3055,19 @@ API地址：https://api.deepseek.com/chat/completions`}
                   <div className="flex items-center gap-2">
                     <span className="text-xs bg-cyan-500 text-white font-extrabold px-2 py-0.5 rounded shadow-[0_0_10px_rgba(6,182,212,0.4)]">ORIGINAL TEXT</span>
                     <h4 className="font-semibold text-sm text-white font-display">{activeModule ? `《${activeModule.chapterIndex} · ${activeModule.title}》` : "等待载入章节"}</h4>
+                    {/* Preview button */}
+                    {activeModuleId && extractedModules[activeModuleId] && (
+                      <button
+                        onClick={() => {
+                          setPreviewContent(extractedModules[activeModuleId]);
+                          setShowPreviewModal(true);
+                        }}
+                        className="text-cyan-400 hover:text-cyan-300 transition cursor-pointer"
+                        title="预览原文渲染效果"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     {pdfPagesText && pdfPagesText.length > 0 && (
@@ -3300,20 +3313,6 @@ API地址：https://api.deepseek.com/chat/completions`}
 
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="text-[10px] text-slate-450 text-slate-400 line-clamp-1"> {mod.gameTitle}</span>
-                        {/* Preview button */}
-                        {extractedModules[mod.id] && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPreviewContent(extractedModules[mod.id]);
-                              setShowPreviewModal(true);
-                            }}
-                            className="text-[10px] text-cyan-400 hover:text-cyan-300 transition flex items-center gap-0.5 cursor-pointer"
-                            title="预览原文渲染效果"
-                          >
-                            <Eye className="w-3 h-3" />
-                          </button>
-                        )}
                       </div>
                     </button>
                   );
@@ -3341,6 +3340,19 @@ API地址：https://api.deepseek.com/chat/completions`}
                     <h4 className="font-semibold text-sm text-white font-display">
                       {activeModule ? `《${activeModule.chapterIndex} · ${activeModule.title}》` : "等待载入章节"}
                     </h4>
+                    {/* Preview button */}
+                    {activeModuleId && extractedModules[activeModuleId] && (
+                      <button
+                        onClick={() => {
+                          setPreviewContent(extractedModules[activeModuleId]);
+                          setShowPreviewModal(true);
+                        }}
+                        className="text-cyan-400 hover:text-cyan-300 transition cursor-pointer"
+                        title="预览原文渲染效果"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Simulator vs Script Code Tabs */}
