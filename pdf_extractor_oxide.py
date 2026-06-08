@@ -719,7 +719,7 @@ def filter_markdown_content(md_content: str, toc_titles: set) -> str:
 
 
 def clean_pymupdf_table(table) -> str:
-    """清理 PyMuPDF 提取的表格，去除重复列，生成正确的 Markdown 表格"""
+    """清理 PyMuPDF 提取的表格，去除重复列，生成 HTML 表格（支持合并单元格）"""
     data = table.extract()
     if not data:
         return ""
@@ -743,10 +743,7 @@ def clean_pymupdf_table(table) -> str:
     if not content_cols:
         return ""
     
-    # 构建清理后的行
-    md_lines = []
-    
-    # 处理 header 行：从 header 行中提取非空单元格作为标题
+    # 处理 header 行
     header_cells = []
     for col_idx in content_cols:
         cell = data[0][col_idx] if col_idx < len(data[0]) else None
@@ -755,7 +752,6 @@ def clean_pymupdf_table(table) -> str:
     # 如果 header 为空，尝试从相邻列获取标题
     if not any(h for h in header_cells):
         for col_idx in content_cols:
-            # 检查相邻列是否有标题
             for offset in [-1, 1, -2, 2]:
                 adj_col = col_idx + offset
                 if 0 <= adj_col < num_cols:
@@ -764,11 +760,8 @@ def clean_pymupdf_table(table) -> str:
                         header_cells[content_cols.index(col_idx)] = cell.strip()
                         break
     
-    # 添加 header
-    md_lines.append("|" + "|".join(header_cells) + "|")
-    md_lines.append("|" + "|".join(["---"] * len(content_cols)) + "|")
-    
-    # 处理数据行：填充合并单元格的空值
+    # 处理数据行：提取并清理单元格
+    rows_data = []
     prev_values = [""] * len(content_cols)
     for row_idx in range(1, len(data)):
         row = data[row_idx]
@@ -776,20 +769,72 @@ def clean_pymupdf_table(table) -> str:
         for i, col_idx in enumerate(content_cols):
             cell = row[col_idx] if col_idx < len(row) else None
             if cell is None or not cell.strip():
-                # 空单元格：使用前一行的值（合并单元格）
                 cells.append(prev_values[i])
             else:
                 cleaned = cell.strip().replace('\n', ' ')
                 cells.append(cleaned)
                 prev_values[i] = cleaned
         
-        # 跳过全空的行
         if all(not c for c in cells):
             continue
-        
-        md_lines.append("|" + "|".join(cells) + "|")
+        rows_data.append(cells)
     
-    return "\n".join(md_lines)
+    if not rows_data:
+        return ""
+    
+    # 计算每列的 rowspan：检测连续相同的值
+    num_rows = len(rows_data)
+    num_content_cols = len(content_cols)
+    
+    # rowspan[col][row] = 该单元格应该跨越的行数（0 表示被合并，不渲染）
+    rowspan = [[1] * num_rows for _ in range(num_content_cols)]
+    
+    for col_idx in range(num_content_cols):
+        row = 0
+        while row < num_rows:
+            if not rows_data[row][col_idx]:
+                row += 1
+                continue
+            
+            # 查找连续相同的值
+            span = 1
+            while row + span < num_rows and rows_data[row + span][col_idx] == rows_data[row][col_idx]:
+                rowspan[col_idx][row + span] = 0  # 标记为被合并
+                span += 1
+            
+            rowspan[col_idx][row] = span
+            row += span
+    
+    # 生成 HTML 表格
+    html_lines = []
+    html_lines.append('<table class="w-full border-collapse my-4 text-xs">')
+    
+    # Header
+    html_lines.append('<thead class="bg-cyan-500/10">')
+    html_lines.append('<tr>')
+    for h in header_cells:
+        html_lines.append(f'<th class="text-left px-3 py-2 text-cyan-300 font-semibold border-r border-white/5 last:border-r-0">{h}</th>')
+    html_lines.append('</tr>')
+    html_lines.append('</thead>')
+    
+    # Body
+    html_lines.append('<tbody>')
+    for row_idx in range(num_rows):
+        html_lines.append('<tr class="border-b border-white/10 hover:bg-white/5 transition">')
+        for col_idx in range(num_content_cols):
+            if rowspan[col_idx][row_idx] == 0:
+                continue  # 被合并的单元格，跳过
+            
+            rs = rowspan[col_idx][row_idx]
+            rs_attr = f' rowspan="{rs}"' if rs > 1 else ''
+            cell_content = rows_data[row_idx][col_idx]
+            html_lines.append(f'<td class="px-3 py-2 text-slate-300 border-r border-white/5 last:border-r-0 align-top"{rs_attr}>{cell_content}</td>')
+        html_lines.append('</tr>')
+    html_lines.append('</tbody>')
+    
+    html_lines.append('</table>')
+    
+    return '\n'.join(html_lines)
 
 
 def remove_fragmented_tables(md_content: str) -> str:
