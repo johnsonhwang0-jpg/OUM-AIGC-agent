@@ -4,7 +4,7 @@ import {
   MessageSquare, Send, RefreshCw, FileText, Settings, ArrowRight, Gamepad2, 
   CheckCircle2, XCircle, Compass, HelpCircle, Info, Download, Copy, AlertCircle, 
   Award, Trophy, ChevronRight, CornerDownRight, Volume2, Gamepad, Lock, Code2, Terminal,
-  Maximize2, Minimize2, X, Image as ImageIcon
+  Maximize2, Minimize2, X, Image as ImageIcon, Eye
 } from "lucide-react";
 
 // Error Boundary 组件 - 防止整个应用崩溃
@@ -151,6 +151,10 @@ export default function App() {
   const [extractingModuleId, setExtractingModuleId] = useState<string | null>(null);
   const [extractedModules, setExtractedModules] = useState<Record<string, string>>({});
   const [moduleImages, setModuleImages] = useState<Record<string, ExtractedImage[]>>({});
+  
+  // Preview modal state
+  const [showPreviewModal, setShowPreviewModal] = useState<boolean>(false);
+  const [previewContent, setPreviewContent] = useState<string>("");
 
   // Step 4 States: UI Preference and App Generation
   const [uiTheme, setUiTheme] = useState<'minimal' | 'cyberpunk' | 'cartoon' | 'retro'>('minimal');
@@ -3295,7 +3299,21 @@ API地址：https://api.deepseek.com/chat/completions`}
                       </h5>
 
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-[10px] text-slate-450 text-slate-400 line-clamp-1">🔍 {mod.gameTitle}</span>
+                        <span className="text-[10px] text-slate-450 text-slate-400 line-clamp-1"> {mod.gameTitle}</span>
+                        {/* Preview button */}
+                        {extractedModules[mod.id] && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPreviewContent(extractedModules[mod.id]);
+                              setShowPreviewModal(true);
+                            }}
+                            className="text-[10px] text-cyan-400 hover:text-cyan-300 transition flex items-center gap-0.5 cursor-pointer"
+                            title="预览原文渲染效果"
+                          >
+                            <Eye className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
                     </button>
                   );
@@ -4348,6 +4366,52 @@ ${challenge.options ? `* 可选游戏决策卡:\n   ${challenge.options.map((opt
         </div>
 
       </div>
+
+      {/* Preview Modal */}
+      {showPreviewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowPreviewModal(false)}>
+          <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl w-[90vw] max-w-4xl max-h-[85vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
+              <h3 className="text-sm font-bold text-cyan-400 flex items-center gap-2">
+                <Eye className="w-4 h-4" />
+                原文渲染预览
+              </h3>
+              <button
+                onClick={() => setShowPreviewModal(false)}
+                className="text-slate-400 hover:text-white transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* Modal content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="text-xs text-slate-300 leading-relaxed font-sans select-text selection:bg-cyan-500/30 selection:text-white">
+                <ReactMarkdown components={{
+                  h2: ({ node, ...props }) => (<h2 className="text-sm font-bold text-cyan-400 bg-cyan-500/5 border-l-2 border-cyan-500/50 px-3 py-1.5 mt-6 mb-3 font-mono tracking-wide" {...props} />),
+                  h3: ({ node, ...props }) => (<h3 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-4 mb-2 inline-block font-mono tracking-wider" {...props} />),
+                  h4: ({ node, ...props }) => (<h4 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-5 mb-3 inline-block font-mono tracking-wider" {...props} />),
+                  p: ({ node, ...props }) => (<p className="text-xs text-slate-300 leading-relaxed mb-3 font-sans opacity-95" {...props} />),
+                  strong: ({ node, ...props }) => (<strong className="text-white font-extrabold" {...props} />),
+                  blockquote: () => null,
+                  ul: ({ node, ...props }) => (<ul className="list-disc pl-4 space-y-1 my-2.5 text-xs text-slate-300" {...props} />),
+                  ol: ({ node, ...props }) => (<ol className="list-decimal pl-4 space-y-1 my-2.5 text-xs text-slate-300" {...props} />),
+                  li: ({ node, ...props }) => (<li className="text-xs text-slate-300 leading-relaxed" {...props} />),
+                  hr: ({ node, ...props }) => (<hr className="border-t border-white/5 my-4" {...props} />),
+                  code: ({ node, ...props }) => (<code className="bg-white/10 px-1 py-0.5 rounded font-mono text-[10.5px] text-cyan-200 font-bold" {...props} />),
+                  img: ({ node, src, alt, ...props }) => src ? (<img src={src} alt={alt} className="max-w-full h-auto rounded-lg border border-white/10 my-4 shadow-lg" {...props} />) : null,
+                  table: ({ node, ...props }) => (<table className="w-full border-collapse my-4 text-xs" {...props} />),
+                  thead: ({ node, ...props }) => (<thead className="bg-cyan-500/10" {...props} />),
+                  tbody: ({ node, ...props }) => (<tbody {...props} />),
+                  tr: ({ node, ...props }) => (<tr className="border-b border-white/10 hover:bg-white/5 transition" {...props} />),
+                  th: ({ node, ...props }) => (<th className="text-left px-3 py-2 text-cyan-300 font-semibold border-r border-white/5 last:border-r-0" {...props} />),
+                  td: ({ node, ...props }) => (<td className="px-3 py-2 text-slate-300 border-r border-white/5 last:border-r-0 align-top" {...props} />),
+                }}>{previewContent}</ReactMarkdown>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Fullscreen Game Preview Portal overlay */}
       {isFullscreen && finalCode && (
