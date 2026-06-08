@@ -779,7 +779,7 @@ def clean_pymupdf_table(table) -> str:
                 # 空单元格：使用前一行的值（合并单元格）
                 cells.append(prev_values[i])
             else:
-                cleaned = cell.strip()
+                cleaned = cell.strip().replace('\n', ' ')
                 cells.append(cleaned)
                 prev_values[i] = cleaned
         
