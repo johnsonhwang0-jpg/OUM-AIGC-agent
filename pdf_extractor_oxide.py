@@ -329,6 +329,37 @@ def rebuild_table_with_pymupdf(pdf_bytes: bytes, page_idx: int) -> str:
         return ""
 
 
+def fix_table_empty_lines(md_content: str) -> str:
+    """修复表格内的空行：表格分隔符和数据行之间不能有空行"""
+    lines = md_content.split('\n')
+    result = []
+    in_table = False
+    
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        
+        # 检测表格开始
+        if is_table_line(stripped) or is_table_separator(stripped):
+            in_table = True
+            result.append(line)
+            continue
+        
+        # 在表格中时，跳过空行
+        if in_table:
+            if not stripped:
+                continue  # 跳过表格内的空行
+            elif is_table_line(stripped):
+                result.append(line)
+            else:
+                # 非表格行，表格结束
+                in_table = False
+                result.append(line)
+        else:
+            result.append(line)
+    
+    return '\n'.join(result)
+
+
 def fix_fragmented_tables(md_content: str) -> str:
     """修复被碎片化的表格：
     1. 合并相邻的表格片段
@@ -890,6 +921,9 @@ def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int,
         
         # 后处理：先修复标题和段落格式（合并断裂标题、分割多标题行）
         fixed_content = fix_headings_and_paragraphs(md_content)
+        
+        # 后处理：修复表格内的空行（分隔符和数据行之间不能有空行）
+        fixed_content = fix_table_empty_lines(fixed_content)
         
         # 后处理：再过滤页眉页脚（此时标题已正确分割）
         filtered_content = filter_markdown_content(fixed_content, toc_titles)
