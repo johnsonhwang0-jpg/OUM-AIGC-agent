@@ -50,6 +50,7 @@ import { getExtractedTextForModule, getExtractedTextForModuleAsync, calculateAut
 import StandalonePreview from "./components/StandalonePreview";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 
 function CollapsibleSection({ title, defaultOpen = false, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -3213,7 +3214,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                   ) : (
                     <div className="animate-fadeIn p-5">
                       <div className="text-xs text-slate-300 leading-relaxed font-sans overflow-y-auto select-text selection:bg-cyan-500/30 selection:text-white scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={{
                             h2: ({ node, ...props }) => (<h2 className="text-sm font-bold text-cyan-400 bg-cyan-500/5 border-l-2 border-cyan-500/50 px-3 py-1.5 mt-6 mb-3 font-mono tracking-wide" {...props} />),
                             h3: ({ node, ...props }) => (<h3 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-4 mb-2 inline-block font-mono tracking-wider" {...props} />),
                             h4: ({ node, ...props }) => (<h4 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-5 mb-3 inline-block font-mono tracking-wider" {...props} />),
@@ -3518,7 +3519,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                             </span>
                           </div>
                           <div className="text-[11px] text-slate-300 bg-black/50 border border-white/5 p-3 rounded-xl max-h-40 overflow-y-auto select-text leading-relaxed font-sans scrollbar-thin scrollbar-thumb-white/10">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}
                               components={{
                                 h3: ({ node, ...props }) => (
                                   <h3 className="text-xs font-bold text-cyan-400 mt-1 mb-2 pb-1 border-b border-white/10 flex items-center gap-1 font-display" {...props} />
@@ -4446,7 +4447,7 @@ ${challenge.options ? `* 可选游戏决策卡:\n   ${challenge.options.map((opt
             {/* Modal content */}
             <div className="flex-1 overflow-y-auto p-6">
               <div className="text-xs text-slate-300 leading-relaxed font-sans select-text selection:bg-cyan-500/30 selection:text-white">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={{
                   h1: ({ node, ...props }) => (<h1 className="text-lg font-bold text-white mb-3 mt-4" {...props} />),
                   h2: ({ node, ...props }) => (<h2 className="text-sm font-bold text-cyan-400 bg-cyan-500/5 border-l-2 border-cyan-500/50 px-3 py-1.5 mt-6 mb-3 font-mono tracking-wide" {...props} />),
                   h3: ({ node, ...props }) => (<h3 className="text-[11px] font-bold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg mt-4 mb-2 inline-block font-mono tracking-wider" {...props} />),
