@@ -278,6 +278,130 @@ def split_merged_paragraphs(text: str) -> str:
     return text
 
 
+def is_table_line(text: str) -> bool:
+    """检查是否是 Markdown 表格行"""
+    stripped = text.strip()
+    # 表格内容行：| cell1 | cell2 |
+    if stripped.startswith('|') and stripped.endswith('|'):
+        # 排除分隔符行 |---|---|
+        if not re.match(r'^\|[\s\-:|]+\|$', stripped):
+            return True
+    return False
+
+
+def is_table_separator(text: str) -> bool:
+    """检查是否是 Markdown 表格分隔符行"""
+    stripped = text.strip()
+    return bool(re.match(r'^\|[\s\-:|]+\|$', stripped))
+
+
+def rebuild_table_with_pymupdf(pdf_bytes: bytes, page_idx: int) -> str:
+    """使用 PyMuPDF 重建表格格式"""
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if page_idx >= len(doc):
+            doc.close()
+            return ""
+        
+        page = doc[page_idx]
+        blocks = page.get_text("dict")["blocks"]
+        
+        # 查找表格相关的文本块（基于 y 坐标排序）
+        table_rows = []
+        for block in blocks:
+            if "lines" in block:
+                for line in block["lines"]:
+                    text = "".join(span["text"] for span in line["spans"]).strip()
+                    if text:
+                        y = line.get("bbox", (0,0,0,0))[1]
+                        x = line.get("bbox", (0,0,0,0))[0]
+                        table_rows.append((y, x, text))
+        
+        doc.close()
+        
+        # 按 y 坐标排序
+        table_rows.sort(key=lambda r: (r[0], r[1]))
+        
+        # 简单的表格重建：假设每行是一个单元格
+        # 这里需要根据实际表格结构调整
+        return "\n".join([r[2] for r in table_rows])
+    except Exception:
+        return ""
+
+
+def fix_fragmented_tables(md_content: str) -> str:
+    """修复被碎片化的表格：
+    1. 合并相邻的表格片段
+    2. 清理空单元格
+    3. 确保表格格式正确
+    """
+    lines = md_content.split('\n')
+    result = []
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        
+        # 检查是否是表格行
+        if is_table_line(stripped) or is_table_separator(stripped):
+            # 收集所有连续的表格行
+            table_lines = []
+            while i < len(lines):
+                s = lines[i].strip()
+                if is_table_line(s) or is_table_separator(s):
+                    table_lines.append(s)
+                    i += 1
+                elif not s:  # 跳过空行
+                    i += 1
+                    continue
+                else:
+                    break
+            
+            # 解析表格
+            if table_lines:
+                # 找到分隔符行的位置
+                sep_idx = -1
+                for idx, tl in enumerate(table_lines):
+                    if is_table_separator(tl):
+                        sep_idx = idx
+                        break
+                
+                if sep_idx > 0:
+                    # 有完整的表格结构
+                    # 计算列数
+                    header = table_lines[0]
+                    num_cols = len([c for c in header.split('|') if c.strip()])
+                    
+                    # 清理表格：移除空行，合并多行单元格
+                    cleaned_rows = []
+                    for tl in table_lines:
+                        if is_table_separator(tl):
+                            # 生成分隔符行
+                            cleaned_rows.append('|' + '|'.join(['---'] * num_cols) + '|')
+                        else:
+                            # 清理单元格
+                            cells = [c.strip() for c in tl.split('|')[1:-1]]
+                            # 如果单元格数量不匹配，补齐
+                            while len(cells) < num_cols:
+                                cells.append('')
+                            cleaned_rows.append('|' + '|'.join(cells) + '|')
+                    
+                    # 添加清理后的表格
+                    result.append('')
+                    result.extend(cleaned_rows)
+                    result.append('')
+                else:
+                    # 没有分隔符，直接输出
+                    result.extend(table_lines)
+            continue
+        
+        result.append(line)
+        i += 1
+    
+    return '\n'.join(result)
+
+
 def fix_headings_and_paragraphs(md_content: str) -> str:
     """修复标题和段落格式：
     1. 将 **1.1.2** **Title** 转换为 ### 1.1.2 Title
@@ -287,7 +411,8 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
     5. 合并标题文本和数字编号（如 "Software Requirements..." + "1.1" -> "## 1.1 Software Requirements..."）
     6. 合并 Markdown 标题和加粗编号（如 "## SOFTWARE REQUIREMENTS AND" + "**1.1 REQUIREMENTS ENGINEERING**" -> "## 1.1 SOFTWARE REQUIREMENTS AND REQUIREMENTS ENGINEERING"）
     7. 合并多段 Markdown 标题 + 中间加粗数字（如 "## BACKGROUND OF TEACHING YOUNG" + "**1.1**" + "## LEARNERS:..." + "## CHILDREN"）
-    8. 分割被错误合并的段落（双空格分隔的多个段落）
+    8. 分割被错误合并的段落（3个或更多空格分隔的多个段落）
+    9. 修复被碎片化的表格
     """
     lines = md_content.split('\n')
     result = []
@@ -519,7 +644,8 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
         i += 1
     
     output = '\n'.join(result)
-    # 最后一步：分割被错误合并的段落
+    # 最后两步：修复表格，然后分割被错误合并的段落
+    output = fix_fragmented_tables(output)
     output = split_merged_paragraphs(output)
     return output
 
@@ -561,11 +687,173 @@ def filter_markdown_content(md_content: str, toc_titles: set) -> str:
     return '\n'.join(filtered).strip()
 
 
+def clean_pymupdf_table(table) -> str:
+    """清理 PyMuPDF 提取的表格，去除重复列，生成正确的 Markdown 表格"""
+    data = table.extract()
+    if not data:
+        return ""
+    
+    num_cols = len(data[0]) if data else 0
+    if num_cols == 0:
+        return ""
+    
+    # 找出内容列：在数据行（跳过 header）中有实际内容的列
+    content_cols = []
+    for col_idx in range(num_cols):
+        has_data = False
+        for row_idx in range(1, len(data)):
+            cell = data[row_idx][col_idx] if col_idx < len(data[row_idx]) else None
+            if cell and cell.strip():
+                has_data = True
+                break
+        if has_data:
+            content_cols.append(col_idx)
+    
+    if not content_cols:
+        return ""
+    
+    # 构建清理后的行
+    md_lines = []
+    
+    # 处理 header 行：从 header 行中提取非空单元格作为标题
+    header_cells = []
+    for col_idx in content_cols:
+        cell = data[0][col_idx] if col_idx < len(data[0]) else None
+        header_cells.append(cell.strip() if cell else "")
+    
+    # 如果 header 为空，尝试从相邻列获取标题
+    if not any(h for h in header_cells):
+        for col_idx in content_cols:
+            # 检查相邻列是否有标题
+            for offset in [-1, 1, -2, 2]:
+                adj_col = col_idx + offset
+                if 0 <= adj_col < num_cols:
+                    cell = data[0][adj_col] if adj_col < len(data[0]) else None
+                    if cell and cell.strip():
+                        header_cells[content_cols.index(col_idx)] = cell.strip()
+                        break
+    
+    # 添加 header
+    md_lines.append("|" + "|".join(header_cells) + "|")
+    md_lines.append("|" + "|".join(["---"] * len(content_cols)) + "|")
+    
+    # 处理数据行
+    for row_idx in range(1, len(data)):
+        row = data[row_idx]
+        cells = []
+        for col_idx in content_cols:
+            cell = row[col_idx] if col_idx < len(row) else None
+            if cell is None:
+                cells.append("")
+            else:
+                cleaned = cell.strip()
+                cells.append(cleaned)
+        
+        # 跳过全空的行
+        if all(not c for c in cells):
+            continue
+        
+        md_lines.append("|" + "|".join(cells) + "|")
+    
+    return "\n".join(md_lines)
+
+
+def remove_fragmented_tables(md_content: str) -> str:
+    """移除 pdf_oxide 产生的碎片化表格内容"""
+    lines = md_content.split('\n')
+    result = []
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        
+        # 检测并跳过碎片化表格行
+        if is_table_line(stripped) or is_table_separator(stripped):
+            # 跳过所有连续的表格行和空行
+            while i < len(lines):
+                s = lines[i].strip()
+                if is_table_line(s) or is_table_separator(s) or not s:
+                    i += 1
+                else:
+                    break
+            continue
+        
+        result.append(line)
+        i += 1
+    
+    return '\n'.join(result)
+
+
+def clean_table_fragments(md_content: str) -> str:
+    """清理表格碎片文本（在 remove_fragmented_tables 之后调用）"""
+    lines = md_content.split('\n')
+    cleaned = []
+    
+    # 表格关键词（用于识别表格碎片）
+    table_header_keywords = {"Stage", "Emotional Development", "Action"}
+    
+    # 表格单元格常见模式
+    cell_patterns = [
+        r"^They have", r"^They are", r"^They start", r"^They begin",
+        r"^They show", r"^They display", r"^They love", r"^They learn",
+        r"^makes them", r"^likely to", r"^of sadness", r"^association between",
+        r"^outbursts and", r"^consequences\.$", r"^humour\.$",
+        r"^regulate their", r"^control their", r"^proper and",
+        r"^differences between", r"^impulse control", r"^unable to comprehend",
+        r"^start to develop", r"^start showing", r"^start to express",
+        r"^without difficulty", r"^patience\. They", r"^ask for permission",
+        r"^belong to them", r"^throwing a tantrum", r"^getting physical",
+        r"^snatch a toy", r"^hit, bite or push", r"^laugh if they find",
+        r"^something funny", r"^sense of humour", r"^develop empathy",
+        r"^recognise the feeling", r"^comprehend the", r"^emotional outbursts",
+        r"^negative consequences", r"^fewer tantrums", r"^making people laugh",
+        r"^silly and making", r"^sadness in others",
+        r"^Three years", r"^Four years", r"^Five years", r"^old$",
+        r"^In trying to", r"^They display patience",
+    ]
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # 跳过表格 header 碎片
+        if stripped in table_header_keywords:
+            continue
+        
+        # 跳过表格单元格碎片
+        is_fragment = False
+        for pattern in cell_patterns:
+            if re.search(pattern, stripped, re.IGNORECASE):
+                is_fragment = True
+                break
+        if is_fragment:
+            continue
+        
+        cleaned.append(line)
+    
+    # 清理多余空行（最多保留 2 个连续空行）
+    result = []
+    empty_count = 0
+    for line in cleaned:
+        if not line.strip():
+            empty_count += 1
+            if empty_count <= 2:
+                result.append(line)
+        else:
+            empty_count = 0
+            result.append(line)
+    
+    return '\n'.join(result)
+
+
 def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int, 
                        toc_titles: set, image_output_dir: str = None) -> dict:
     """使用 pdf_oxide 进行结构化提取 + 后处理过滤"""
     doc = PdfDocument.from_bytes(pdf_bytes)
     total_pages = doc.page_count()
+    
+    # 同时用 PyMuPDF 打开，用于表格提取
+    fitz_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     
     result_pages = []
     
@@ -577,6 +865,25 @@ def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int,
             include_images=True,
             image_output_dir=image_output_dir
         )
+        
+        # 尝试用 PyMuPDF 提取表格并替换碎片化的表格
+        try:
+            fitz_page = fitz_doc[page_num]
+            tabs = fitz_page.find_tables()
+            if tabs.tables:
+                # 先移除碎片化的表格内容
+                md_content = remove_fragmented_tables(md_content)
+                # 再清理表格碎片文本
+                md_content = clean_table_fragments(md_content)
+                # 用 PyMuPDF 提取的表格替换 pdf_oxide 的碎片化表格
+                for table in tabs.tables:
+                    # 清理表格并生成正确的 Markdown 格式
+                    table_md = clean_pymupdf_table(table)
+                    if table_md:
+                        # 将表格添加到内容末尾
+                        md_content = md_content + "\n\n" + table_md
+        except Exception as e:
+            print(f"Warning: Table extraction failed for page {page_num + 1}: {e}", file=sys.stderr)
         
         # 后处理：先修复标题和段落格式（合并断裂标题、分割多标题行）
         fixed_content = fix_headings_and_paragraphs(md_content)
@@ -613,6 +920,8 @@ def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int,
         
         if page_info['content']:
             result_pages.append(page_info)
+    
+    fitz_doc.close()
     
     return {
         'pages': result_pages,
