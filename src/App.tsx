@@ -3158,7 +3158,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                             li: ({ node, ...props }) => (<li className="text-xs text-slate-300 leading-relaxed" {...props} />),
                             hr: ({ node, ...props }) => (<hr className="border-t border-white/5 my-4" {...props} />),
                             code: ({ node, ...props }) => (<code className="bg-white/10 px-1 py-0.5 rounded font-mono text-[10.5px] text-cyan-200 font-bold" {...props} />),
-                            img: ({ node, src, alt, ...props }) => (<img src={src} alt={alt} className="max-w-full h-auto rounded-lg border border-white/10 my-4 shadow-lg" {...props} />),
+                            img: ({ node, src, alt, ...props }) => src ? (<img src={src} alt={alt} className="max-w-full h-auto rounded-lg border border-white/10 my-4 shadow-lg" {...props} />) : null,
                           }}>{activeModuleId && extractingModuleId === activeModuleId ? "⏳ 正在从 PDF 提取内容..." : (extractedContent || "请点击左侧列表选择章节查看原文")}</ReactMarkdown>
                         </div>
                       
