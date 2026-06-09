@@ -3311,10 +3311,6 @@ API地址：https://api.deepseek.com/chat/completions`}
                             <span className="text-[9px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-cyan-500/20">
                               <RefreshCw className="w-2.5 h-2.5 animate-spin" /> 提取中...
                             </span>
-                          ) : isExtracted ? (
-                            <span className="text-[9px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 border border-blue-500/20">
-                              <BookOpen className="w-2.5 h-2.5" /> 已提取
-                            </span>
                           ) : null}
                           {isDone ? (
                             <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
@@ -3324,11 +3320,11 @@ API地址：https://api.deepseek.com/chat/completions`}
                             <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-amber-500/20">
                               <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Coding...
                             </span>
-                          ) : !isExtracted ? (
+                          ) : (
                             <span className="text-[9px] bg-white/5 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-white/5 italic">
                               Pending
                             </span>
-                          ) : null}
+                          )}
                         </div>
                       </div>
 
