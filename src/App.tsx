@@ -1931,7 +1931,7 @@ export default function StandaloneEduGame() {
             
             {/* Minimal decoration */}
             <div className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400">
-              version 1.0.22
+              version 1.0.23
             </div>
           </div>
 

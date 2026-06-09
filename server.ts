@@ -18,6 +18,7 @@ import {
 } from "./database.js";
 
 // Load environment variables
+const SERVER_VERSION = "v2026.06.09-list-fix";
 dotenv.config();
 
 const app = express();
@@ -2273,7 +2274,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 Full-stack Book-to-Game server running on http://0.0.0.0:${PORT}`);
+    console.log(`🚀 Full-stack Book-to-Game server running on http://0.0.0.0:${PORT} [${SERVER_VERSION}]`);
   });
 }
 
