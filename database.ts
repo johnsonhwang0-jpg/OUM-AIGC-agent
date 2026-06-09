@@ -67,6 +67,18 @@ async function initDatabase(): Promise<Database> {
     )
   `);
 
+  // 迁移：为旧数据库添加缺失的列
+  try {
+    database.run(`ALTER TABLE projects ADD COLUMN aiMeta TEXT`);
+  } catch (e) {
+    // 列已存在，忽略
+  }
+  try {
+    database.run(`ALTER TABLE projects ADD COLUMN rawBlueprintData TEXT`);
+  } catch (e) {
+    // 列已存在，忽略
+  }
+
   database.run(`
     CREATE TABLE IF NOT EXISTS module_scripts (
       id TEXT PRIMARY KEY,
