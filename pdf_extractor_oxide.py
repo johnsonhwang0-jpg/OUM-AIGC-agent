@@ -479,27 +479,27 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
             continue
         
         # 0.5 处理列表项：检测 (a), (b), (c) 或 1., 2., 3. 等列表标记
-        # 匹配模式：行首的 (a) 文本 或 a) 文本 或 1. 文本
-        list_match = re.match(r'^\(?([a-z0-9]+)\)?\s+(.+)$', stripped, re.IGNORECASE)
+        # 匹配模式：行首的 (a) 文本 或 a) 文本 或 1. 文本（只匹配小写字母）
+        list_match = re.match(r'^\(?([a-z0-9]+)\)?\s+(.+)$', stripped)
         if list_match and not stripped.startswith('#'):
             marker = list_match.group(1)
             text = list_match.group(2)
-            # 检查是否是列表标记（单个字母或数字）
-            if re.match(r'^[a-z]$', marker, re.IGNORECASE) or re.match(r'^\d{1,2}$', marker):
+            # 检查是否是列表标记（单个小写字母或1-2位数字）
+            if re.match(r'^[a-z]$', marker) or re.match(r'^\d{1,2}$', marker):
                 # 这是列表项，格式化为 - 标记 文本
                 result.append(f'- ({marker}) {text}')
                 i += 1
                 continue
         
         # 0.6 处理行内的列表项：如 "text:   (a) **Set of Natural Numbers**"
-        # 匹配模式：冒号 + 多个空格 + (a) 文本
-        inline_list_match = re.search(r':\s{2,}\(?([a-z0-9]+)\)?\s+(.+)$', stripped, re.IGNORECASE)
+        # 匹配模式：冒号 + 多个空格 + (a) 文本（只匹配小写字母）
+        inline_list_match = re.search(r':\s{2,}\(?([a-z0-9]+)\)?\s+(.+)$', stripped)
         if inline_list_match and not stripped.startswith('#'):
             marker = inline_list_match.group(1)
             text = inline_list_match.group(2)
             prefix_text = stripped[:inline_list_match.start()].rstrip()
-            # 检查是否是列表标记（单个字母或数字）
-            if re.match(r'^[a-z]$', marker, re.IGNORECASE) or re.match(r'^\d{1,2}$', marker):
+            # 检查是否是列表标记（单个小写字母或1-2位数字）
+            if re.match(r'^[a-z]$', marker) or re.match(r'^\d{1,2}$', marker):
                 # 前缀文本作为段落
                 if prefix_text.endswith(':'):
                     result.append(prefix_text)
@@ -960,6 +960,115 @@ def clean_table_fragments(md_content: str) -> str:
     return '\n'.join(result)
 
 
+def convert_raw_text_to_markdown(raw_text: str) -> str:
+    """将 extract_text_auto 的原始文本转换为 Markdown 格式。
+    保留公式符号，应用标题检测和段落格式化。
+    """
+    # 替换 Unicode 私有区域字符为正确的数学符号
+    char_map = {
+        '\uf03d': '=',   # 等号
+        '\uf02d': '-',   # 减号/负号
+        '\uf075': '',    # 图标（移除）
+        '\uf0ec': '{',   # 左花括号
+        '\uf0fc': '',    # 空
+        '\uf0ce': '∈',   # 属于
+        '\uf0b9': ':',   # 冒号
+        '\uf0ed': '',    # 空
+        '\uf0fd': '}',   # 右花括号
+        '\uf0ee': '',    # 空
+        '\uf0fe': '',    # 空
+    }
+    for old_char, new_char in char_map.items():
+        raw_text = raw_text.replace(old_char, new_char)
+    
+    lines = raw_text.split('\n')
+    result = []
+    
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            result.append('')
+            continue
+        
+        # 分离 "NUMBER SYSTEM 1.1" 模式
+        heading_match = re.match(r'^([A-Z][A-Z\s]+?)\s+(\d+\.\d+(?:\.\d+)*)\s*$', stripped)
+        if heading_match:
+            title = heading_match.group(1).strip()
+            num = heading_match.group(2)
+            result.append(f'## {title}')
+            result.append('')
+            continue
+        
+        # 检测标题模式
+        bold_heading = re.match(r'^(\d+\.\d+(?:\.\d+)*)\s+(.+)$', stripped)
+        if bold_heading and not stripped.endswith('.'):
+            num = bold_heading.group(1)
+            title = bold_heading.group(2)
+            level = len(num.split('.'))
+            hashes = '#' * min(level + 1, 6)
+            result.append(f'{hashes} {num} {title}')
+            continue
+        
+        # 纯大写标题
+        if stripped.isupper() and len(stripped) > 3 and len(stripped) < 60:
+            if not re.match(r'^(TOPIC|PAGE|CHAPTER)\s+\d', stripped):
+                result.append(f'## {stripped}')
+                continue
+        
+        # 处理行内的列表项：分割 "(a) text (b) text" 为多行
+        # 使用更精确的模式：只匹配 (a-z) 或 (1-2位数字)，排除大写字母
+        list_pattern = r'\(([a-z0-9]+)\)\s+'
+        matches = list(re.finditer(list_pattern, stripped))
+        
+        if len(matches) >= 1:
+            # 有列表标记，分割处理
+            parts = []
+            last_end = 0
+            
+            for match in matches:
+                marker = match.group(1)
+                # 检查是否是有效的列表标记（单个字母或1-2位数字）
+                if re.match(r'^[a-z]$', marker, re.IGNORECASE) or re.match(r'^\d{1,2}$', marker):
+                    # 添加标记前的文本
+                    if match.start() > last_end:
+                        prefix = stripped[last_end:match.start()].strip()
+                        if prefix:
+                            parts.append(prefix)
+                    # 提取列表项内容（从标记后到下一个标记前）
+                    start = match.end()
+                    # 找到下一个标记的位置
+                    next_match = None
+                    for m in matches:
+                        if m.start() > match.start():
+                            next_match = m
+                            break
+                    
+                    if next_match:
+                        content = stripped[start:next_match.start()].strip()
+                    else:
+                        content = stripped[start:].strip()
+                    
+                    if content:
+                        parts.append(f'- ({marker}) {content}')
+                    last_end = next_match.start() if next_match else len(stripped)
+            
+            # 添加剩余文本
+            if last_end < len(stripped):
+                remaining = stripped[last_end:].strip()
+                if remaining:
+                    parts.append(remaining)
+            
+            if parts:
+                result.extend(parts)
+            else:
+                result.append(stripped)
+        else:
+            # 普通文本
+            result.append(stripped)
+    
+    return '\n'.join(result)
+
+
 def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int, 
                        toc_titles: set, image_output_dir: str = None) -> dict:
     """使用 pdf_oxide 进行结构化提取 + 后处理过滤"""
@@ -972,13 +1081,11 @@ def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int,
     result_pages = []
     
     for page_num in range(start_page - 1, min(end_page, total_pages)):
-        # 结构化提取
-        md_content = doc.to_markdown(
-            page_num,
-            detect_headings=True,
-            include_images=True,
-            image_output_dir=image_output_dir
-        )
+        # 使用 extract_text_auto 获取原始文本（保留公式符号）
+        raw_text = doc.extract_text_auto(page_num)
+        
+        # 将原始文本转换为 Markdown 格式
+        md_content = convert_raw_text_to_markdown(raw_text)
         
         # 尝试用 PyMuPDF 提取表格并替换碎片化的表格
         try:
