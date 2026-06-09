@@ -444,6 +444,7 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
     7. 合并多段 Markdown 标题 + 中间加粗数字（如 "## BACKGROUND OF TEACHING YOUNG" + "**1.1**" + "## LEARNERS:..." + "## CHILDREN"）
     8. 分割被错误合并的段落（3个或更多空格分隔的多个段落）
     9. 修复被碎片化的表格
+    10. 处理列表项（如 (a), (b), (c) 或 1., 2., 3.）
     """
     lines = md_content.split('\n')
     result = []
@@ -476,6 +477,40 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
             result.extend(split_result)
             i += 1
             continue
+        
+        # 0.5 处理列表项：检测 (a), (b), (c) 或 1., 2., 3. 等列表标记
+        # 匹配模式：行首的 (a) 文本 或 a) 文本 或 1. 文本
+        list_match = re.match(r'^\(?([a-z0-9]+)\)?\s+(.+)$', stripped, re.IGNORECASE)
+        if list_match and not stripped.startswith('#'):
+            marker = list_match.group(1)
+            text = list_match.group(2)
+            # 检查是否是列表标记（单个字母或数字）
+            if re.match(r'^[a-z]$', marker, re.IGNORECASE) or re.match(r'^\d{1,2}$', marker):
+                # 这是列表项，格式化为 - 标记 文本
+                result.append(f'- ({marker}) {text}')
+                i += 1
+                continue
+        
+        # 0.6 处理行内的列表项：如 "text:   (a) **Set of Natural Numbers**"
+        # 匹配模式：冒号 + 多个空格 + (a) 文本
+        inline_list_match = re.search(r':\s{2,}\(?([a-z0-9]+)\)?\s+(.+)$', stripped, re.IGNORECASE)
+        if inline_list_match and not stripped.startswith('#'):
+            marker = inline_list_match.group(1)
+            text = inline_list_match.group(2)
+            prefix_text = stripped[:inline_list_match.start()].rstrip()
+            # 检查是否是列表标记（单个字母或数字）
+            if re.match(r'^[a-z]$', marker, re.IGNORECASE) or re.match(r'^\d{1,2}$', marker):
+                # 前缀文本作为段落
+                if prefix_text.endswith(':'):
+                    result.append(prefix_text)
+                    result.append('')
+                else:
+                    result.append(prefix_text)
+                    result.append('')
+                # 列表项
+                result.append(f'- ({marker}) {text}')
+                i += 1
+                continue
         
         # 1. 检查是否是加粗标题模式 **1.1.2** **Title**
         heading_match = is_bold_heading_pattern(stripped)
