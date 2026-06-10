@@ -4,7 +4,7 @@ import {
   MessageSquare, Send, RefreshCw, FileText, Settings, ArrowRight, Gamepad2, 
   CheckCircle2, XCircle, Compass, HelpCircle, Info, Download, Copy, AlertCircle, 
   Award, Trophy, ChevronRight, CornerDownRight, Volume2, Gamepad, Lock, Code2, Terminal,
-  Maximize2, Minimize2, X, Image as ImageIcon, Eye
+  Maximize2, Minimize2, X, Eye
 } from "lucide-react";
 
 // Error Boundary 组件 - 防止整个应用崩溃
@@ -3361,16 +3361,6 @@ API地址：https://api.deepseek.com/chat/completions`}
                     <h4 className="font-semibold text-sm text-white font-display">
                       {activeModule ? `《${activeModule.chapterIndex} · ${activeModule.title}》` : "等待载入章节"}
                     </h4>
-                    {/* Preview button */}
-                    {activeModuleId && extractedModules[activeModuleId] && (
-                      <button
-                        onClick={() => setShowPreviewModal(true)}
-                        className="text-cyan-400 hover:text-cyan-300 transition cursor-pointer"
-                        title="查看渲染样式示例"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                    )}
                   </div>
 
                   {/* Simulator vs Script Code Tabs */}
