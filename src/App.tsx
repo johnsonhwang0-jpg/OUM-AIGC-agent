@@ -450,6 +450,17 @@ function greet(name) {
           }
         });
         setSavedScripts(scriptsMap);
+
+        // Merge scripts back into modules
+        if (scripts.length > 0) {
+          setModules(prev => prev.map(m => {
+            const script = scriptsMap[m.id];
+            if (script) {
+              return { ...m, scriptStatus: 'completed' as const, script };
+            }
+            return m;
+          }));
+        }
       }
 
       // 加载已保存的提取内容

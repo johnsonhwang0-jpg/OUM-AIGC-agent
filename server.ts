@@ -1057,7 +1057,7 @@ Make the challenges direct, logical, scientific and fully complete. Ensure all o
     
     if (AI_PROVIDER === "deepseek") {
       console.log("🔄 Using DeepSeek for script generation...");
-      outputText = await callDeepSeek(promptText, systemInstruction);
+      outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash");
     } else if (AI_PROVIDER === "dashscope") {
       console.log("🔄 Using DashScope (通义千问) for script generation...");
       outputText = await callDashScope(promptText, systemInstruction);
