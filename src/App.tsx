@@ -1607,6 +1607,7 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
     if (!module) return "";
     if (module.simulationScript?.markdown) return module.simulationScript.markdown;
     if (module.script) {
+      const challenges = module.script.challenges || [];
       return `
 # 【BookToGame 旧版互动剧本】
 教材名称: 《${bookTitle}》
@@ -1616,7 +1617,7 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
 ${module.script.introduction}
 
 ## 挑战关卡
-${module.script.challenges.map((challenge, cIdx) => `
+${challenges.map((challenge, cIdx) => `
 ### 关卡 ${cIdx + 1}: ${challenge.title}
 - 类型: ${challenge.type}
 - 提示: ${challenge.prompt}
