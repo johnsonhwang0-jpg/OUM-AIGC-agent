@@ -3354,39 +3354,32 @@ API地址：https://api.deepseek.com/chat/completions`}
                     </div>
                   ) : activeModule.scriptStatus === 'completed' && getSimulationMarkdown(activeModule) ? (
                     <div className="h-full flex flex-col gap-3">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
-                        <div className="flex items-center gap-2 bg-[#0a0a0f] border border-white/10 rounded-xl p-1">
-                          {[
-                            { id: 'simulator', label: '可视化预览', icon: Eye },
-                            { id: 'code', label: '源文本', icon: Code2 },
-                            { id: 'edit', label: '人工编辑', icon: Edit3 }
-                          ].map((tabItem) => {
-                            const Icon = tabItem.icon;
-                            return (
-                              <button
-                                key={tabItem.id}
-                                type="button"
-                                onClick={() => setActiveTab(tabItem.id as 'simulator' | 'code' | 'edit')}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
-                                  activeTab === tabItem.id
-                                    ? 'bg-cyan-500 text-white shadow-[0_0_12px_rgba(6,182,212,0.25)]'
-                                    : 'text-slate-400 hover:text-white hover:bg-white/5'
-                                }`}
-                              >
-                                <Icon className="w-3.5 h-3.5" />
-                                {tabItem.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-
+                      <div className="flex items-center justify-between shrink-0">
                         <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono font-bold text-cyan-400 bg-cyan-500/10 border border-cyan-500/30 px-2 py-0.5 rounded uppercase">
+                            Simulation Blueprint
+                          </span>
+                          <span className="text-xs text-slate-400">《{activeModule.chapterIndex} · {activeModule.title}》</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab(activeTab === 'edit' ? 'simulator' : 'edit')}
+                            className={`text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer border ${
+                              activeTab === 'edit'
+                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
+                            }`}
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            {activeTab === 'edit' ? '预览模式' : '编辑模式'}
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleCopySimulationMarkdown(getSimulationMarkdown(activeModule))}
                             className="bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
                           >
-                            {scriptCopySuccess ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> 已复制</> : <><Copy className="w-3.5 h-3.5" /> 复制给 AI coding</>}
+                            {scriptCopySuccess ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> 已复制</> : <><Copy className="w-3.5 h-3.5" /> 复制 Markdown</>}
                           </button>
                           <button
                             type="button"
@@ -3402,41 +3395,37 @@ API地址：https://api.deepseek.com/chat/completions`}
                         </div>
                       </div>
 
-                      {activeTab === 'simulator' && (
+                      {activeTab === 'edit' ? (
+                        <textarea
+                          value={getSimulationMarkdown(activeModule)}
+                          onChange={(e) => handleUpdateSimulationMarkdown(activeModule.id, e.target.value)}
+                          className="flex-1 min-h-[480px] bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-2xl p-4 text-xs text-slate-200 transition resize-none leading-relaxed focus:ring-1 focus:ring-cyan-500 font-mono"
+                        />
+                      ) : (
                         <div className="flex-1 bg-[#0a0a0f] border border-white/10 rounded-2xl overflow-y-auto p-6 max-h-[calc(100vh-250px)]">
-                          <article className="prose prose-invert prose-sm max-w-none prose-headings:font-display prose-headings:text-white prose-h1:text-2xl prose-h1:text-cyan-300 prose-h2:text-cyan-200 prose-h3:text-amber-200 prose-p:text-slate-300 prose-li:text-slate-300 prose-strong:text-white prose-code:text-cyan-200 prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-black/50 prose-pre:border prose-pre:border-white/10">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-                              {getSimulationMarkdown(activeModule)}
-                            </ReactMarkdown>
-                          </article>
-                        </div>
-                      )}
-
-                      {activeTab === 'code' && (
-                        <div className="space-y-3.5 h-full flex flex-col">
-                          <div className="flex items-center justify-between shrink-0">
-                            <span className="text-xs text-slate-500 font-medium">可复制给 AI coding 的结构化 Markdown 模拟器脚本</span>
+                          <div className="text-xs text-slate-300 leading-relaxed font-sans overflow-y-auto select-text selection:bg-cyan-500/30 selection:text-white scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={{
+                              h1: ({ node, ...props }) => (<h1 className="text-lg font-bold text-white border-b border-white/10 pb-2 mt-6 mb-4 font-display" {...props} />),
+                              h2: ({ node, ...props }) => (<h2 className="text-sm font-bold text-white bg-white/5 border-l-2 border-white/20 px-3 py-1.5 mt-6 mb-3 font-mono tracking-wide" {...props} />),
+                              h3: ({ node, ...props }) => (<h3 className="text-[11px] font-bold text-white bg-white/5 border border-white/10 px-2.5 py-1 rounded-lg mt-4 mb-2 inline-block font-mono tracking-wider" {...props} />),
+                              h4: ({ node, ...props }) => (<h4 className="text-[11px] font-bold text-white bg-white/5 border border-white/10 px-2.5 py-1 rounded-lg mt-5 mb-3 inline-block font-mono tracking-wider" {...props} />),
+                              p: ({ node, ...props }) => (<p className="text-xs text-slate-300 leading-relaxed mb-3 font-sans opacity-95" {...props} />),
+                              strong: ({ node, ...props }) => (<strong className="text-white font-extrabold" {...props} />),
+                              blockquote: ({ node, ...props }) => (<blockquote className="border-l-2 border-white/20 pl-4 py-2 my-3 bg-white/5 rounded-r-lg text-xs text-slate-300 italic" {...props} />),
+                              ul: ({ node, ...props }) => (<ul className="list-disc pl-4 space-y-1 my-2.5 text-xs text-slate-300" {...props} />),
+                              ol: ({ node, ...props }) => (<ol className="list-decimal pl-4 space-y-1 my-2.5 text-xs text-slate-300" {...props} />),
+                              li: ({ node, ...props }) => (<li className="text-xs text-slate-300 leading-relaxed" {...props} />),
+                              hr: ({ node, ...props }) => (<hr className="border-t border-white/5 my-4" {...props} />),
+                              code: ({ node, ...props }) => (<code className="bg-white/10 px-1 py-0.5 rounded font-mono text-[10.5px] text-slate-200 font-bold" {...props} />),
+                              pre: ({ node, ...props }) => (<pre className="bg-black/50 border border-white/10 rounded-lg p-3 my-3 overflow-x-auto text-[10px] font-mono text-slate-300" {...props} />),
+                              table: ({ node, ...props }) => (<table className="w-full border-collapse my-4 text-xs" {...props} />),
+                              thead: ({ node, ...props }) => (<thead className="bg-white/5" {...props} />),
+                              tbody: ({ node, ...props }) => (<tbody {...props} />),
+                              tr: ({ node, ...props }) => (<tr className="border-b border-white/10 hover:bg-white/5 transition" {...props} />),
+                              th: ({ node, ...props }) => (<th className="text-left px-3 py-2 text-white font-semibold border-r border-white/5 last:border-r-0" {...props} />),
+                              td: ({ node, ...props }) => (<td className="px-3 py-2 text-slate-300 border-r border-white/5 last:border-r-0 align-top" {...props} />),
+                            }}>{getSimulationMarkdown(activeModule)}</ReactMarkdown>
                           </div>
-                          <div className="flex-1 bg-[#0a0a0f] border border-white/10 rounded-2xl p-4 overflow-auto max-h-[calc(100vh-260px)]">
-                            <pre className="text-[11px] font-mono whitespace-pre-wrap text-slate-300 leading-relaxed select-text">{getSimulationMarkdown(activeModule)}</pre>
-                          </div>
-                        </div>
-                      )}
-
-                      {activeTab === 'edit' && (
-                        <div className="space-y-4 h-full flex flex-col">
-                          <div className="flex items-center justify-between shrink-0">
-                            <span className="text-xs text-slate-400 font-semibold flex items-center gap-1.5">
-                              <Edit3 className="w-4 h-4 text-cyan-400" />
-                              人工二次编辑模拟器脚本
-                            </span>
-                            <span className="text-[10px] text-slate-500">修改会自动保存到当前项目脚本记录</span>
-                          </div>
-                          <textarea
-                            value={getSimulationMarkdown(activeModule)}
-                            onChange={(e) => handleUpdateSimulationMarkdown(activeModule.id, e.target.value)}
-                            className="flex-1 min-h-[480px] bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-2xl p-4 text-xs text-slate-200 transition resize-none leading-relaxed focus:ring-1 focus:ring-cyan-500 font-mono"
-                          />
                         </div>
                       )}
                     </div>
