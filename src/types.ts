@@ -1,12 +1,13 @@
 export type GameType = 'quiz' | 'cross-match' | 'fill-blank' | 'interactive-story' | 'coding-puzzle' | 'math-quest';
 
+// Legacy challenge-based types (keep for backward compatibility)
 export interface GameChallenge {
   id: string;
   type: 'question' | 'match' | 'blank' | 'puzzle' | 'choice';
   title: string;
   prompt: string;
-  options?: string[]; // Used for quizzes or choice-based stories
-  correctAnswer: string; // The correct answer string or matching index
+  options?: string[];
+  correctAnswer: string;
   feedbackCorrect: string;
   feedbackIncorrect: string;
 }
@@ -18,6 +19,42 @@ export interface GameScript {
   introduction: string;
   challenges: GameChallenge[];
   conclusion: string;
+}
+
+// New scenario-based interactive script types
+export interface ScriptOption {
+  text: string;
+  isCorrect: boolean;
+  consequence: string; // Narrative consequence after this choice
+  explanation: string; // Why right/wrong, connecting to textbook knowledge
+}
+
+export interface ScriptStage {
+  id: string;
+  title: string; // Stage title, e.g. "Phase 1: Discovery"
+  sceneDescription: string; // Immersive scene description (visual, narrative)
+  problem: string; // The problem/challenge the student faces
+  knowledgeHint: string; // Hint about what knowledge to apply
+  options: ScriptOption[];
+}
+
+export interface ScenarioScript {
+  id: string;
+  moduleId: string;
+  scenarioTitle: string;
+  scenarioContext: string; // Overall immersive scenario setup
+  role: string; // What role the student plays in the scenario
+  stages: ScriptStage[];
+  conclusion: string; // Wrap-up and knowledge reflection
+  knowledgeSummary: string; // Summary of knowledge applied throughout
+}
+
+export interface SimulationBlueprintScript {
+  id: string;
+  moduleId: string;
+  kind: "simulation_blueprint_markdown";
+  markdown: string;
+  generatedAt?: string;
 }
 
 export interface SummaryInfo {
@@ -62,11 +99,13 @@ export interface BookModule {
   gameTitle?: string;
   gameRules?: string;
   duration?: string;
-  designRationale?: string; // 教学设计逻辑/课业深度价值
+  designRationale?: string | { learnedPoints?: string; practicalProblems?: string }; // 教学设计逻辑/课业深度价值
   extractedContent?: string; // Content text utilized for generating this script
   extractedImages?: ExtractedImage[]; // Images extracted alongside content
   scriptStatus: 'pending' | 'generating' | 'completed' | 'failed';
-  script?: GameScript;
+  script?: GameScript; // Legacy challenge-based script
+  scenarioScript?: ScenarioScript; // New scenario-based interactive script
+  simulationScript?: SimulationBlueprintScript; // Markdown simulation blueprint for AI coding
 }
 
 export interface BookBlueprint {
@@ -113,4 +152,6 @@ export interface GameSessionState {
   isCorrect: boolean;
   isCompleted: boolean;
   userMatches: Record<string, string>; // Match-pair games state
+  lastConsequence?: string; // Narrative consequence for scenario-based scripts
+  lastExplanation?: string; // Knowledge explanation for scenario-based scripts
 }

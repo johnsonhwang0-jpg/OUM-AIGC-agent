@@ -43,7 +43,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError
 import { TEMPLATE_BOOKS } from "./data";
 import { 
   BookModule, BookBlueprint, GameScript, Message, GameSessionState, GameChallenge, GameType, DirectoryItem,
-  SummaryInfo, InfoDensity, CohesionDetail, ExtractedImage
+  SummaryInfo, InfoDensity, CohesionDetail, ExtractedImage, SimulationBlueprintScript
 } from "./types";
 import { parseTextToDirectory, serializeDirectoryToText } from "./utils/directoryParser";
 import { getExtractedTextForModule, getExtractedTextForModuleAsync, calculateAutoPageOffset } from "./utils/textbookMatcher";
@@ -146,6 +146,22 @@ export default function App() {
   const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
   const [scriptGenerating, setScriptGenerating] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<'simulator' | 'code' | 'original' | 'edit'>('simulator');
+  const [showApiDrawer, setShowApiDrawer] = useState<boolean>(false);
+  const [apiDebugInfo, setApiDebugInfo] = useState<{
+    model: string;
+    systemPrompt: string;
+    userPrompt: string;
+    status: 'idle' | 'calling' | 'success' | 'error';
+    rawResponse: string;
+    timestamp: string;
+  }>({
+    model: 'deepseek-v4-flash',
+    systemPrompt: '',
+    userPrompt: '',
+    status: 'idle',
+    rawResponse: '',
+    timestamp: ''
+  });
   const [scriptCopySuccess, setScriptCopySuccess] = useState<boolean>(false);
   const [recommendingId, setRecommendingId] = useState<string | null>(null);
   const [extractedContent, setExtractedContent] = useState<string>("");
@@ -247,6 +263,24 @@ function greet(name) {
     }
     return '';
   };
+
+  const simulationBlueprintSystemPrompt = `你是一名“教学模拟产品设计师 + 互动学习脚本架构师”。
+
+你的任务不是生成 quiz、选择题、判断题、填空题、题库、剧情问答或换皮闯关。
+你的任务是把一个教学切片转化为一份可交给 AI coding agent 实现的“可视化、沉浸式、问题驱动的互动模拟器生成脚本”。
+
+核心原则：
+1. 每个模拟必须围绕一个综合问题场景。学生进入具体情境，扮演具体角色，面对必须使用本切片知识才能解决的任务。
+2. 互动必须是“应用知识干预场景”，不是“回忆知识回答问题”。学生应观察场景、调整变量、选择策略、安排步骤、诊断原因、分配资源、预测后果或优化方案。
+3. 知识点必须变成场景机制。切片中的概念、关系、流程、判断标准必须映射为可观察对象、状态变量、用户操作、反馈规则、成功/失败条件。
+4. 反馈必须体现因果。每次操作后的反馈要说明场景发生了什么变化、为什么会这样、对应教材中的哪个机制、下一步应如何调整。
+5. 视觉设计要服务教学内容。不同学科应生成不同模拟形态，例如应急处置、课堂/角色实践、变量实验室、诊断决策、系统优化、流程搭建、情境推理、证据研判等。不要套用固定玩法模板。
+
+输出要求：
+- 使用中文。
+- 输出结构化 Markdown，不要输出 JSON，不要输出代码。
+- 这份 Markdown 将被 AI coding agent 直接用来生成网页应用，所以必须具体、可实现、可渲染、可编辑。
+- 必须包含页面布局、主要组件、场景对象、状态变量、交互阶段、操作反馈、知识机制解释和完成条件。`;
 
 
   // Playable interactive Game Session state for active simulator
@@ -456,6 +490,9 @@ function greet(name) {
           setModules(prev => prev.map(m => {
             const script = scriptsMap[m.id];
             if (script) {
+              if (script.kind === "simulation_blueprint_markdown" || script.markdown) {
+                return { ...m, scriptStatus: 'completed' as const, simulationScript: script };
+              }
               return { ...m, scriptStatus: 'completed' as const, script };
             }
             return m;
@@ -1117,6 +1154,16 @@ function greet(name) {
     // Update state to generating
     setModules(prev => prev.map(m => m.id === moduleId ? { ...m, scriptStatus: 'generating' } : m));
 
+    // Set API debug calling status
+    setApiDebugInfo(prev => ({
+      ...prev,
+      model: 'deepseek-chat',
+      systemPrompt: simulationBlueprintSystemPrompt,
+      status: 'calling',
+      rawResponse: '',
+      timestamp: new Date().toLocaleTimeString()
+    }));
+
     try {
       const { extractedOriginalText } = await getExtractedTextForModuleAsync(
         mod, directoryItems, bookContentText,
@@ -1127,14 +1174,25 @@ function greet(name) {
         currentProjectId
       );
 
+      const userPrompt = `Book: ${bookTitle}
+Chapter: ${mod.chapterIndex} - ${mod.title}
+Summary: ${mod.summary}
+Info Density: ${getInfoDensityText(mod.infoDensity)}
+Cohesion: ${getCohesionText(mod.cohesionDetail)}
+Design Rationale: ${mod.designRationale || ""}
+Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
+
+      // Update user prompt in debug info
+      setApiDebugInfo(prev => ({ ...prev, userPrompt }));
+
       const payload = {
         bookTitle: bookTitle,
         chapterTitle: mod.title,
         chapterIndex: mod.chapterIndex,
         summary: mod.summary,
-        gameType: mod.gameType,
-        gameTitle: mod.gameTitle,
-        gameRules: mod.gameRules,
+        infoDensity: mod.infoDensity,
+        cohesionDetail: mod.cohesionDetail,
+        designRationale: mod.designRationale,
         extractedContent: extractedOriginalText.substring(0, 8000)
       };
 
@@ -1145,23 +1203,43 @@ function greet(name) {
       });
 
       if (!response.ok) {
+        const errorText = await response.text();
+        setApiDebugInfo(prev => ({
+          ...prev,
+          status: 'error',
+          rawResponse: `HTTP ${response.status}: ${errorText}`,
+          timestamp: new Date().toLocaleTimeString()
+        }));
         throw new Error("Script generation request error");
       }
 
-      const scriptData = await response.json();
+      const rawText = await response.text();
+      const responseData = JSON.parse(rawText);
+
+      // Update API debug with raw response
+      setApiDebugInfo(prev => ({
+        ...prev,
+        model: responseData?._meta?.model || prev.model,
+        systemPrompt: responseData?._meta?.systemInstruction || prev.systemPrompt,
+        userPrompt: responseData?._meta?.userPrompt || prev.userPrompt,
+        status: 'success',
+        rawResponse: rawText,
+        timestamp: new Date().toLocaleTimeString()
+      }));
+
+      const markdown = typeof responseData.markdown === "string" ? responseData.markdown : rawText;
       
-      const finishedScript: GameScript = {
-        id: `script-${mod.id}`,
+      const finishedScript: SimulationBlueprintScript = {
+        id: `simulation-script-${mod.id}`,
         moduleId: mod.id,
-        gameType: mod.gameType,
-        introduction: scriptData.introduction,
-        challenges: scriptData.challenges,
-        conclusion: scriptData.conclusion
+        kind: "simulation_blueprint_markdown",
+        markdown,
+        generatedAt: new Date().toISOString()
       };
 
       setModules(prev => prev.map(m => 
         m.id === moduleId 
-          ? { ...m, scriptStatus: 'completed', script: finishedScript } 
+          ? { ...m, scriptStatus: 'completed', simulationScript: finishedScript }
           : m
       ));
       
@@ -1171,14 +1249,18 @@ function greet(name) {
       setScriptGenerating(prev => ({ ...prev, [moduleId]: false }));
 
       // If this is the active module being viewed, initialize the play state instantly
-      if (activeModuleId === moduleId) {
-        initGameSession(finishedScript);
-      }
+      setActiveTab('simulator');
 
     } catch (err: any) {
       console.error(err);
       setScriptGenerating(prev => ({ ...prev, [moduleId]: false }));
       setModules(prev => prev.map(m => m.id === moduleId ? { ...m, scriptStatus: 'failed' } : m));
+      setApiDebugInfo(prev => ({
+        ...prev,
+        status: 'error',
+        rawResponse: prev.rawResponse || `Error: ${err.message}`,
+        timestamp: new Date().toLocaleTimeString()
+      }));
     }
   };
 
@@ -1521,6 +1603,62 @@ function greet(name) {
     }
   };
 
+  const getSimulationMarkdown = (module?: BookModule | null): string => {
+    if (!module) return "";
+    if (module.simulationScript?.markdown) return module.simulationScript.markdown;
+    if (module.script) {
+      return `
+# 【BookToGame 旧版互动剧本】
+教材名称: 《${bookTitle}》
+当前课章: ${module.chapterIndex} · ${module.title}
+
+## 开场导语
+${module.script.introduction}
+
+## 挑战关卡
+${module.script.challenges.map((challenge, cIdx) => `
+### 关卡 ${cIdx + 1}: ${challenge.title}
+- 类型: ${challenge.type}
+- 提示: ${challenge.prompt}
+${challenge.options ? `- 选项: ${challenge.options.join(" / ")}` : ""}
+- 标准答案: ${challenge.correctAnswer}
+- 正确反馈: ${challenge.feedbackCorrect}
+- 错误反馈: ${challenge.feedbackIncorrect}
+`).join("\n")}
+
+## 总结
+${module.script.conclusion}
+      `.trim();
+    }
+    return "";
+  };
+
+  const handleUpdateSimulationMarkdown = (moduleId: string, markdown: string) => {
+    const updatedScript: SimulationBlueprintScript = {
+      id: `simulation-script-${moduleId}`,
+      moduleId,
+      kind: "simulation_blueprint_markdown",
+      markdown,
+      generatedAt: modules.find(m => m.id === moduleId)?.simulationScript?.generatedAt || new Date().toISOString()
+    };
+
+    const updatedModules = modules.map(m =>
+      m.id === moduleId ? { ...m, scriptStatus: 'completed' as const, simulationScript: updatedScript } : m
+    );
+    setModules(updatedModules);
+    saveScriptToProject(moduleId, updatedScript);
+    if (currentProjectId) {
+      saveCurrentProject(updatedModules);
+    }
+  };
+
+  const handleCopySimulationMarkdown = (markdown: string) => {
+    navigator.clipboard.writeText(markdown).then(() => {
+      setScriptCopySuccess(true);
+      setTimeout(() => setScriptCopySuccess(false), 2000);
+    });
+  };
+
   const handleCopyScriptMarkdown = (script: GameScript) => {
     const parentModule = modules.find(m => m.id === script.moduleId);
     const formattedText = `
@@ -1551,346 +1689,56 @@ ${script.conclusion}
     });
   };
 
-  const handleGenerateFinalApp = () => {
+  const handleGenerateFinalApp = async () => {
+    const blueprintModules = modules
+      .map(m => ({
+        id: m.id,
+        title: m.title,
+        chapterIndex: m.chapterIndex,
+        coveredChapters: m.coveredChapters,
+        markdown: getSimulationMarkdown(m)
+      }))
+      .filter(m => m.markdown.trim().length > 0);
+
+    if (blueprintModules.length === 0) {
+      alert("请先在第四步为至少一个教学切片生成模拟器脚本。");
+      return;
+    }
+
     setIsGeneratingApp(true);
-    addAgentMessage(`🚀 正在启动**独立应用构建引擎**... 我将综合您的 ${modules.length} 个关卡剧本数据，融合 ${uiTheme} 主题与指定色调（${primaryColor}），为您生成一组可直接运行的完整包含本地状态存储的 React/TypeScript 代码方案。稍等...`);
-    
-    setTimeout(() => {
+    setOutputTab('code');
+    setFinalCode('');
+    addAgentMessage(`🚀 正在调用 **DeepSeek V4 Flash** 生成独立互动模拟器应用...\n\n我会把第四步的 ${blueprintModules.length} 份 Markdown brief 作为核心输入，生成可复制到 React/Vite 项目中的 TSX 单文件代码。`);
+
+    try {
+      const response = await fetch('/api/generate-app-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookTitle,
+          uiTheme,
+          primaryColor,
+          modules: blueprintModules
+        })
+      });
+
+      const rawText = await response.text();
+      if (!response.ok) {
+        throw new Error(rawText || `HTTP ${response.status}`);
+      }
+
+      const data = JSON.parse(rawText);
+      setFinalCode(data.code || '');
       setIsGeneratingApp(false);
-      setFinalCode(`// ==========================================
-// 自动生成 - 交互教材小游戏整合游戏机
-// 教材书籍: 《${bookTitle}》
-// UI 主题: ${uiTheme} | 强调色: ${primaryColor}
-// 包含关卡数: ${modules.length}
-// ==========================================
-
-import React, { useState } from 'react';
-
-// 注入用户完全定制与AI策划的本章关卡剧本数据
-const GAME_MODULES = ${JSON.stringify(modules.map(m => ({ title: m.title, chapterIndex: m.chapterIndex, gameType: m.gameType, gameTitle: m.gameTitle, gameRules: m.gameRules, script: m.script })), null, 2)};
-
-export default function StandaloneEduGame() {
-  const [activeModule, setActiveModule] = useState(0);
-  const [gameState, setGameState] = useState<'intro' | 'playing' | 'feedback' | 'completed' | 'all-done'>('intro');
-  const [currentChallenge, setCurrentChallenge] = useState(0);
-  const [selectedOpt, setSelectedOpt] = useState<string | null>(null);
-  const [textAnswer, setTextAnswer] = useState<string>('');
-  const [isCorrect, setIsCorrect] = useState<boolean>(false);
-  const [score, setScore] = useState<number>(0);
-  
-  const activeChapter = GAME_MODULES[activeModule];
-  const script = activeChapter?.script;
-  const challenge = script?.challenges?.[currentChallenge];
-
-  // UI Theme specific Tailwind Styles definitions
-  const themeStyles = {
-    minimal: {
-      bg: 'bg-slate-50 text-slate-900 font-sans',
-      card: 'bg-white border border-slate-200 rounded-2xl shadow-xs p-6 space-y-5',
-      button: 'bg-[#18181b] hover:bg-[#27272a] text-white rounded-xl py-2.5 px-4 font-medium transition',
-      optionBtn: 'border border-slate-200 hover:border-slate-800 hover:bg-slate-50 text-slate-700 font-medium text-left p-3.5 rounded-xl transition',
-      title: 'text-slate-950 font-bold tracking-tight',
-      badge: 'bg-slate-150 text-slate-800 border border-slate-200 px-2.5 py-1 rounded-md text-[10px] font-bold font-mono',
-      input: 'border border-slate-200 rounded-xl p-3 text-xs focus:ring-1 focus:ring-slate-900 outline-none w-full bg-slate-50 text-slate-900',
-      successCard: 'bg-emerald-50 text-emerald-800 border border-emerald-150 p-4 rounded-xl space-y-1',
-      failCard: 'bg-rose-50 text-rose-800 border border-rose-150 p-4 rounded-xl space-y-1'
-    },
-    cyberpunk: {
-      bg: 'bg-[#05050a] text-cyan-400 font-mono relative',
-      card: 'bg-[#0a0a14] border-2 border-cyan-500/30 rounded-2xl shadow-[0_0_20px_rgba(6,182,212,0.15)] p-6 space-y-5',
-      button: 'bg-cyan-950 hover:bg-cyan-900 border border-cyan-400 text-cyan-400 rounded-xl py-2.5 px-4 font-bold tracking-wide transition uppercase',
-      optionBtn: 'border border-cyan-500/20 hover:border-cyan-400 bg-[#080810] hover:bg-cyan-950/20 text-slate-300 hover:text-cyan-400 text-left p-3.5 rounded-xl transition',
-      title: 'text-white font-black tracking-widest uppercase text-cyan-400',
-      badge: 'bg-cyan-950/40 text-cyan-400 border border-cyan-500/40 px-2.5 py-1 rounded-md text-[10px] font-bold',
-      input: 'border border-cyan-500/30 rounded-xl p-3 text-xs focus:ring-1 focus:ring-cyan-400 outline-none w-full bg-[#050510] text-cyan-300 font-mono',
-      successCard: 'bg-emerald-950/30 text-emerald-300 border border-emerald-500/30 p-4 rounded-xl space-y-1',
-      failCard: 'bg-rose-950/30 text-rose-300 border border-rose-500/30 p-4 rounded-xl space-y-1'
-    },
-    cartoon: {
-      bg: 'bg-amber-100 text-amber-900 font-sans font-medium',
-      card: 'bg-white border-4 border-amber-400 rounded-3xl shadow-[0_8px_0_#d97706] p-6 space-y-5',
-      button: 'bg-amber-400 hover:bg-amber-500 text-amber-950 rounded-2xl border-b-4 border-amber-600 font-bold text-center py-2.5 px-4 transition active:translate-y-0.5',
-      optionBtn: 'border-2 border-amber-200 hover:border-amber-400 bg-amber-50/50 hover:bg-amber-100/50 text-amber-950 font-semibold text-left p-3.5 rounded-2xl transition',
-      title: 'text-amber-900 font-extrabold text-2xl tracking-normal',
-      badge: 'bg-amber-400/20 text-amber-600 font-extrabold px-3 py-1 rounded-full text-[10px]',
-      input: 'border-2 border-amber-300 rounded-2xl p-3 text-xs focus:ring-2 focus:ring-amber-400 outline-none w-full bg-amber-50 text-amber-950 font-bold',
-      successCard: 'bg-emerald-100 text-emerald-900 border-2 border-emerald-300 p-4 rounded-xl space-y-1',
-      failCard: 'bg-rose-105 bg-rose-100 text-rose-900 border-2 border-rose-300 p-4 rounded-xl space-y-1'
-    },
-    retro: {
-      bg: 'bg-slate-950 text-fuchsia-400 font-mono relative',
-      card: 'bg-black border-4 border-double border-fuchsia-500 shadow-[6px_6px_0_#d946ef] p-6 space-y-5',
-      button: 'bg-fuchsia-950 hover:bg-fuchsia-900 border-2 border-fuchsia-500 text-fuchsia-300 py-2.5 px-4 font-bold transition tracking-tight',
-      optionBtn: 'border border-fuchsia-500/30 hover:border-fuchsia-500 bg-black hover:bg-fuchsia-950/30 text-slate-400 hover:text-fuchsia-350 text-left p-3.5 transition',
-      title: 'text-fuchsia-400 font-bold tracking-tight uppercase',
-      badge: 'bg-fuchsia-950 text-fuchsia-400 border border-fuchsia-500 px-2 py-0.5 text-[10px] font-bold',
-      input: 'border-2 border-fuchsia-500 bg-black text-fuchsia-300 p-3 text-xs focus:ring-1 focus:ring-fuchsia-400 outline-none w-full',
-      successCard: 'bg-stone-900 text-green-400 border border-green-500 p-4 space-y-1',
-      failCard: 'bg-stone-900 text-red-400 border border-red-500 p-4 space-y-1'
+      setOutputTab('code');
+      addAgentMessage(`✅ **DeepSeek V4 Flash 代码生成完成！**\n\n第五步已经基于第四步的模拟器 brief 生成了独立 React/TypeScript 应用代码。你可以在右侧代码区查看、复制，并继续交给 AI coding 或放入项目中运行。`, 'text');
+    } catch (err: any) {
+      setIsGeneratingApp(false);
+      const message = err?.message || '未知错误';
+      setFinalCode(`// DeepSeek V4 Flash 代码生成失败\n// ${message}`);
+      addAgentMessage(`❌ **DeepSeek V4 Flash 代码生成失败**\n\n错误信息：${message}`);
     }
   };
-
-  const st = themeStyles['${uiTheme}'] || themeStyles.minimal;
-
-  const handleStartGame = () => {
-    setGameState('playing');
-    setCurrentChallenge(0);
-    setSelectedOpt(null);
-    setTextAnswer('');
-  };
-
-  const handleSelectOption = (opt: string) => {
-    if (!challenge) return;
-    setSelectedOpt(opt);
-    const correct = opt.trim().toLowerCase() === challenge.correctAnswer.trim().toLowerCase();
-    setIsCorrect(correct);
-    if (correct) {
-      setScore(prev => prev + 10);
-    }
-    setGameState('feedback');
-  };
-
-  const handleSubmitText = () => {
-    if (!challenge || !textAnswer.trim()) return;
-    const correct = textAnswer.trim().toLowerCase() === challenge.correctAnswer.trim().toLowerCase();
-    setIsCorrect(correct);
-    if (correct) {
-      setScore(prev => prev + 10);
-    }
-    setGameState('feedback');
-  };
-
-  const handleNextChallenge = () => {
-    if (!script) return;
-    const nextIdx = currentChallenge + 1;
-    if (nextIdx >= (script.challenges || []).length) {
-      setGameState('completed');
-    } else {
-      setCurrentChallenge(nextIdx);
-      setSelectedOpt(null);
-      setTextAnswer('');
-      setGameState('playing');
-    }
-  };
-
-  const handleNextModule = () => {
-    const nextModIdx = activeModule + 1;
-    if (nextModIdx >= GAME_MODULES.length) {
-      setGameState('all-done');
-    } else {
-      setActiveModule(nextModIdx);
-      setGameState('intro');
-    }
-  };
-
-  const handleRestart = () => {
-    setActiveModule(0);
-    setScore(0);
-    setGameState('intro');
-  };
-
-  return (
-    <div className={"min-h-screen p-4 md:p-8 " + st.bg + " flex flex-col items-center justify-center"}>
-      
-      {/* Retro scanline overlay decoration */}
-      {"${uiTheme}" === 'retro' && (
-        <div className="absolute inset-0 bg-[radial-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_100%)] pointer-events-none z-50"></div>
-      )}
-
-      <div className="w-full max-w-2xl space-y-6">
-        
-        {/* Header Metadata */}
-        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-4">
-          <div>
-            <h1 className="text-xl font-bold font-display" style={{ color: '${primaryColor}' }}>
-              《${bookTitle}》· 智能交互随身学
-            </h1>
-            <p className="text-xs text-slate-500 mt-0.5">教材游戏化转换系统出品 · 主题模式：${uiTheme}</p>
-          </div>
-          <div className="flex items-center gap-3">
-            {activeChapter && (
-              <span className={st.badge}>
-                关卡 {activeModule + 1} / {GAME_MODULES.length}
-              </span>
-            )}
-            <span className="text-xs font-bold text-amber-500 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">
-              🏅 总积分: {score}
-            </span>
-          </div>
-        </header>
-
-        {/* Dynamic game stages rendering */}
-        {gameState === 'intro' && activeChapter && (
-          <div className={st.card}>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">{activeChapter.chapterIndex}</span>
-            </div>
-            
-            <h2 className={"text-xl font-bold font-display " + st.title}>
-              🎮 {activeChapter.gameTitle}
-            </h2>
-
-            <div className="p-4 bg-slate-950/40 rounded-xl border border-white/10 leading-relaxed text-slate-300 italic text-sm">
-              “{script?.introduction || ("本章带您深入浅出领略 " + activeChapter.title + " 的精彩原理。准备接受试炼了吗？")}”
-            </div>
-
-            <div className="p-3.5 bg-cyan-500/10 rounded-xl border border-cyan-500/20 text-xs text-slate-400 leading-relaxed">
-              <span className="font-extrabold text-cyan-400 block mb-0.5">🧭 关卡规则：</span>
-              {activeChapter.gameRules}
-            </div>
-
-            <button onClick={handleStartGame} className={"w-full " + st.button}>
-              载入神力，开辟试炼 🚀
-            </button>
-          </div>
-        )}
-
-        {gameState === 'playing' && challenge && (
-          <div className={st.card}>
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span className="font-semibold text-slate-400">推进进度: 挑战 {currentChallenge + 1} / {(script?.challenges || []).length}</span>
-              <span className="font-mono">难点点位 A-{currentChallenge + 1}</span>
-            </div>
-
-            <div className="bg-slate-950/50 p-2 text-xs font-bold text-slate-300 rounded border-l-4 border-cyan-500">
-              🛡️ {challenge.title}
-            </div>
-
-            <h3 className="text-base font-semibold leading-relaxed text-slate-200">
-              {challenge.prompt}
-            </h3>
-
-            {/* OPTIONS */}
-            {challenge.options && challenge.options.length > 0 ? (
-              <div className="grid grid-cols-1 gap-2.5 pt-2">
-                {challenge.options.map((opt: string, idx: number) => (
-                  <button 
-                    key={idx}
-                    onClick={() => handleSelectOption(opt)}
-                    className={st.optionBtn}
-                  >
-                    <span className="w-5 h-5 bg-white/5 rounded-md flex items-center justify-center text-[10px] font-bold text-slate-400 border border-white/10 shrink-0 mr-3 inline-flex">
-                      {String.fromCharCode(65 + idx)}
-                    </span>
-                    <span>{opt}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-3 pt-2">
-                <input 
-                  type="text"
-                  placeholder="请输入您的学术关键字..."
-                  value={textAnswer}
-                  onChange={(e) => setTextAnswer(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSubmitText()}
-                  className={st.input}
-                />
-                <button onClick={handleSubmitText} className={"w-full " + st.button}>
-                  核实并提交验证 🖋️
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {gameState === 'feedback' && challenge && (
-          <div className={st.card}>
-            <h3 className="text-xs font-bold text-slate-400 uppercase">问卜审核日志</h3>
-            
-            {isCorrect ? (
-              <div className={st.successCard}>
-                <div className="font-extrabold flex items-center gap-1.5 text-sm h-6">
-                  ✨ 恭喜，回答完全正确！ 积分 +10
-                </div>
-                <p className="text-xs leading-relaxed opacity-90 p-1">
-                  {challenge.feedbackCorrect}
-                </p>
-              </div>
-            ) : (
-              <div className={st.failCard}>
-                <div className="font-extrabold flex items-center gap-1.5 text-sm h-6">
-                  ❌ 答题偏位，我们需要总结
-                </div>
-                <p className="text-xs leading-relaxed opacity-90 p-1">
-                  {challenge.feedbackIncorrect}
-                </p>
-              </div>
-            )}
-
-            <div className="p-3.5 bg-slate-950/40 rounded-xl text-xs text-slate-400">
-              教材官方标准解答：<span className="text-cyan-400 font-bold underline select-all">{challenge.correctAnswer}</span>
-            </div>
-
-            <button onClick={handleNextChallenge} className={"w-full " + st.button}>
-              继续后行挑战关卡 🏆
-            </button>
-          </div>
-        )}
-
-        {gameState === 'completed' && activeChapter && (
-          <div className={st.card}>
-            <div className="text-center space-y-4 py-3">
-              <div className="w-16 h-16 bg-amber-500 rounded-full flex items-center justify-center text-white text-2xl mx-auto shadow-md">
-                🏅
-              </div>
-              <div>
-                <h2 className={"text-lg font-extrabold " + st.title}>
-                  🎉 通关成功！《{activeChapter.title}》
-                </h2>
-                <p className="text-xs text-slate-400 mt-1">您已完成了该章节的所有游戏指标</p>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-950/40 border border-white/10 rounded-xl leading-relaxed text-xs text-slate-300">
-              <span className="font-bold text-amber-500 block mb-1">💡 知识点总结复盘：</span>
-              {script?.conclusion || '您已经圆满掌握了本节课文的科学内含与公式。'}
-            </div>
-
-            <button onClick={handleNextModule} className={"w-full " + st.button}>
-              开启下个章节游戏战役 🗺️
-            </button>
-          </div>
-        )}
-
-        {gameState === 'all-done' && (
-          <div className={st.card}>
-            <div className="text-center space-y-4 py-8">
-              <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center text-5xl mx-auto animate-bounce">
-                👑
-              </div>
-              <div className="space-y-1">
-                <h2 className={"text-2xl font-black tracking-tight " + st.title}>
-                  🎓 整书大满贯，学业完成！
-                </h2>
-                <p className="text-xs text-slate-450 text-slate-400">
-                  您已经完成了整部教材《${bookTitle}》的所有小游戏。
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-amber-500/10 border-2 border-amber-500/20 p-5 rounded-2xl text-center space-y-1 max-w-md mx-auto">
-              <div className="text-[11px] text-slate-550 text-slate-400 uppercase font-bold tracking-wider">终极成绩单总比分</div>
-              <div className="text-3xl font-black text-amber-500">{score} 点学业分</div>
-              <div className="text-xs text-amber-700 font-semibold">授予评级：SS 顶阶智慧先锋学者</div>
-            </div>
-
-            <button onClick={handleRestart} className={"w-full " + st.button}>
-              重启整书学科卡牌游戏 🔄
-            </button>
-          </div>
-        )}
-
-      </div>
-    </div>
-  );
-}
-      `);
-      setOutputTab('preview');
-      addAgentMessage(`✅ **生成完毕！** 我已经根据你当前的最新模块大纲、**${uiTheme} 主题** 风格以及最新的游戏脚本剧本，为您独家产出了最完美的 StandaloneeduGame 独立全功能游戏整合客户端代码方案（包含了自动答卷、游戏交互和所有积分总结）。\n\n您可以点击右侧 “拷贝到本地执行” 并在您的任何 React 物理项目(例如 App.tsx)中开始运行它！`, 'text');
-    }, 3000);
-  };
-
   const handleCopyFinalCode = () => {
     navigator.clipboard.writeText(finalCode).then(() => {
       setCodeCopySuccess(true);
@@ -2060,7 +1908,7 @@ export default function StandaloneEduGame() {
               <span className="font-semibold text-sm">
                 {activeStep === 1 ? "第一阶段：分析并挂载教材数据源" : 
                  activeStep === 2 ? "第二阶段：教学进度大纲大盘与规则编辑" : 
-                 activeStep === 3 ? "第三阶段：小游戏仿真演练及剧本代码" :
+                 activeStep === 3 ? "第三阶段：切片原文校对与映射" :
                  "第四阶段：UI主题渲染与独立游戏代码导出"}
               </span>
             </div>
@@ -2112,7 +1960,15 @@ export default function StandaloneEduGame() {
                 3. 切片内容提取
               </button>
               <button 
-                onClick={() => modules.length > 0 && setActiveStep(4)}
+                onClick={async () => {
+                  if (modules.length === 0) return;
+                  await reExtractPdfText();
+                  if (!activeModuleId || !modules.some(m => m.id === activeModuleId)) {
+                    setActiveModuleId(modules[0].id);
+                  }
+                  setActiveTab('simulator');
+                  setActiveStep(4);
+                }}
                 disabled={modules.length === 0}
                 className={`text-xs px-2.5 py-1 rounded-md border transition cursor-pointer ${
                   modules.length === 0 ? 'opacity-30 cursor-not-allowed' : ''
@@ -3093,11 +2949,11 @@ API地址：https://api.deepseek.com/chat/completions`}
                           ) : null}
                           {isDone ? (
                             <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
-                              <Check className="w-2.5 h-2.5" /> Playable
+                              <Check className="w-2.5 h-2.5" /> 已生成
                             </span>
                           ) : isGen ? (
                             <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-amber-500/20">
-                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Coding...
+                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> 生成中...
                             </span>
                           ) : null}
                         </div>
@@ -3284,7 +3140,7 @@ API地址：https://api.deepseek.com/chat/completions`}
             </div>
           )}
 
-          {/* Step 4: Interactive Playable Simulator and Export codes panel */}
+          {/* Step 4: Simulation blueprint generation and editing panel */}
           {activeStep === 4 && (
             <div className="p-4 flex-1 flex flex-col md:flex-row gap-4 overflow-hidden h-full z-10 animate-fadeIn">
               
@@ -3325,11 +3181,11 @@ API地址：https://api.deepseek.com/chat/completions`}
                           ) : null}
                           {isDone ? (
                             <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
-                              <Check className="w-2.5 h-2.5" /> Playable
+                              <Check className="w-2.5 h-2.5" /> 已生成
                             </span>
                           ) : isGen ? (
                             <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-amber-500/20">
-                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Coding...
+                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> 生成中...
                             </span>
                           ) : (
                             <span className="text-[9px] bg-white/5 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-white/5 italic">
@@ -3344,7 +3200,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                       </h5>
 
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-[10px] text-slate-450 text-slate-400 line-clamp-1"> {mod.gameTitle}</span>
+                        <span className="text-[10px] text-slate-450 text-slate-400 line-clamp-1"> {mod.simulationScript ? "模拟器脚本已就绪" : (mod.coveredChapters || "等待生成")}</span>
                       </div>
                     </button>
                   );
@@ -3367,49 +3223,39 @@ API地址：https://api.deepseek.com/chat/completions`}
                 <div className="bg-[#0a0a0f] px-5 py-3 border-b border-white/10 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
                   <div className="flex items-center gap-2">
                     <span className="text-xs bg-cyan-500 text-white font-extrabold px-2 py-0.5 rounded shadow-[0_0_10px_rgba(6,182,212,0.4)]">
-                      SIMULATOR
+                      BLUEPRINT
                     </span>
                     <h4 className="font-semibold text-sm text-white font-display">
                       {activeModule ? `《${activeModule.chapterIndex} · ${activeModule.title}》` : "等待载入章节"}
                     </h4>
                   </div>
 
-                  {/* Simulator vs Script Code Tabs */}
+                  {/* Action Buttons */}
                   <div className="flex items-center gap-2">
                     <button 
-                      onClick={() => setActiveTab('simulator')}
-                      className={`text-xs px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1 cursor-pointer ${
-                        activeTab === 'simulator' 
-                          ? 'bg-cyan-500 text-white font-semibold shadow-[0_0_12px_rgba(6,182,212,0.3)]' 
-                          : 'bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10'
-                      }`}
+                      onClick={() => setShowApiDrawer(true)}
+                      className="p-2 rounded-lg transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
+                      title="API 调试"
                     >
-                      <Gamepad2 className="w-3.5 h-3.5" />
-                      运行仿真实验 (Play simulator)
+                      <Settings className="w-4 h-4" />
                     </button>
 
                     <button 
-                      onClick={() => setActiveTab('edit')}
-                      className={`text-xs px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1 cursor-pointer ${
-                        activeTab === 'edit' 
-                          ? 'bg-cyan-500 text-white font-semibold shadow-[0_0_12px_rgba(6,182,212,0.3)]' 
-                          : 'bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10'
-                      }`}
+                      onClick={() => activeModule && handleGenerateScript(activeModule.id)}
+                      disabled={!activeModule || activeModule.scriptStatus === 'generating'}
+                      className="text-xs px-4 py-2 rounded-lg font-semibold transition flex items-center gap-1.5 cursor-pointer bg-gradient-to-r from-purple-500 to-cyan-500 hover:from-purple-600 hover:to-cyan-600 text-white shadow-[0_0_15px_rgba(168,85,247,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      修改确认脚本 (Edit script)
-                    </button>
-                    
-                    <button 
-                      onClick={() => setActiveTab('code')}
-                      className={`text-xs px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1 cursor-pointer ${
-                        activeTab === 'code' 
-                          ? 'bg-cyan-500 text-white font-semibold shadow-[0_0_12px_rgba(6,182,212,0.3)]' 
-                          : 'bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10'
-                      }`}
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      查看游戏剧本代码 (Script code)
+                      {activeModule.scriptStatus === 'generating' ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          生成中...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          生成互动脚本
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -3451,719 +3297,147 @@ API地址：https://api.deepseek.com/chat/completions`}
                       </button>
                     </div>
                   ) : activeModule.scriptStatus === 'pending' ? (
-                    <div className="max-w-2xl mx-auto bg-[#0a0a0f] border border-white/10 rounded-3xl p-6 shadow-xl space-y-6">
-                      
-                      {/* Dashboard Header */}
+                    <div className="max-w-3xl mx-auto bg-[#0a0a0f] border border-white/10 rounded-3xl p-6 shadow-xl space-y-6">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-white/10 pb-4 gap-3">
                         <div>
                           <span className="text-[10px] font-mono font-bold text-cyan-400 bg-cyan-500/10 border border-cyan-500/30 px-2 py-0.5 rounded uppercase">
-                            Stage 3 · Gameplay Conception Cabin
+                            Simulation Blueprint
                           </span>
                           <h3 className="text-lg font-bold text-white font-display mt-1 flex items-center gap-1.5">
-                            🎬 游戏化副本创意调取与机制匹配舱
+                            生成沉浸式互动模拟器脚本
                           </h3>
+                          <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                            系统会直接根据教学切片、知识内聚分析和教材原文，生成一份可交给 AI coding 的结构化 Markdown 规格。
+                          </p>
                         </div>
                       </div>
 
-                      {/* Top Panel: Grounded Academic Context Card */}
-                      <div className="bg-white/[0.02] border border-white/10 rounded-2xl p-4 space-y-3">
-                        <div className="text-xs font-bold text-slate-300 flex items-center gap-1.5 uppercase tracking-wider">
-                          <Compass className="w-3.5 h-3.5 text-cyan-400 animate-spin" style={{ animationDuration: '8s' }} /> 学术大纲锚定面 (Curriculum Anchors)
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs text-slate-300">
+                        <div className="space-y-1 bg-[#050508]/60 p-4 rounded-xl border border-white/5">
+                          <span className="text-slate-400 font-semibold block text-[10px] uppercase">知识切片主题</span>
+                          <p className="font-bold text-white mb-1">{activeModule.title}</p>
+                          <p className="text-slate-400 leading-normal">{getSummaryText(activeModule.summary)}</p>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs text-slate-300">
-                          <div className="space-y-1 bg-[#050508]/60 p-3 rounded-xl border border-white/5">
-                            <span className="text-slate-400 font-semibold block text-[10px] uppercase">📚 知识切片主题与考点</span>
-                            <p className="font-bold text-white mb-1">{activeModule.title}</p>
-                            <p className="text-slate-400 leading-normal line-clamp-2">{getSummaryText(activeModule.summary)}</p>
-                          </div>
-                          <div className="space-y-1 bg-[#050508]/60 p-3 rounded-xl border border-white/5">
-                            <span className="text-slate-400 font-semibold block text-[10px] uppercase">⚡ 信息负荷评估与内聚度</span>
-                            <p className="text-slate-300 leading-normal line-clamp-3 font-medium">{getInfoDensityText(activeModule.infoDensity) || "暂无合理度评估"}</p>
-                          </div>
-                        </div>
-
-                        {/* Mapped Textbook Paragraph Excerpt */}
-                        <div className="bg-[#030305]/60 border border-white/5 rounded-xl p-3.5 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-cyan-400 font-bold block text-[10px] uppercase tracking-wider">
-                              📖 匹配对齐本单元的教材原文段落 ({activeModule ? getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).mappedPages : ""})
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-slate-300 bg-black/50 border border-white/5 p-3 rounded-xl max-h-40 overflow-y-auto select-text leading-relaxed font-sans scrollbar-thin scrollbar-thumb-white/10">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}
-                              components={{
-                                h3: ({ node, ...props }) => (
-                                  <h3 className="text-xs font-bold text-cyan-400 mt-1 mb-2 pb-1 border-b border-white/10 flex items-center gap-1 font-display" {...props} />
-                                ),
-                                h4: ({ node, ...props }) => (
-                                  <h4 className="text-[10px] font-bold text-amber-400/90 bg-amber-500/5 px-2 py-0.5 rounded mt-3 mb-1.5 inline-block font-mono" {...props} />
-                                ),
-                                p: ({ node, ...props }) => (
-                                  <p className="text-[10.5px] text-slate-300 leading-relaxed mb-1.5 font-sans opacity-95" {...props} />
-                                ),
-                                strong: ({ node, ...props }) => (
-                                  <strong className="text-white font-semibold" {...props} />
-                                ),
-                                blockquote: ({ node, ...props }) => (
-                                  <blockquote className="border-l border-cyan-500/50 bg-cyan-500/5 px-2 py-1 rounded-r-lg my-1 text-[10px] text-slate-400 leading-normal" {...props} />
-                                ),
-                                ul: ({ node, ...props }) => (
-                                  <ul className="list-disc pl-3 space-y-0.5 my-1 text-[10.5px]" {...props} />
-                                ),
-                                ol: ({ node, ...props }) => (
-                                  <ol className="list-decimal pl-3 space-y-0.5 my-1 text-[10.5px]" {...props} />
-                                ),
-                                li: ({ node, ...props }) => (
-                                  <li className="text-[10.5px] leading-relaxed" {...props} />
-                                ),
-                                hr: ({ node, ...props }) => (
-                                  <hr className="border-t border-white/5 my-2" {...props} />
-                                ),
-                                code: ({ node, ...props }) => (
-                                  <code className="bg-white/10 px-1 py-0.5 rounded font-mono text-[9.5px] text-cyan-200" {...props} />
-                                ),
-                                img: ({ node, src, alt, ...props }) => (
-                                  <img src={src} alt={alt} className="max-w-full h-auto rounded-lg border border-white/10 my-2" {...props} />
-                                ),
-                              }}
-                            >
-                              {activeModuleId && extractingModuleId === activeModuleId ? "⏳ 正在提取..." : (extractedContent || "暂无原文内容")}
-                            </ReactMarkdown>
-                          </div>
+                        <div className="space-y-1 bg-[#050508]/60 p-4 rounded-xl border border-white/5">
+                          <span className="text-slate-400 font-semibold block text-[10px] uppercase">知识机制与内聚度</span>
+                          <p className="text-slate-300 leading-normal font-medium">{getCohesionText(activeModule.cohesionDetail) || getInfoDensityText(activeModule.infoDensity) || "暂无分析"}</p>
                         </div>
                       </div>
 
-                      {/* Main Creation Grid */}
-                      <div className="space-y-5">
-                        
-                        {/* 1. Game Type Selector Card Row */}
-                        <div>
-                          <label className="block text-xs font-bold text-slate-300 mb-2 uppercase tracking-wide">
-                            STEP 1. 匹配游戏交互机制 (Choose Interactive Mechanic)
-                          </label>
-                          <div className="grid grid-cols-2 gap-3">
-                            {[
-                              { id: 'quiz', label: '知识诊断抢答', desc: '限时排障与高密度反思诊断' },
-                              { id: 'interactive-story', label: '危机对抗战役', desc: '面临解体临界抉择生死权衡' },
-                              { id: 'coding-puzzle', label: '逻辑重构焊接', desc: '故障代码检修与网络阻断' },
-                              { id: 'math-quest', label: '精密参数计算', desc: '高压参数极值限时对齐协议' }
-                            ].map((item) => (
+                      <div className="bg-[#030305]/60 border border-white/5 rounded-xl p-3.5 space-y-2">
+                        <span className="text-cyan-400 font-bold block text-[10px] uppercase tracking-wider">
+                          教材原文依据
+                        </span>
+                        <div className="text-[11px] text-slate-300 bg-black/50 border border-white/5 p-3 rounded-xl max-h-44 overflow-y-auto select-text leading-relaxed font-sans scrollbar-thin scrollbar-thumb-white/10">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                            {activeModuleId && extractingModuleId === activeModuleId ? "正在提取教材原文..." : (extractedContent || "暂无原文内容")}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+
+                      <div className="bg-amber-500/10 border border-amber-500/25 rounded-2xl p-4 text-xs text-amber-100 leading-relaxed">
+                        <div className="font-bold text-amber-300 mb-1 flex items-center gap-1.5">
+                          <Info className="w-4 h-4" /> 生成目标
+                        </div>
+                        不是生成题库，也不是让学生做 A/B/C/D 选择题，而是生成一个“场景对象、状态变量、用户操作、反馈规则、完成条件”齐备的模拟器设计 brief。
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateScript(activeModule.id)}
+                        className="w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-1.5 transition text-xs shadow-[0_0_20px_rgba(6,182,212,0.15)] cursor-pointer bg-cyan-500 hover:bg-cyan-600 text-white border border-cyan-400/20 active:scale-95"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-white" />
+                        生成本切片的互动模拟器脚本
+                      </button>
+                    </div>
+                  ) : activeModule.scriptStatus === 'completed' && getSimulationMarkdown(activeModule) ? (
+                    <div className="h-full flex flex-col gap-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
+                        <div className="flex items-center gap-2 bg-[#0a0a0f] border border-white/10 rounded-xl p-1">
+                          {[
+                            { id: 'simulator', label: '可视化预览', icon: Eye },
+                            { id: 'code', label: '源文本', icon: Code2 },
+                            { id: 'edit', label: '人工编辑', icon: Edit3 }
+                          ].map((tabItem) => {
+                            const Icon = tabItem.icon;
+                            return (
                               <button
-                                key={item.id}
+                                key={tabItem.id}
                                 type="button"
-                                onClick={() => handleUpdateModule(activeModule.id, { gameType: item.id as GameType })}
-                                className={`p-3.5 rounded-xl border text-left flex flex-col justify-between transition h-20 group relative overflow-hidden cursor-pointer ${
-                                  (activeModule.gameType || 'quiz') === item.id
-                                    ? 'bg-cyan-500/10 border-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.15)] text-white'
-                                    : 'bg-white/5 border-white/10 hover:border-white/20 text-slate-400 hover:text-white'
+                                onClick={() => setActiveTab(tabItem.id as 'simulator' | 'code' | 'edit')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                                  activeTab === tabItem.id
+                                    ? 'bg-cyan-500 text-white shadow-[0_0_12px_rgba(6,182,212,0.25)]'
+                                    : 'text-slate-400 hover:text-white hover:bg-white/5'
                                 }`}
                               >
-                                <span className="font-bold text-xs">{item.label}</span>
-                                <span className={`text-[9.5px] block leading-tight ${
-                                  (activeModule.gameType || 'quiz') === item.id ? 'text-cyan-300 font-medium' : 'text-slate-500'
-                                }`}>{item.desc}</span>
+                                <Icon className="w-3.5 h-3.5" />
+                                {tabItem.label}
                               </button>
-                            ))}
-                          </div>
+                            );
+                          })}
                         </div>
 
-                        {/* 2. Interactive Title and Scenario Rules Column */}
-                        <div className="space-y-3 pt-1">
-                          <div className="flex items-center justify-between">
-                            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wide">
-                              STEP 2. 设计冲突化情境 Scenario (Title & Rules)
-                            </label>
-                            
-                            {/* Recommend Button */}
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  setRecommendingId(activeModule.id);
-                                  const response = await fetch("/api/recommend-scenario", {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      chapterTitle: activeModule.title,
-                                      summary: activeModule.summary,
-                                      gameType: activeModule.gameType || 'quiz',
-                                      designRationale: activeModule.designRationale
-                                    })
-                                  });
-                                  const recommendation = await response.json();
-                                  if (recommendation && recommendation.gameTitle) {
-                                    handleUpdateModule(activeModule.id, {
-                                      gameTitle: recommendation.gameTitle,
-                                      gameRules: recommendation.gameRules
-                                    });
-                                    addAgentMessage(`⚡ 我已经帮您推荐了《${recommendation.gameTitle}》创意情景！您可以在匹配舱内直接微调，然后点击“启动合拢剧本合成”即可运行仿真！`);
-                                  }
-                                } catch (e) {
-                                  console.error(e);
-                                } finally {
-                                  setRecommendingId(null);
-                                }
-                              }}
-                              disabled={recommendingId === activeModule.id}
-                              className="text-[10px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer transition hover:border-cyan-500 hover:bg-cyan-500/20 active:scale-95"
-                            >
-                              {recommendingId === activeModule.id ? (
-                                <>
-                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
-                                  AI 创意智能构建中...
-                                </>
-                              ) : (
-                                <>
-                                  <Sparkles className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
-                                  ⚡ AI 专业推荐游戏创意
-                                </>
-                              )}
-                            </button>
-                          </div>
-
-                          <div className="space-y-3">
-                            {/* Scenario Title */}
-                            <div>
-                              <span className="text-[10px] font-bold text-slate-400 block mb-1">🎮 副本关卡命名 (Title)</span>
-                              <input 
-                                type="text"
-                                value={activeModule.gameTitle || ""}
-                                onChange={(e) => handleUpdateModule(activeModule.id, { gameTitle: e.target.value })}
-                                placeholder="如：核动力电离层平衡自限协议"
-                                className="w-full bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-xl p-2.5 text-xs text-white transition font-semibold"
-                              />
-                            </div>
-                            
-                            {/* Scenario Rules */}
-                            <div>
-                              <span className="text-[10px] font-bold text-slate-400 block mb-1">⚔️ 特遣冲突情境、虚拟角色及通关目标 (Rules)</span>
-                              <textarea 
-                                value={activeModule.gameRules || ""}
-                                onChange={(e) => handleUpdateModule(activeModule.id, { gameRules: e.target.value })}
-                                rows={3}
-                                placeholder="描述玩家扮演的角色，遭遇的物理/学术突发性级联崩溃，引导学生必须如何应用该切片的概念进行精准纠错/诊断判断以获胜。"
-                                className="w-full bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-xl p-2.5 text-xs text-slate-300 transition leading-relaxed resize-none"
-                              />
-                            </div>
-                          </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleCopySimulationMarkdown(getSimulationMarkdown(activeModule))}
+                            className="bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                          >
+                            {scriptCopySuccess ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> 已复制</> : <><Copy className="w-3.5 h-3.5" /> 复制给 AI coding</>}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveStep(4);
+                              addAgentMessage("✅ 模拟器脚本已确认。你现在可以把这份 Markdown brief 交给下一步 AI coding 生成完整互动网页。", 'script_ready');
+                            }}
+                            className="bg-cyan-500 hover:bg-cyan-600 text-white text-xs font-semibold px-4 py-1.5 rounded-lg flex items-center gap-1 transition shadow-[0_0_12px_rgba(6,182,212,0.3)] cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            确认脚本
+                          </button>
                         </div>
-
                       </div>
 
-                      {/* Giant Neon CTA Button to Compile Script */}
-                      <div className="pt-4 border-t border-white/5 space-y-2">
-                        <button
-                          type="button"
-                          onClick={() => handleGenerateScript(activeModule.id)}
-                          disabled={!activeModule.gameTitle || !activeModule.gameRules}
-                          className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-1.5 transition text-xs shadow-[0_0_20px_rgba(6,182,212,0.15)] cursor-pointer ${
-                            activeModule.gameTitle && activeModule.gameRules
-                              ? 'bg-cyan-500 hover:bg-cyan-600 text-white border border-cyan-400/20 active:scale-95'
-                              : 'bg-white/5 text-slate-500 border border-white/5 cursor-not-allowed'
-                          }`}
-                        >
-                          <Play className="w-3.5 h-3.5 text-white fill-white" />
-                          ⚔️ 启动合拢！生成互动仿真剧本 (Generate Simulation Playflow)
-                        </button>
-                        
-                        {!activeModule.gameTitle || !activeModule.gameRules ? (
-                          <div className="text-[9.5px] text-center text-slate-500 leading-normal">
-                            请填写 <strong>关卡命名</strong> 和 <strong>冲突情境</strong> (或点击右上角 “⚡ AI 专业推荐游戏创意” )，以激活副本合成
-                          </div>
-                        ) : (
-                          <div className="text-[9.5px] text-center text-cyan-500/80 leading-normal">
-                            ✨ 点击该按钮，Gemini 将根据上面的情境设定、大纲考点自适应合成 3 个极具深度的交互游戏难关！
-                          </div>
-                        )}
-                      </div>
-
-                    </div>
-                  ) : activeModule.scriptStatus === 'completed' && activeModule.script ? (
-                    
-                    // Main Completed View Container
-                    <div className="h-full">
-                      
-                      {/* Sub-view TAB A: Interactive Simulator Window */}
                       {activeTab === 'simulator' && (
-                        <div className="max-w-xl mx-auto bg-[#0a0a0f] border border-white/10 rounded-3xl shadow-lg overflow-hidden flex flex-col min-h-[380px] p-5">
-                          
-                          {/* Upper visual game header bar */}
-                          <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4 shrink-0">
-                            <div className="flex items-center gap-2">
-                              <h5 className="font-bold text-sm text-white font-display">
-                                🎮 {activeModule.gameTitle}
-                              </h5>
-                            </div>
-
-                            {/* Scoring monitor */}
-                            <div className="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
-                              <Trophy className="w-3.5 h-3.5" />
-                              积分: {gameSession.score}
-                            </div>
-                          </div>
-
-                          {/* GAME PLAYFLOW STAGE 1: INTRO */}
-                          {gameSession.currentChallengeIndex === 0 && !gameSession.isCompleted && !gameSession.showFeedback && !gameSession.selectedOption ? (
-                            <div className="flex-1 flex flex-col justify-between py-2">
-                              <div className="space-y-3.5">
-                                <div className="text-xs text-slate-400 flex items-center gap-1 uppercase tracking-wider font-extrabold">
-                                  <Compass className="w-3.5 h-3.5 text-cyan-400 animate-spin" /> Game Introduction Story
-                                </div>
-                                <h4 className="text-base font-bold text-white font-display leading-snug">
-                                  🎮 副本战役：“{activeModule.gameTitle}” 开启！
-                                </h4>
-                                <p className="text-sm text-slate-300 bg-[#050508] rounded-2xl p-4 border border-white/10 leading-relaxed italic">
-                                  “{activeModule.script.introduction}”
-                                </p>
-                                <div className="p-3.5 bg-cyan-500/10 rounded-xl border border-cyan-500/20 flex items-start gap-2.5">
-                                  <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-                                  <div className="text-xs text-slate-300 leading-relaxed">
-                                    <span className="font-semibold">玩法通关指南：</span> {activeModule.gameRules}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <button 
-                                onClick={() => setGameSession(prev => ({ ...prev, currentChallengeIndex: 0, showFeedback: false, textAnswer: "START" }))}
-                                className="w-full mt-4 bg-cyan-500 hover:bg-cyan-600 text-white py-3 rounded-2xl font-bold flex items-center justify-center gap-1.5 transition text-sm shadow-[0_0_15px_rgba(6,182,212,0.4)] cursor-pointerborder border-cyan-400/20"
-                              >
-                                投递神力并开辟挑战 <Play className="w-4 h-4 fill-white text-white" />
-                              </button>
-                            </div>
-                          ) : !gameSession.isCompleted ? (
-                            
-                            // LEVEL ACTIVE STAGES: Loops through 3 challenges
-                            <div className="flex-1 flex flex-col justify-between">
-                              
-                              {/* Upper level numbers map */}
-                              <div className="flex items-center justify-between text-xs text-slate-400 mb-3.5 shrink-0">
-                                <span className="font-bold flex items-center gap-1.5">
-                                  <Layers className="w-4 h-4 text-cyan-400 animate-pulse" />
-                                  进度: 关卡 {gameSession.currentChallengeIndex + 1} / {activeModule.script.challenges.length}
-                                </span>
-                                <span className="font-mono text-slate-500">{10 * (gameSession.currentChallengeIndex + 1)}% COMPLETED</span>
-                              </div>
-
-                              {/* Active challenge box */}
-                              {(() => {
-                                const challenge: GameChallenge = activeModule.script!.challenges[gameSession.currentChallengeIndex];
-                                if (!challenge) return null;
-
-                                return (
-                                  <div className="space-y-4 flex-1">
-                                    
-                                    {/* Challenge title */}
-                                    <div className="bg-[#050508] p-2 text-xs font-bold text-slate-300 rounded-lg border-l-4 border-cyan-500 font-display">
-                                      🛡️ {challenge.title}
-                                    </div>
-
-                                    {/* Question prompt text */}
-                                    <h4 className="text-sm font-bold text-slate-200 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/10">
-                                      {challenge.prompt}
-                                    </h4>
-
-                                    {/* DYNAMIC MECHANICS: Check game types rendering */}
-                                    {!gameSession.showFeedback ? (
-                                      
-                                      <div className="mt-4">
-                                        
-                                        {/* OPTION A: Multiple choice UI (for Quiz or Story or general Choices) */}
-                                        {challenge.options && challenge.options.length > 0 ? (
-                                          <div className="grid grid-cols-1 gap-2">
-                                            {challenge.options.map((opt, oIdx) => (
-                                              <button 
-                                                key={oIdx}
-                                                type="button"
-                                                onClick={() => handleCheckAnswer(challenge, opt)}
-                                                className="text-left w-full p-3 border border-white/10 hover:border-cyan-500 hover:bg-cyan-500/10 text-xs font-semibold text-slate-300 rounded-xl transition flex items-center gap-3 cursor-pointer"
-                                              >
-                                                <span className="w-5 h-5 bg-white/5 border border-white/10 text-slate-350 text-slate-300 text-[10px] font-bold rounded-lg flex items-center justify-center shrink-0">
-                                                  {String.fromCharCode(65 + oIdx)}
-                                                </span>
-                                                <span>{opt}</span>
-                                              </button>
-                                            ))}
-                                          </div>
-                                        ) : challenge.type === 'match' ? (
-                                          
-                                          // OPTION B: Interactive matching concept linking
-                                          <div className="space-y-2">
-                                            <p className="text-[10px] font-bold text-slate-400">请选择正确的匹配概念进行连线消消乐：</p>
-                                            <div className="grid grid-cols-2 gap-2">
-                                              <div className="p-3 bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 rounded-xl text-xs font-bold text-center">
-                                                科学名词等式
-                                              </div>
-                                              <div className="flex flex-col gap-1.5">
-                                                <button 
-                                                  onClick={() => handleSelectMatchPair(challenge, "Core Concept", challenge.correctAnswer)}
-                                                  className="p-2 border border-white/10 hover:border-cyan-500 hover:bg-cyan-500/10 rounded-xl text-xs font-semibold text-slate-300 text-center cursor-pointer transition"
-                                                >
-                                                  {challenge.correctAnswer} (正确释义)
-                                                </button>
-                                                <button 
-                                                  onClick={() => handleSelectMatchPair(challenge, "Core Concept", "无关混淆干扰定义...")}
-                                                  className="p-2 border border-white/10 hover:border-cyan-500 hover:bg-cyan-500/10 rounded-xl text-xs font-semibold text-slate-300 text-center cursor-pointer transition"
-                                                >
-                                                  相反性质物理常量
-                                                </button>
-                                              </div>
-                                            </div>
-                                          </div>
-
-                                        ) : (
-                                          
-                                          // OPTION C: Core fill in blank text inputs
-                                          <div className="space-y-2">
-                                            <input 
-                                              type="text"
-                                              placeholder="在这里键入您认为的最合适学术关键词（不区分大小写）..."
-                                              onKeyDown={(e) => {
-                                                if (e.key === "Enter") {
-                                                  handleCheckAnswer(challenge, (e.target as HTMLInputElement).value);
-                                                }
-                                              }}
-                                              className="w-full bg-[#050508] border border-white/10 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none rounded-xl p-3 text-xs text-white transition placeholder:text-slate-500"
-                                            />
-                                            <p className="text-[10px] text-slate-500">输入完毕后直接按下 **Enter 回车键** 提交验证。</p>
-                                          </div>
-
-                                        )}
-
-                                      </div>
-                                    ) : (
-                                      
-                                      // FEEDBACK SCREEN WITH GEMINI SCIENTIFIC INSIGHTS
-                                      <div className={`mt-4 p-4 rounded-2xl border ${
-                                        gameSession.isCorrect 
-                                          ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' 
-                                          : 'bg-rose-500/10 text-rose-300 border-rose-500/20'
-                                      }`}>
-                                        <div className="flex items-start gap-2 text-sm font-bold animate-fadeIn">
-                                          {gameSession.isCorrect ? (
-                                            <>
-                                              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                                              <span>回答正确！积分 +10 点 💫</span>
-                                            </>
-                                          ) : (
-                                            <>
-                                              <XCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5 animate-pulse" />
-                                              <span>未能答对该题，我们汲取经验：</span>
-                                            </>
-                                          )}
-                                        </div>
-
-                                        <p className="text-xs leading-relaxed mt-2 p-1 font-medium select-text text-slate-300">
-                                          {gameSession.isCorrect ? challenge.feedbackCorrect : challenge.feedbackIncorrect}
-                                        </p>
-                                        
-                                        <div className="text-[10px] text-slate-500 mt-2">
-                                          正确答案是：<span className="font-bold text-cyan-400 underline">{challenge.correctAnswer}</span>
-                                        </div>
-                                      </div>
-
-                                    )}
-
-                                  </div>
-                                );
-                              })()}
-
-                              {/* Simulator footer controls */}
-                              <div className="mt-4 pt-3 border-t border-white/10 shrink-0">
-                                {gameSession.showFeedback ? (
-                                  <button 
-                                    onClick={() => handleNextChallenge(activeModule.script!)}
-                                    className="w-full bg-cyan-500 hover:bg-cyan-600 text-white py-2.5 rounded-xl font-semibold flex items-center justify-center gap-1.5 transition text-xs shadow-[0_0_15px_rgba(6,182,212,0.3)] cursor-pointer"
-                                  >
-                                    下一级挑战 <ChevronRight className="w-4 h-4" />
-                                  </button>
-                                ) : (
-                                  <div className="text-center text-[10px] text-slate-500">
-                                    💡 玩家必须回答完本题才能推进关卡。提示：本挑战答案可在课本相应章节找到。
-                                  </div>
-                                )}
-                              </div>
-
-                            </div>
-                          ) : (
-                            
-                            // LEVEL COMPLETED STATS SCREEN
-                            <div className="flex-1 flex flex-col items-center justify-center text-center py-4 space-y-4 animate-scaleUp">
-                              <div className="relative">
-                                <div className="w-16 h-16 rounded-full bg-amber-500 flex items-center justify-center text-white scale-up animate-pulse shadow-md">
-                                  <Trophy className="w-8 h-8 fill-amber-300" />
-                                </div>
-                                <div className="absolute -top-1 -right-1 bg-cyan-500 border border-cyan-400/20 text-white rounded-full p-1 text-[8px] font-bold">
-                                  BEST
-                                </div>
-                              </div>
-
-                              <div className="space-y-1">
-                                <h4 className="font-bold text-base text-white font-display">
-                                  🏆 恭喜，关卡试炼圆满通关！
-                                </h4>
-                                <p className="text-xs text-slate-400 max-w-sm leading-normal">
-                                  您已完美达成了单元 **“{activeModule.title}”** 的全部学业积分。
-                                </p>
-                              </div>
-
-                              <div className="bg-white/5 px-5 py-3.5 rounded-2xl border border-white/10 flex items-center justify-between gap-8 shrink-0">
-                                <div className="text-center">
-                                  <div className="text-[10px] text-slate-500">本关累计得分</div>
-                                  <div className="text-lg font-bold text-cyan-400">{gameSession.score} / 30</div>
-                                </div>
-                                <div className="w-px bg-white/10 h-8"></div>
-                                <div className="text-center">
-                                  <div className="text-[10px] text-slate-500">学术评级等级</div>
-                                  <div className="text-md font-extrabold text-amber-500">
-                                    {gameSession.score >= 30 ? "SS 学术领跑者" : (gameSession.score >= 20 ? "A 卓越特等生" : "B 探索学员")}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <p className="text-xs text-slate-350 italic bg-[#050508] p-3 rounded-xl border border-white/10 max-w-sm">
-                                “{activeModule.script.conclusion}”
-                              </p>
-
-                              <div className="flex items-center gap-2 w-full pt-2">
-                                <button 
-                                  onClick={() => initGameSession(activeModule.script!)}
-                                  className="flex-1 border border-white/10 hover:bg-white/10 text-slate-300 py-2 rounded-xl font-semibold text-xs transition cursor-pointer"
-                                >
-                                  🔄 重刷此关
-                                </button>
-                                <button 
-                                  onClick={() => {
-                                    // Move to next module in list if available
-                                    const cIdx = modules.findIndex(m => m.id === activeModuleId);
-                                    if (cIdx >= 0 && cIdx < modules.length - 1) {
-                                      handleSelectModuleForSimulator(modules[cIdx + 1].id);
-                                    } else {
-                                      alert("恭喜您，这已经是整本书籍的最后一关啦！再次导出剧本给学生体验吧！");
-                                    }
-                                  }}
-                                  className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-white py-2 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1 cursor-pointer shadow-[0_0_15px_rgba(6,182,212,0.3)] border border-cyan-400/20"
-                                >
-                                  解锁下一本书章 <ChevronRight className="w-4 h-4" />
-                                </button>
-                              </div>
-
-                            </div>
-                          )}
-
+                        <div className="flex-1 bg-[#0a0a0f] border border-white/10 rounded-2xl overflow-y-auto p-6 max-h-[calc(100vh-250px)]">
+                          <article className="prose prose-invert prose-sm max-w-none prose-headings:font-display prose-headings:text-white prose-h1:text-2xl prose-h1:text-cyan-300 prose-h2:text-cyan-200 prose-h3:text-amber-200 prose-p:text-slate-300 prose-li:text-slate-300 prose-strong:text-white prose-code:text-cyan-200 prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-black/50 prose-pre:border prose-pre:border-white/10">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                              {getSimulationMarkdown(activeModule)}
+                            </ReactMarkdown>
+                          </article>
                         </div>
                       )}
 
-
-
-                      {/* Sub-view TAB B: Raw Exporting scripts codes */}
                       {activeTab === 'code' && (
                         <div className="space-y-3.5 h-full flex flex-col">
-                          
-                          {/* Export buttons utilities bar */}
                           <div className="flex items-center justify-between shrink-0">
-                            <span className="text-xs text-slate-500 font-medium">
-                              可复制的 Markdown/YAML 书籍游戏化剧本配置文件 (CSV-compatible)
-                            </span>
-                            <div className="flex items-center gap-2">
-                              <button 
-                                onClick={() => handleCopyScriptMarkdown(activeModule.script!)}
-                                className="bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
-                              >
-                                {scriptCopySuccess ? (
-                                  <>
-                                    <Check className="w-3.5 h-3.5 text-emerald-400" /> 已复制到剪切板！
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="w-3.5 h-3.5" /> 复制剧本源文本
-                                  </>
-                                )}
-                              </button>
-                            </div>
+                            <span className="text-xs text-slate-500 font-medium">可复制给 AI coding 的结构化 Markdown 模拟器脚本</span>
                           </div>
-
-                          {/* JetBrains Mono beautiful code representation document */}
-                          <div className="flex-1 bg-[#0a0a0f] border border-white/10 rounded-2xl p-4 overflow-auto max-h-[460px]">
-                            <pre className="text-[11px] font-mono whitespace-pre text-slate-300 leading-relaxed select-text">
-{`# 【BookToGame 智能课程配方清单】
-教材名称: 《${bookTitle}》
-当前课章: ${activeModule.chapterIndex} · ${activeModule.title}
-覆盖重点知识要项: ${activeModule.summary}
-关卡代号: ${activeModule.gameTitle}
-
----
-
-## ── 【第一阶段：宇宙世界观宏伟开局】 ──
-背景引言 (Storyline Scenario):
-"${activeModule.script.introduction}"
-
-## ── 【第二阶段：三重深度游戏化关卡】 ──
-${activeModule.script.challenges.map((challenge, cIdx) => `
-### [等级试炼 ${cIdx + 1}] -> ${challenge.title}
-* 挑战类别: ${challenge.type}
-* 主线考卷题目: "${challenge.prompt}"
-${challenge.options ? `* 可选游戏决策卡:\n   ${challenge.options.map((opt, oIdx) => `[${String.fromCharCode(65 + oIdx)}] ${opt}`).join("\n   ")}` : '* 作答方式: 玩家物理单词填空'}
-* 官方底稿答案: "${challenge.correctAnswer}"
-* 答对反馈释义: "${challenge.feedbackCorrect}"
-* 答错挽救提示: "${challenge.feedbackIncorrect}"
-`).join("\n")}
-
-## ── 【第三阶段：本章科学法则复盘总纲】 ──
-复盘总结:
-"${activeModule.script.conclusion}"
-`}
-                            </pre>
+                          <div className="flex-1 bg-[#0a0a0f] border border-white/10 rounded-2xl p-4 overflow-auto max-h-[calc(100vh-260px)]">
+                            <pre className="text-[11px] font-mono whitespace-pre-wrap text-slate-300 leading-relaxed select-text">{getSimulationMarkdown(activeModule)}</pre>
                           </div>
-
                         </div>
                       )}
 
-                      {/* Sub-view TAB C: Interactive Script Editor */}
                       {activeTab === 'edit' && (
                         <div className="space-y-4 h-full flex flex-col">
                           <div className="flex items-center justify-between shrink-0">
                             <span className="text-xs text-slate-400 font-semibold flex items-center gap-1.5">
                               <Edit3 className="w-4 h-4 text-cyan-400" />
-                              进行戏剧化剧本/考题关卡精细化修改 (Interactive Script Editor)
+                              人工二次编辑模拟器脚本
                             </span>
-                            <button
-                              onClick={() => {
-                                setActiveStep(4);
-                                addAgentMessage("✨ 剧本及挑战关卡修改确认完毕！接下来请设置您最喜欢的 UI 界面偏好风格并选择您需要色彩系统，我们即将生成最终的独立游戏应用代码。");
-                              }}
-                              className="bg-cyan-500 hover:bg-cyan-600 text-white text-xs font-semibold px-4 py-1.5 rounded-lg flex items-center gap-1 transition shadow-[0_0_12px_rgba(6,182,212,0.3)] cursor-pointer"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              确认剧本，进入下一步
-                            </button>
+                            <span className="text-[10px] text-slate-500">修改会自动保存到当前项目脚本记录</span>
                           </div>
-
-                          <div className="flex-1 bg-[#0a0a0f] border border-white/10 rounded-2xl p-4 overflow-y-auto max-h-[460px] space-y-6">
-                            
-                            {/* Intro Story */}
-                            <div className="space-y-2">
-                              <h4 className="text-sm font-bold text-slate-200 border-l-2 border-cyan-500 pl-2">
-                                🌌 【本章开场剧情故事 / 背景世界观引导】 (Game Introduction)
-                              </h4>
-                              <p className="text-[11px] text-slate-500">剧本开场引入，用于引发学生的沉浸式代入好奇心：</p>
-                              <textarea
-                                value={activeModule.script.introduction}
-                                onChange={(e) => handleUpdateScriptField(activeModule.id, 'introduction', e.target.value)}
-                                className="w-full h-24 bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-3 text-xs text-slate-300 transition resize-none leading-relaxed focus:ring-1 focus:ring-cyan-500"
-                              />
-                            </div>
-
-                            {/* Challenges list */}
-                            <div className="space-y-6">
-                              <h4 className="text-sm font-bold text-slate-200 border-l-2 border-cyan-500 pl-2">
-                                🛡️ 【关卡详细题目与答疑库】 (Active Challenges)
-                              </h4>
-                              
-                              {activeModule.script.challenges.map((challenge, cIdx) => (
-                                <div key={cIdx} className="bg-[#050508] border border-white/5 rounded-xl p-4 space-y-4">
-                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-2">
-                                    <span className="text-xs font-bold text-cyan-400 flex items-center gap-2">
-                                      <span className="w-5 h-5 bg-cyan-500/20 text-cyan-300 rounded-full flex items-center justify-center font-extrabold text-[11px]">
-                                        {cIdx + 1}
-                                      </span>
-                                      关卡等级: {challenge.title}
-                                    </span>
-                                    <input
-                                      type="text"
-                                      value={challenge.title}
-                                      onChange={(e) => handleUpdateChallengeField(activeModule.id, cIdx, 'title', e.target.value)}
-                                      placeholder="例如：关卡 1: 化学平衡漏口"
-                                      className="bg-white/5 border border-white/10 hover:border-white/20 focus:border-cyan-500 outline-none rounded px-2.5 py-1 text-xs text-slate-200 font-semibold transition"
-                                    />
-                                  </div>
-
-                                  {/* Prompt */}
-                                  <div className="space-y-1">
-                                    <label className="block text-[10px] font-bold text-slate-400">问题或冒险情境说明 (Question Prompt)</label>
-                                    <textarea
-                                      value={challenge.prompt}
-                                      onChange={(e) => handleUpdateChallengeField(activeModule.id, cIdx, 'prompt', e.target.value)}
-                                      className="w-full h-16 bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-2.5 text-xs text-slate-300 resize-none leading-relaxed focus:ring-1 focus:ring-cyan-500"
-                                    />
-                                  </div>
-
-                                  {/* Options (if multiple choice or match) */}
-                                  {challenge.options && challenge.options.length > 0 && (
-                                    <div className="space-y-2">
-                                      <label className="block text-[10px] font-bold text-slate-400">问题可选项 (Choices & Options)</label>
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        {challenge.options.map((opt, oIdx) => (
-                                          <div key={oIdx} className="flex items-center gap-2 bg-[#050508] border border-white/5 p-1 rounded">
-                                            <span className="text-xs text-slate-500 font-bold px-1.5">{String.fromCharCode(65 + oIdx)}</span>
-                                            <input
-                                              type="text"
-                                              value={opt}
-                                              onChange={(e) => handleUpdateChallengeOption(activeModule.id, cIdx, oIdx, e.target.value)}
-                                              className="flex-1 bg-transparent outline-none text-xs text-slate-300"
-                                            />
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {/* Correct answer & validation */}
-                                  <div className="space-y-1.5">
-                                    <label className="block text-[10px] font-bold text-slate-400">官方标准答案 / 必填匹配对 (Correct Answer)</label>
-                                    <input
-                                      type="text"
-                                      value={challenge.correctAnswer}
-                                      onChange={(e) => handleUpdateChallengeField(activeModule.id, cIdx, 'correctAnswer', e.target.value)}
-                                      className="w-full bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-2 text-xs text-emerald-400 font-semibold focus:ring-1 focus:ring-cyan-500"
-                                    />
-                                    {challenge.options && challenge.options.length > 0 && !challenge.options.includes(challenge.correctAnswer) && (
-                                      <p className="text-[10px] text-amber-500 flex items-center gap-1 bg-amber-500/10 p-1 rounded border border-amber-500/20">
-                                        <AlertCircle className="w-3.5 h-3.5" /> 提示：当前标准答案和可选项内容未能精确吻合，请确保两边文字拼写及空格完全一致。
-                                      </p>
-                                    )}
-                                  </div>
-
-                                  {/* Feedbacks */}
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
-                                    <div className="space-y-1">
-                                      <label className="block text-[10px] font-bold text-slate-400 text-emerald-400">回答正确释义反馈 (Correct Feedback)</label>
-                                      <textarea
-                                        value={challenge.feedbackCorrect}
-                                        onChange={(e) => handleUpdateChallengeField(activeModule.id, cIdx, 'feedbackCorrect', e.target.value)}
-                                        className="w-full h-16 bg-[#050508] border border-emerald-500/20 focus:border-emerald-500 outline-none rounded-lg p-2 text-xs text-slate-300 resize-none leading-relaxed focus:ring-1 focus:ring-emerald-500"
-                                      />
-                                    </div>
-                                    <div className="space-y-1">
-                                      <label className="block text-[10px] font-bold text-rose-400">回答错误纠偏提示 (Incorrect Feedback)</label>
-                                      <textarea
-                                        value={challenge.feedbackIncorrect}
-                                        onChange={(e) => handleUpdateChallengeField(activeModule.id, cIdx, 'feedbackIncorrect', e.target.value)}
-                                        className="w-full h-16 bg-[#050508] border border-rose-500/20 focus:border-rose-500 outline-none rounded-lg p-2 text-xs text-slate-300 resize-none leading-relaxed focus:ring-1 focus:ring-rose-500"
-                                      />
-                                    </div>
-                                  </div>
-
-                                </div>
-                              ))}
-                            </div>
-
-                            {/* Final Conclusion */}
-                            <div className="space-y-2">
-                              <h4 className="text-sm font-bold text-slate-200 border-l-2 border-cyan-500 pl-2">
-                                🏁 【终关复盘与学业总结】 (Game Conclusion Summary)
-                              </h4>
-                              <p className="text-[11px] text-slate-500">本章战役顺利过关后的科学道理高度复盘总结：</p>
-                              <textarea
-                                value={activeModule.script.conclusion}
-                                onChange={(e) => handleUpdateScriptField(activeModule.id, 'conclusion', e.target.value)}
-                                className="w-full h-24 bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-3 text-xs text-slate-300 transition resize-none leading-relaxed focus:ring-1 focus:ring-cyan-500"
-                              />
-                            </div>
-
-                          </div>
+                          <textarea
+                            value={getSimulationMarkdown(activeModule)}
+                            onChange={(e) => handleUpdateSimulationMarkdown(activeModule.id, e.target.value)}
+                            className="flex-1 min-h-[480px] bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-2xl p-4 text-xs text-slate-200 transition resize-none leading-relaxed focus:ring-1 focus:ring-cyan-500 font-mono"
+                          />
                         </div>
                       )}
-
                     </div>
                   ) : null}
 
@@ -4172,6 +3446,67 @@ ${challenge.options ? `* 可选游戏决策卡:\n   ${challenge.options.map((opt
               </div>
 
             </div>
+          )}
+
+          {/* API Debug Drawer */}
+          {showApiDrawer && (
+            <>
+              <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setShowApiDrawer(false)} />
+              <div className="fixed top-0 right-0 h-full w-[520px] bg-[#0a0a0f] border-l border-white/10 z-50 flex flex-col shadow-2xl">
+                <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <Settings className="w-4 h-4 text-purple-400" />
+                    <h3 className="font-bold text-sm text-white">API 调用调试面板</h3>
+                  </div>
+                  <button onClick={() => setShowApiDrawer(false)} className="p-1.5 hover:bg-white/10 rounded-lg transition cursor-pointer">
+                    <X className="w-4 h-4 text-slate-400" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">调用模型</label>
+                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 text-xs text-purple-400 font-mono font-bold">{apiDebugInfo.model}</div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">调用状态</label>
+                    <div className={`rounded-lg p-3 text-xs font-bold flex items-center gap-2 ${
+                      apiDebugInfo.status === 'idle' ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20' :
+                      apiDebugInfo.status === 'calling' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                      apiDebugInfo.status === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                      'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                    }`}>
+                      {apiDebugInfo.status === 'idle' && <Info className="w-3.5 h-3.5" />}
+                      {apiDebugInfo.status === 'calling' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                      {apiDebugInfo.status === 'success' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                      {apiDebugInfo.status === 'error' && <XCircle className="w-3.5 h-3.5" />}
+                      {apiDebugInfo.status === 'idle' && '尚未调用'}
+                      {apiDebugInfo.status === 'calling' && '正在调用中...'}
+                      {apiDebugInfo.status === 'success' && '调用成功'}
+                      {apiDebugInfo.status === 'error' && '调用失败'}
+                      {apiDebugInfo.timestamp && <span className="ml-auto text-[10px] opacity-60 font-mono">{apiDebugInfo.timestamp}</span>}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">系统指令</label>
+                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-48 overflow-y-auto">
+                      <pre className="text-[10px] text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">{apiDebugInfo.systemPrompt || simulationBlueprintSystemPrompt}</pre>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">用户指令</label>
+                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-48 overflow-y-auto">
+                      <pre className="text-[10px] text-cyan-300 whitespace-pre-wrap leading-relaxed font-mono">{apiDebugInfo.userPrompt || '（尚未生成）'}</pre>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">API 原始返回</label>
+                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-64 overflow-y-auto">
+                      <pre className="text-[10px] text-emerald-300 whitespace-pre-wrap leading-relaxed font-mono">{apiDebugInfo.rawResponse || '（无返回结果）'}</pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
           )}
 
           {/* Step 5 View: UI Preferences and App Generation */}

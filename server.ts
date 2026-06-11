@@ -35,7 +35,7 @@ app.use("/api/pdf-images", express.static(path.join(process.cwd(), "uploads", "p
 const AI_PROVIDER = process.env.AI_PROVIDER || "deepseek"; // "deepseek", "dashscope", "gemini", "ollama", or "huggingface"
 
 // DeepSeek API client
-async function callDeepSeek(prompt: string, systemPrompt: string = "", model: string = "", maxTokens: number = 4096): Promise<string> {
+async function callDeepSeek(prompt: string, systemPrompt: string = "", model: string = "", maxTokens: number = 4096, jsonMode: boolean = true): Promise<string> {
   try {
     const deepseekModel = model || process.env.DEEPSEEK_MODEL || "deepseek-chat";
     const deepseekApiKey = process.env.DEEPSEEK_API_KEY || "";
@@ -44,13 +44,7 @@ async function callDeepSeek(prompt: string, systemPrompt: string = "", model: st
       throw new Error("DEEPSEEK_API_KEY is not configured");
     }
     
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${deepseekApiKey}`
-      },
-      body: JSON.stringify({
+    const requestBody = JSON.stringify({
         model: deepseekModel,
         messages: [
           { role: "system", content: systemPrompt },
@@ -58,9 +52,34 @@ async function callDeepSeek(prompt: string, systemPrompt: string = "", model: st
         ],
         temperature: 0.7,
         max_tokens: maxTokens,
-        response_format: { type: "json_object" }
-      })
-    });
+        ...(jsonMode ? { response_format: { type: "json_object" } } : {})
+      });
+
+    let response: Response | null = null;
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        response = await fetch("https://api.deepseek.com/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${deepseekApiKey}`
+          },
+          body: requestBody
+        });
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        if (attempt === 2) throw err;
+        console.warn("DeepSeek fetch aborted, retrying once...");
+        await new Promise(resolve => setTimeout(resolve, 700));
+      }
+    }
+
+    if (!response) {
+      throw lastError || new Error("DeepSeek API request failed");
+    }
     
     if (!response.ok) {
       const errorText = await response.text();
@@ -76,7 +95,7 @@ async function callDeepSeek(prompt: string, systemPrompt: string = "", model: st
 }
 
 // DashScope (阿里云通义千问) API client
-async function callDashScope(prompt: string, systemPrompt: string = "", model: string = ""): Promise<string> {
+async function callDashScope(prompt: string, systemPrompt: string = "", model: string = "", jsonMode: boolean = true): Promise<string> {
   try {
     const dashscopeModel = model || process.env.DASHSCOPE_MODEL || "qwen-plus";
     const dashscopeApiKey = process.env.DASHSCOPE_API_KEY || "";
@@ -99,7 +118,7 @@ async function callDashScope(prompt: string, systemPrompt: string = "", model: s
         ],
         temperature: 0.7,
         max_tokens: 4096,
-        response_format: { type: "json_object" }
+        ...(jsonMode ? { response_format: { type: "json_object" } } : {})
       })
     });
     
@@ -137,7 +156,7 @@ function getGenAI(): GoogleGenAI {
 }
 
 // Ollama API client
-async function callOllama(prompt: string, systemPrompt: string = "", model: string = ""): Promise<string> {
+async function callOllama(prompt: string, systemPrompt: string = "", model: string = "", jsonMode: boolean = true): Promise<string> {
   try {
     const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
     const ollamaModel = model || process.env.OLLAMA_MODEL || "llama3.1:8b";
@@ -149,7 +168,7 @@ async function callOllama(prompt: string, systemPrompt: string = "", model: stri
         model: ollamaModel,
         prompt: prompt,
         system: systemPrompt,
-        format: "json",
+        ...(jsonMode ? { format: "json" } : {}),
         stream: false
       })
     });
@@ -999,10 +1018,10 @@ app.post("/api/generate-script", async (req, res) => {
       bookTitle, 
       chapterTitle, 
       chapterIndex, 
-      summary, 
-      gameType, 
-      gameTitle, 
-      gameRules, 
+      summary,
+      infoDensity,
+      cohesionDetail,
+      designRationale,
       extractedContent 
     } = req.body;
 
@@ -1010,62 +1029,81 @@ app.post("/api/generate-script", async (req, res) => {
       return res.status(400).json({ error: "Missing required chapter metadata (chapterTitle)." });
     }
 
-    const activeGameType = gameType || "quiz";
-    const activeGameTitle = gameTitle || `${chapterTitle}核心知识闯关`;
-    const activeGameRules = gameRules || "通过问答和交互挑战，在游戏场景中论证并巩固该章节的核心理论与概念考点。";
+    const systemInstruction = `你是一名“教学模拟产品设计师 + 互动学习脚本架构师”。
 
-    const systemInstruction = `You are a creative educational writer and game scripting system.
-You will write a step-by-step interactive gaming script (specifically 3 challenges) designed to teach and quiz students about a school book chapter.
-Based on the chapter details, formulate:
-1. An introduction story/scenario context: Establish a quest, virtual lab, workspace portal, or team mission.
-2. Exactly 3 comprehensive, progressive questions/challenges ('challenges') of matching type:
-   - For 'quiz' / 'interactive-story': Make type 'choice' or 'question', providing four standard visual 'options', and set 'correctAnswer' to the correct option index or exact choice.
-   - For 'cross-match': Set type 'match', where prompt contains the matching item, options contain a few distinct definitions, and correctAnswer is the correct definition string.
-   - For 'fill-blank': Set type 'blank', prompt should be a sentence with a missing word, and correctAnswer is the single correct keyword.
-   - For 'coding-puzzle': Set type 'puzzle', prompt should contain code snippets with errors, and correctAnswer is the correct snippet format.
-   - For 'math-quest': Set type 'question' or 'choice', focusing on academic numeric step solving.
-3. A nice wrap-up educational conclusion explaining the principles of the gameplay.
+你的任务不是生成 quiz、选择题、判断题、填空题、题库、剧情问答或换皮闯关。
+你的任务是把一个教学切片转化为一份可交给 AI coding agent 实现的“可视化、沉浸式、问题驱动的互动模拟器生成脚本”。
 
-Provide extremely high-quality feedback logs explaining the scientific or historical reasoning why an answer is correct or not.
+核心原则：
+1. 每个模拟必须围绕一个综合问题场景。学生进入具体情境，扮演具体角色，面对必须使用本切片知识才能解决的任务。
+2. 互动必须是“应用知识干预场景”，不是“回忆知识回答问题”。学生应观察场景、调整变量、选择策略、安排步骤、诊断原因、分配资源、预测后果或优化方案。
+3. 知识点必须变成场景机制。切片中的概念、关系、流程、判断标准必须映射为可观察对象、状态变量、用户操作、反馈规则、成功/失败条件。
+4. 反馈必须体现因果。每次操作后的反馈要说明场景发生了什么变化、为什么会这样、对应教材中的哪个机制、下一步应如何调整。
+5. 视觉设计要服务教学内容。不同学科应生成不同模拟形态，例如应急处置、课堂/角色实践、变量实验室、诊断决策、系统优化、流程搭建、情境推理、证据研判等。不要套用固定玩法模板。
 
-Output ONLY valid JSON format:
-{
-  "introduction": "场景介绍",
-  "challenges": [
-    {
-      "type": "choice|question|blank|match|puzzle",
-      "title": "关卡标题",
-      "prompt": "问题描述",
-      "options": ["选项1", "选项2", "选项3", "选项4"],
-      "correctAnswer": "正确答案",
-      "feedbackCorrect": "正确反馈",
-      "feedbackIncorrect": "错误反馈"
-    }
-  ],
-  "conclusion": "结束语"
-}
-Reply in Chinese only.`;
+输出要求：
+- 使用中文。
+- 输出结构化 Markdown，不要输出 JSON，不要输出代码。
+- 这份 Markdown 将被 AI coding agent 直接用来生成网页应用，所以必须具体、可实现、可渲染、可编辑。
+- 必须包含页面布局、主要组件、场景对象、状态变量、交互阶段、操作反馈、知识机制解释和完成条件。
 
-    const promptText = `Generate a fully functional step-by-step game script for Chapter ${chapterIndex}: "${chapterTitle}" in "${bookTitle || 'Textbook'}".
-Chapter Objectives: ${summary}
-Proposed Game: ${activeGameTitle} (${activeGameRules})
-Target Game Class Mode: ${activeGameType}
-Reference Textbook Text Snippet:\n\n${(extractedContent || "General academic curriculum rules relative to " + chapterTitle).substring(0, 8000)}\n\n
-Make the challenges direct, logical, scientific and fully complete. Ensure all options are list array strings. Set correctAnswers to match options exactly.`;
+禁止：
+- “请选择正确答案”
+- A/B/C/D 答题卡
+- 判断题/填空题/单纯问答
+- 只有剧情，没有可操作对象或状态变化
+- 只有讲解，没有模拟任务
+- 每个阶段只是一个 quiz question`;
+
+    const promptText = `请基于以下教学切片，生成一份“可交给 AI coding 实现的沉浸式学习模拟器脚本”。
+
+教材名称：
+${bookTitle || "Textbook"}
+
+教学切片：
+${chapterIndex || ""} - ${chapterTitle}
+
+切片学习目标：
+${typeof summary === "string" ? summary : JSON.stringify(summary, null, 2)}
+
+信息密度与知识内聚分析：
+${typeof infoDensity === "string" ? infoDensity : JSON.stringify(infoDensity || {}, null, 2)}
+${typeof cohesionDetail === "string" ? cohesionDetail : JSON.stringify(cohesionDetail || {}, null, 2)}
+
+教学设计理由：
+${designRationale || "未提供"}
+
+教材原文：
+${(extractedContent || "General academic curriculum rules relative to " + chapterTitle).substring(0, 8000)}
+
+请先判断这个教学切片最适合被转化成哪一种互动模拟形式，然后输出结构化 Markdown。建议包含以下章节：
+
+# 模拟器标题
+## 1. 教学切片理解
+## 2. 模拟器概念
+## 3. 可视化场景设计
+## 4. 状态变量与知识机制映射
+## 5. 交互流程
+## 6. 操作反馈规则
+## 7. 完成条件与学习反思
+## 8. 给 AI coding 的实现说明
+
+请确保它不是题库，而是一个学生可以通过观察、干预、验证、修正来完成的互动模拟器。`;
 
     let outputText: string;
     
     if (AI_PROVIDER === "deepseek") {
-      console.log("🔄 Using DeepSeek for script generation...");
-      outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash");
+      const scriptModel = process.env.DEEPSEEK_SCRIPT_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-chat";
+      console.log(`🔄 Using DeepSeek (${scriptModel}) for scenario script generation...`);
+      outputText = await callDeepSeek(promptText, systemInstruction, scriptModel, 6144, false);
     } else if (AI_PROVIDER === "dashscope") {
-      console.log("🔄 Using DashScope (通义千问) for script generation...");
-      outputText = await callDashScope(promptText, systemInstruction);
+      console.log("🔄 Using DashScope (通义千问) for scenario script generation...");
+      outputText = await callDashScope(promptText, systemInstruction, "", false);
     } else if (AI_PROVIDER === "ollama") {
-      console.log("🔄 Using Ollama for script generation...");
-      outputText = await callOllama(promptText, systemInstruction);
+      console.log("🔄 Using Ollama for scenario script generation...");
+      outputText = await callOllama(promptText, systemInstruction, "", false);
     } else if (AI_PROVIDER === "huggingface") {
-      console.log("🔄 Using Hugging Face for script generation...");
+      console.log("🔄 Using Hugging Face for scenario script generation...");
       outputText = await callHuggingFace(promptText, systemInstruction);
     } else {
       const key = process.env.GEMINI_API_KEY;
@@ -1073,47 +1111,18 @@ Make the challenges direct, logical, scientific and fully complete. Ensure all o
         return res.status(401).json({ 
           error: "GEMINI_API_KEY 未配置",
           message: "请在 .env 文件中设置有效的 Google Gemini API Key，或者设置 AI_PROVIDER=dashscope 使用阿里云通义千问。",
-          detail: "当前无法调用 AI 模型生成游戏脚本，请先配置 API Key 或切换到 DashScope。"
+          detail: "当前无法调用 AI 模型生成场景脚本，请先配置 API Key 或切换到 DashScope。"
         });
       }
       
       const ai = getGenAI();
-      console.log("🔄 Using Gemini for script generation...");
+      console.log("🔄 Using Gemini for scenario script generation...");
       
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: promptText,
         config: {
-          systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              introduction: { type: Type.STRING },
-              challenges: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    type: { type: Type.STRING, description: "Must be 'choice', 'question', 'blank', 'match', or 'puzzle'" },
-                    title: { type: Type.STRING, description: "Creative step level name" },
-                    prompt: { type: Type.STRING, description: "Question prompt, riddle, code puzzle block, or math challenge" },
-                    options: { 
-                      type: Type.ARRAY, 
-                      items: { type: Type.STRING },
-                      description: "Array of potential answers"
-                    },
-                    correctAnswer: { type: Type.STRING, description: "The exact matching answer" },
-                    feedbackCorrect: { type: Type.STRING, description: "Deep educational recap" },
-                    feedbackIncorrect: { type: Type.STRING, description: "Insightful hint" }
-                  },
-                  required: ["type", "title", "prompt", "correctAnswer", "feedbackCorrect", "feedbackIncorrect"]
-                }
-              },
-              conclusion: { type: Type.STRING }
-            },
-            required: ["introduction", "challenges", "conclusion"]
-          }
+          systemInstruction
         }
       });
       
@@ -1123,17 +1132,90 @@ Make the challenges direct, logical, scientific and fully complete. Ensure all o
       }
     }
 
-    try {
-      const parsedScript = parseJsonResponse(outputText);
-      res.json(parsedScript);
-    } catch (parseErr) {
-      console.error("JSON parsing of script failed, raw chunk was:", outputText);
-      res.status(500).json({ error: "Failed to parse script as JSON.", raw: outputText });
-    }
+    res.json({
+      markdown: outputText.trim(),
+      _meta: {
+        model: AI_PROVIDER === "deepseek" ? (process.env.DEEPSEEK_SCRIPT_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-chat") : AI_PROVIDER,
+        provider: AI_PROVIDER,
+        systemInstruction,
+        userPrompt: promptText
+      }
+    });
 
   } catch (error: any) {
-    console.error("Error generating interactive script:", error);
+    console.error("Error generating scenario script:", error);
     res.status(500).json({ error: error.message || "External endpoint processing error" });
+  }
+});
+
+app.post("/api/generate-app-code", async (req, res) => {
+  try {
+    const { bookTitle, uiTheme, primaryColor, modules } = req.body;
+    if (!modules || !Array.isArray(modules) || modules.length === 0) {
+      return res.status(400).json({ error: "Missing simulation blueprint modules." });
+    }
+
+    const systemInstruction = `你是一名资深前端工程师和教育模拟器产品实现专家。
+
+你的任务是根据一组教学模拟器 Markdown brief，生成一个可直接复制到 React/Vite 项目中运行的单文件 React + TypeScript 应用组件。
+
+硬性要求：
+- 只输出代码，不要输出解释文字。
+- 使用 React 函数组件，默认导出组件。
+- 不要调用任何外部 API，不要依赖后端。
+- 不要使用传统 quiz/题库模板。
+- 应根据 brief 中的场景对象、状态变量、交互流程、反馈规则，实现可视化、沉浸式、问题驱动的模拟互动。
+- 用内置状态管理模拟变量变化、学生操作、阶段推进和反馈。
+- 代码应包含样例数据常量，来自输入 brief。
+- 样式使用 Tailwind CSS className；不要引入 CSS 文件。
+- 可以使用 lucide-react 图标，但不要假设其他第三方 UI 库存在。
+- 输出一个完整 TSX 文件内容。`;
+
+    const promptText = `请基于以下 BookToGame 互动模拟器 brief，生成一个完整的 React/TypeScript 单文件应用组件。
+
+教材名称：
+${bookTitle || "未命名教材"}
+
+视觉主题：
+${uiTheme || "minimal"}
+
+强调色：
+${primaryColor || "#06b6d4"}
+
+模拟器 brief 列表：
+${modules.map((mod: any, idx: number) => `
+===== MODULE ${idx + 1}: ${mod.chapterIndex || ""} ${mod.title || ""} =====
+${mod.markdown || ""}
+`).join("\n\n")}
+
+实现要求：
+1. 第一屏直接是可用的模拟器，不要做营销 landing page。
+2. 左侧或顶部提供模块切换。
+3. 每个模块要有独立的场景面板、状态变量面板、学生操作区、反馈区和学习反思区。
+4. 学生操作应改变状态变量或场景状态，而不是只判断对错。
+5. 反馈要解释变量变化背后的知识机制。
+6. 界面要精致、稳定、适合教学演示，避免文字溢出。
+7. 只输出 TSX 代码，不要 Markdown 代码围栏。`;
+
+    const outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 12000, false);
+    const code = outputText
+      .trim()
+      .replace(/^```(?:tsx|typescript|ts|jsx|javascript|js)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    res.json({
+      code,
+      _meta: {
+        model: "deepseek-v4-flash",
+        provider: "deepseek",
+        systemInstruction,
+        userPrompt: promptText
+      }
+    });
+  } catch (error: any) {
+    console.error("Error generating app code:", error);
+    res.status(500).json({ error: error.message || "Failed to generate app code" });
   }
 });
 
