@@ -165,6 +165,9 @@ def is_bold_heading_pattern(text: str) -> tuple:
     if m:
         num_part = m.group(1)
         title_part = m.group(2)
+        # 辅助标题（ACTIVITY/SELF-TEST 等）固定使用 H4
+        if is_auxiliary_heading(title_part):
+            return (4, f"{num_part} {title_part}")
         # 根据数字层级判断标题级别
         dots = num_part.count('.')
         level = min(dots + 1, 4)  # 1.1.1 -> 3级, 1.1 -> 2级, 1 -> 1级
@@ -179,6 +182,9 @@ def is_heading_fragment(text: str) -> bool:
         return False
     # 以数字开头（如 1.1 Background...）
     if re.match(r'^\d+\.\d+', stripped):
+        # 如果是完整的标题（包含冒号或长度较长），不是片段
+        if ':' in stripped or len(stripped) > 40:
+            return False
         # 如果结尾没有句号、问号、感叹号，可能是片段
         if not re.search(r'[.!?]$', stripped):
             return True
@@ -200,8 +206,12 @@ def split_multiple_headings(text: str) -> list:
     for match in matches:
         num_part = match.group(1)
         title_part = match.group(2).strip()
-        dots = num_part.count('.')
-        level = min(dots + 1, 4)
+        # 辅助标题固定使用 H4
+        if is_auxiliary_heading(title_part):
+            level = 4
+        else:
+            dots = num_part.count('.')
+            level = min(dots + 1, 4)
         prefix = '#' * level
         results.append(f"{prefix} {num_part} {title_part}")
     
@@ -249,6 +259,16 @@ def extract_number_from_line(text: str) -> str:
     return None
 
 
+# 辅助标题关键词（活动、自测、术语、总结、参考等）
+AUXILIARY_HEADING_KEYWORDS = {'ACTIVITY', 'ACTIVITIES', 'SELF-TEST', 'SELF TEST', 'KEY TERMS', 'SUMMARY', 'REFERENCES', 'REFLECTION', 'FEEDBACK', 'EXERCISE', 'EXERCISES', 'QUIZ', 'PRACTICE', 'DISCUSSION', 'CHECKLIST'}
+
+
+def is_auxiliary_heading(title: str) -> bool:
+    """检查是否是辅助标题（活动、自测、术语等）"""
+    upper = title.upper()
+    return any(kw in upper for kw in AUXILIARY_HEADING_KEYWORDS)
+
+
 def is_bold_number_heading(text: str) -> tuple:
     """检查是否是加粗的数字编号标题
     例如: "**1.1 REQUIREMENTS ENGINEERING**"
@@ -260,6 +280,9 @@ def is_bold_number_heading(text: str) -> tuple:
     if m:
         num_part = m.group(1)
         title_part = m.group(2)
+        # 辅助标题（ACTIVITY/SELF-TEST 等）固定使用 H4
+        if is_auxiliary_heading(title_part):
+            return (4, f"{num_part} {title_part}")
         dots = num_part.count('.')
         level = min(dots + 1, 4)
         return (level, f"{num_part} {title_part}")
@@ -596,9 +619,16 @@ def fix_headings_and_paragraphs(md_content: str, toc_titles: set = None) -> str:
                         if len(bold_parts) == 2:
                             bold_number = bold_parts[0]  # "1.1"
                             bold_title = bold_parts[1]   # "REQUIREMENTS ENGINEERING"
+                            # 辅助标题固定使用 H4，否则根据数字编号的点数计算标题级别
+                            if is_auxiliary_heading(bold_title):
+                                correct_level = 4
+                            else:
+                                dots = bold_number.count('.')
+                                correct_level = min(dots + 1, 4)
+                            correct_prefix = '#' * correct_level
                             # 合并：数字编号 + 标题文本 + 加粗标题文本
                             merged_text = f"{bold_number} {title_text} {bold_title}"
-                            result.append(f"{level_prefix} {merged_text}")
+                            result.append(f"{correct_prefix} {merged_text}")
                             result.append('')  # 保留标题后的空行
                             i = j + 1
                             continue
@@ -625,9 +655,17 @@ def fix_headings_and_paragraphs(md_content: str, toc_titles: set = None) -> str:
                             # 不是标题，停止收集
                             break
                         
+                        # 检查合并后的标题是否是辅助标题
+                        merged_title = ' '.join(heading_parts)
+                        if is_auxiliary_heading(merged_title):
+                            correct_level = 4
+                        else:
+                            dots = bold_number_only.count('.')
+                            correct_level = min(dots + 1, 4)
+                        correct_prefix = '#' * correct_level
                         # 合并所有标题片段
                         merged_text = f"{bold_number_only} {' '.join(heading_parts)}"
-                        result.append(f"{level_prefix} {merged_text}")
+                        result.append(f"{correct_prefix} {merged_text}")
                         result.append('')  # 保留标题后的空行
                         i = k
                         continue
@@ -643,9 +681,12 @@ def fix_headings_and_paragraphs(md_content: str, toc_titles: set = None) -> str:
                 # 检查下一行是否包含数字编号
                 number = extract_number_from_line(next_line)
                 if number:
-                    # 合并：数字编号 + 标题文本
-                    dots = number.count('.')
-                    level = min(dots + 1, 4)
+                    # 检查是否是辅助标题
+                    if is_auxiliary_heading(stripped):
+                        level = 4
+                    else:
+                        dots = number.count('.')
+                        level = min(dots + 1, 4)
                     prefix = '#' * level
                     result.append(f"{prefix} {number} {stripped}")
                     result.append('')  # 保留标题后的空行
@@ -1010,7 +1051,14 @@ def convert_raw_text_to_markdown(raw_text: str) -> str:
         if heading_match:
             title = heading_match.group(1).strip()
             num = heading_match.group(2)
-            result.append(f'## {title}')
+            # 辅助标题固定使用 H4
+            if is_auxiliary_heading(title):
+                level = 4
+            else:
+                dots = num.count('.')
+                level = min(dots + 1, 4)
+            hashes = '#' * level
+            result.append(f'{hashes} {num} {title}')
             result.append('')
             continue
         
@@ -1019,12 +1067,17 @@ def convert_raw_text_to_markdown(raw_text: str) -> str:
         if bold_heading and not stripped.endswith('.'):
             num = bold_heading.group(1)
             title = bold_heading.group(2)
-            level = len(num.split('.'))
-            hashes = '#' * min(level + 1, 6)
+            # 辅助标题固定使用 H4
+            if is_auxiliary_heading(title):
+                hashes = '####'
+            else:
+                dots = num.count('.')
+                level = min(dots + 1, 4)
+                hashes = '#' * level
             result.append(f'{hashes} {num} {title}')
             continue
         
-        # 纯大写标题
+        # 纯大写标题（Topic/Chapter 级别，固定为 H2）
         if stripped.isupper() and len(stripped) > 3 and len(stripped) < 60:
             if not re.match(r'^(TOPIC|PAGE|CHAPTER)\s+\d', stripped):
                 result.append(f'## {stripped}')
