@@ -637,6 +637,157 @@ function calculatePageRange(
 }
 
 /**
+ * 根据 coveredChapters 裁剪提取内容，去除范围外的冗余内容
+ * 例如 coveredChapters = "1.1-1.3"，则：
+ * - 找到 ## 1.1 ... 标题，删除之前的内容
+ * - 找到 1.3 的下一个同级别节点（如 1.4 或 2.1），删除该标题及之后的内容
+ */
+function trimExtractedContent(
+  mdContent: string,
+  coveredChapters: string,
+  directoryItems: DirectoryItem[]
+): string {
+  const covered = coveredChapters.trim();
+  if (!covered) return mdContent;
+
+  // 解析起始章节和结束章节
+  const rangeMatch = covered.match(/(\d+(?:\.\d+)*)\s*[-~—至]\s*(\d+(?:\.\d+)*)/);
+  let startChapter: string;
+  let endChapter: string;
+
+  if (rangeMatch) {
+    startChapter = rangeMatch[1];
+    endChapter = rangeMatch[2];
+  } else {
+    // 单个章节，如 "1.1"
+    startChapter = covered;
+    endChapter = covered;
+  }
+
+  const lines = mdContent.split('\n');
+
+  // 1. 找到起始章节标题，删除之前的内容
+  let startIndex = 0;
+  const startPattern = buildHeadingPattern(startChapter);
+  for (let i = 0; i < lines.length; i++) {
+    if (startPattern.test(lines[i].trim())) {
+      startIndex = i;
+      break;
+    }
+  }
+
+  // 2. 找到结束章节的下一个同级别节点
+  const nextSibling = findNextSibling(endChapter, directoryItems);
+
+  let endIndex = lines.length;
+  if (nextSibling) {
+    const endPattern = buildHeadingPattern(nextSibling);
+    for (let i = startIndex; i < lines.length; i++) {
+      if (endPattern.test(lines[i].trim())) {
+        endIndex = i;
+        break;
+      }
+    }
+  }
+
+  // 裁剪
+  const trimmedLines = lines.slice(startIndex, endIndex);
+  return trimmedLines.join('\n').trim();
+}
+
+/**
+ * 构建匹配 Markdown 标题的正则表达式
+ * 例如 "1.1" → 匹配 "## 1.1 ..." 或 "### 1.1 ..."
+ */
+function buildHeadingPattern(chapterNum: string): RegExp {
+  // 转义正则特殊字符
+  const escaped = chapterNum.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // 匹配任意级别的 Markdown 标题 + 章节号开头
+  return new RegExp(`^#{1,6}\\s+${escaped}(?:\\s|$)`, 'i');
+}
+
+/**
+ * 在目录中找到指定章节的下一个同级别节点
+ * 例如 1.3 的下一个同级是 1.4；如果 1.4 不存在，则是 2.1（下一个 Topic 的第一节）
+ */
+function findNextSibling(
+  chapterNum: string,
+  directoryItems: DirectoryItem[]
+): string | null {
+  const parseSection = (str: string): number[] | null => {
+    const match = str.trim().match(/^(\d+(?:\.\d+)*)/);
+    if (!match) return null;
+    return match[1].split('.').map(x => parseInt(x, 10));
+  };
+
+  const targetNums = parseSection(chapterNum);
+  if (!targetNums) return null;
+
+  const level = targetNums.length;
+
+  // 找到目标章节在目录中的位置
+  let targetIndex = -1;
+  for (let i = 0; i < directoryItems.length; i++) {
+    const nums = parseSection(directoryItems[i].title);
+    if (!nums) continue;
+    if (nums.length === level && nums.every((n, j) => n === targetNums[j])) {
+      targetIndex = i;
+      break;
+    }
+  }
+
+  if (targetIndex === -1) return null;
+
+  // 从目标位置往后找下一个同级别节点
+  for (let i = targetIndex + 1; i < directoryItems.length; i++) {
+    const nums = parseSection(directoryItems[i].title);
+    if (!nums) continue;
+
+    // 同级别：层级相同，且前面的数字部分相同，最后一个数字大 1
+    if (nums.length === level) {
+      const isNext = nums.slice(0, -1).every((n, j) => n === targetNums[j]) &&
+                     nums[nums.length - 1] === targetNums[targetNums.length - 1] + 1;
+      if (isNext) {
+        return directoryItems[i].title;
+      }
+    }
+
+    // 如果是更高级别的节点（如 2.1），说明跨 Topic 了
+    if (nums.length === level && nums[0] > targetNums[0]) {
+      // 返回下一个 Topic 的第一个子节点
+      // 继续查找
+    }
+  }
+
+  // 如果没找到直接的同级节点，尝试找下一个 Topic 的第一个子节点
+  // 例如 1.3 之后没有 1.4，找 2.1
+  const nextTopicNum = targetNums[0] + 1;
+  for (let i = 0; i < directoryItems.length; i++) {
+    const nums = parseSection(directoryItems[i].title);
+    if (!nums) continue;
+    if (nums.length === level && nums[0] === nextTopicNum) {
+      // 找到下一个 Topic 的第一个子节点
+      // 需要找该 Topic 下的第一个子节点
+      const topicPrefix = nums.slice(0, level).join('.');
+      // 如果是 Topic 级别（如 "2"），找它的第一个子节点
+      for (let j = i + 1; j < directoryItems.length; j++) {
+        const childNums = parseSection(directoryItems[j].title);
+        if (!childNums) continue;
+        if (childNums.length > level && childNums.slice(0, level).every((n, k) => n === nums[k])) {
+          return directoryItems[j].title;
+        }
+        // 如果遇到更高级别的节点，停止
+        if (childNums.length <= level && childNums[0] > nums[0]) break;
+      }
+      // 如果 Topic 本身有页码，返回 Topic
+      return directoryItems[i].title;
+    }
+  }
+
+  return null;
+}
+
+/**
  * 对后端提取的纯文本进行页眉页脚过滤和格式化处理
  * 支持两种模式：
  * 1. pdf_oxide 模式：输入已包含 Markdown 格式（# ## ### 标题），只过滤页眉页脚
@@ -856,6 +1007,8 @@ export async function getExtractedTextForModuleAsync(
           
           mdOutput += "\n\n";
         }
+        // 裁剪范围外的冗余内容
+        mdOutput = trimExtractedContent(mdOutput, mod.coveredChapters || "", directoryItems);
         return { mappedPages, extractedOriginalText: mdOutput, extractedImages: allImages.length > 0 ? allImages : undefined };
       }
     } catch (err) {
@@ -888,6 +1041,8 @@ export async function getExtractedTextForModuleAsync(
     }
 
     if (textRetrieved) {
+      // 裁剪范围外的冗余内容
+      mdOutput = trimExtractedContent(mdOutput, mod.coveredChapters || "", directoryItems);
       return { mappedPages, extractedOriginalText: mdOutput };
     }
   }
@@ -909,6 +1064,8 @@ export async function getExtractedTextForModuleAsync(
     }
 
     if (textRetrieved) {
+      // 裁剪范围外的冗余内容
+      mdOutput = trimExtractedContent(mdOutput, mod.coveredChapters || "", directoryItems);
       return { mappedPages, extractedOriginalText: mdOutput };
     }
   }
@@ -994,6 +1151,8 @@ export function getExtractedTextForModule(
     }
 
     if (textRetrieved) {
+      // 裁剪范围外的冗余内容
+      mdOutput = trimExtractedContent(mdOutput, mod.coveredChapters || "", directoryItems);
       return { mappedPages, extractedOriginalText: mdOutput };
     }
   }
