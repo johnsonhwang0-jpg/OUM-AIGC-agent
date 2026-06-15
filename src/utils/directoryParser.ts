@@ -90,7 +90,7 @@ export function parseTextToDirectory(text: string): DirectoryItem[] {
   interface Landmark {
     index: number;
     text: string;
-    type: 'chapter' | 'section';
+    type: 'chapter' | 'section' | 'subsection';
     headingKey: string;
   }
 
@@ -104,10 +104,13 @@ export function parseTextToDirectory(text: string): DirectoryItem[] {
     const matchedText = match[0];
     const index = match.index;
 
-    // Categorize into chapter level or sub-section level
-    let type: 'chapter' | 'section' = 'section';
+    // Categorize into chapter level, section level, or subsection level
+    let type: 'chapter' | 'section' | 'subsection' = 'section';
     if (/^(Topic|Chapter|Unit|第\s*[\d一二三四五六七八九十百]+\s*(?:章|单元))/i.test(matchedText)) {
       type = 'chapter';
+    } else if (/^\d+\.\d+\.\d+$/.test(matchedText)) {
+      // 1.1.1 format = subsection (3 levels of dots)
+      type = 'subsection';
     }
 
     landmarks.push({
@@ -221,7 +224,7 @@ export function parseTextToDirectory(text: string): DirectoryItem[] {
       type: current.type,
       title: finalTitle,
       page: page || "",
-      level: current.type === 'chapter' ? 1 : 2
+      level: current.type === 'chapter' ? 1 : current.type === 'section' ? 2 : 3
     });
   }
 
@@ -311,8 +314,10 @@ export function serializeDirectoryToText(items: DirectoryItem[]): string {
     const pageStr = item.page ? ` (P.${item.page})` : '';
     if (item.type === 'chapter') {
       text += `${item.title}${pageStr}\n`;
-    } else {
+    } else if (item.type === 'section') {
       text += `  - ${item.title}${pageStr}\n`;
+    } else {
+      text += `    - ${item.title}${pageStr}\n`;
     }
   });
   return text;

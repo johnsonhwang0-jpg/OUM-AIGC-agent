@@ -2289,34 +2289,42 @@ ${script.conclusion}
                         <div className="space-y-2.5 select-text">
                           {directoryItems.map((item) => {
                             const isCh = item.type === 'chapter';
+                            const isSec = item.type === 'section';
+                            const isSub = item.type === 'subsection';
                             return (
                               <div
                                 key={item.id}
                                 className={`flex items-center justify-between gap-3 group transition-all duration-150 ${
                                   isCh 
                                     ? 'bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/20 rounded-xl p-3 pl-3.5' 
-                                    : 'bg-white/[0.02] hover:bg-white/[0.05] border border-white/10 border-dashed rounded-lg p-2.5 pl-3 ml-6 md:ml-8 relative'
+                                    : isSec
+                                    ? 'bg-white/[0.02] hover:bg-white/[0.05] border border-white/10 border-dashed rounded-lg p-2.5 pl-3 ml-6 md:ml-8 relative'
+                                    : 'bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 border-dashed rounded-lg p-2 pl-3 ml-12 md:ml-14 relative'
                                 }`}
                               >
                                 {/* Left tree indentation line marker */}
                                 {!isCh && (
-                                  <div className="absolute -left-5 top-1/2 -translate-y-1/2 w-5 h-5 border-l-2 border-b-2 border-white/10 rounded-bl-lg pointer-events-none"></div>
+                                  <div className={`absolute -left-5 top-1/2 -translate-y-1/2 w-5 h-5 border-l-2 border-b-2 rounded-bl-lg pointer-events-none ${
+                                    isSub ? 'border-white/5' : 'border-white/10'
+                                  }`}></div>
                                 )}
 
                                 <div className="flex items-center gap-2.5 flex-1 min-w-0">
                                   {isCh ? (
                                     <BookOpen className="w-4 h-4 text-cyan-400 shrink-0" />
-                                  ) : (
+                                  ) : isSec ? (
                                     <CornerDownRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                                  ) : (
+                                    <CornerDownRight className="w-3 h-3 text-slate-600 shrink-0" />
                                   )}
 
                                   <input
                                     type="text"
                                     value={item.title}
                                     onChange={(e) => updateDirectoryItemTitle(item.id, e.target.value)}
-                                    placeholder={isCh ? "例如：第一章 万有引力与多体物理机制" : "例如：1.1 核心公式及恒星聚变反应条件"}
+                                    placeholder={isCh ? "例如：第一章 万有引力与多体物理机制" : isSec ? "例如：1.1 核心公式及恒星聚变反应条件" : "例如：1.1.1 反应条件详解"}
                                     className={`w-full bg-transparent outline-none text-xs text-slate-200 border-b border-transparent focus:border-cyan-500/40 py-0.5 transition ${
-                                      isCh ? 'font-bold text-slate-105 text-sm' : 'text-slate-300'
+                                      isCh ? 'font-bold text-slate-105 text-sm' : isSec ? 'text-slate-300' : 'text-slate-400'
                                     }`}
                                   />
                                 </div>

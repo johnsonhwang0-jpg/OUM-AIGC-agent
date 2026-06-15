@@ -137,7 +137,7 @@ export interface Message {
 
 export interface DirectoryItem {
   id: string;
-  type: 'chapter' | 'section';
+  type: 'chapter' | 'section' | 'subsection';
   title: string;
   page?: string;
   level: number;
