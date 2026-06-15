@@ -96,11 +96,15 @@ HEADER_FOOTER_PATTERNS = [
     # 单独的课程代码
     r'^[A-Z]{2,4}\d{3,4}$',
     # 页码 + TOPIC/Chapter/Unit/Section 标题（如 "2 TOPIC 1 ESTABLISHING COMMON GROUND"）
-    r'^\d{1,3}\s+(?:TOPIC|CHAPTER|UNIT|SECTION)\s+\d+\s+[A-Z][A-Z\s\'\-]+$',
+    r'^\d{1,3}\s+(?:TOPIC|CHAPTER|UNIT|SECTION)\s+\d+\s+[A-Z][A-Z\s\'\'\'\u2019\-]+$',
     # TOPIC/Chapter/Unit/Section 标题 + 页码（如 "TOPIC 1 ESTABLISHING COMMON GROUND 2"）
-    r'^(?:TOPIC|CHAPTER|UNIT|SECTION)\s+\d+\s+[A-Z][A-Z\s\'\-]+\s+\d{1,3}$',
+    r'^(?:TOPIC|CHAPTER|UNIT|SECTION)\s+\d+\s+[A-Z][A-Z\s\'\'\'\u2019\-]+\s+\d{1,3}$',
     # TOPIC/Chapter/Unit/Section 标题 + 特殊符号 + 页码（如 "TOPIC 2 ...  19"）
-    r'^(?:TOPIC|CHAPTER|UNIT|SECTION)\s+\d+\s+[A-Z][A-Z\s\'\-]+\s+[^\w\s]+\s*\d{1,3}$',
+    r'^(?:TOPIC|CHAPTER|UNIT|SECTION)\s+\d+\s+[A-Z][A-Z\s\'\'\'\u2019\-]+\s+[^\w\s]+\s*\d{1,3}$',
+    # 特殊符号 + TOPIC/Chapter/Unit/Section 标题 + 页码（如 " TOPIC 2 ... 18"）
+    r'^[^\w\s]+\s*(?:TOPIC|CHAPTER|UNIT|SECTION)\s+\d+\s+[A-Z][A-Z\s\'\'\'\u2019\-]+\s+\d{1,3}$',
+    # 特殊符号 + TOPIC/Chapter/Unit/Section 标题 + 特殊符号 + 页码（如 " TOPIC 2 ...  19"）
+    r'^[^\w\s]+\s*(?:TOPIC|CHAPTER|UNIT|SECTION)\s+\d+\s+[A-Z][A-Z\s\'\'\'\u2019\-]+\s+[^\w\s]+\s*\d{1,3}$',
 ]
 
 
