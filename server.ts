@@ -588,7 +588,7 @@ app.post("/api/parse-book", async (req, res) => {
     {
       "sliceId": "S1",
       "title": "切片主题名称（一句话，让学生知道这个切片在讲什么）",
-      "coveredChapters": "1.1-1.2",
+      "coveredChapters": "1.1-1.2/1.1/1.1.1-1.1.5",
       "summary": {
         "learnedPoints": [
           "能说出/理解/区分XXX（具体可陈述的知识点）",
