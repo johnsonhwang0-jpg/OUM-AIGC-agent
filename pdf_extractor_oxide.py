@@ -95,6 +95,12 @@ HEADER_FOOTER_PATTERNS = [
     r'(?:ISBN|ISSN)\s*[\d\-]+',
     # 单独的课程代码
     r'^[A-Z]{2,4}\d{3,4}$',
+    # 页码 + TOPIC/Chapter/Unit/Section 标题（如 "2 TOPIC 1 ESTABLISHING COMMON GROUND"）
+    r'^\d{1,3}\s+(?:TOPIC|CHAPTER|UNIT|SECTION)\s+\d+\s+[A-Z][A-Z\s\'\-]+$',
+    # TOPIC/Chapter/Unit/Section 标题 + 页码（如 "TOPIC 1 ESTABLISHING COMMON GROUND 2"）
+    r'^(?:TOPIC|CHAPTER|UNIT|SECTION)\s+\d+\s+[A-Z][A-Z\s\'\-]+\s+\d{1,3}$',
+    # TOPIC/Chapter/Unit/Section 标题 + 特殊符号 + 页码（如 "TOPIC 2 ...  19"）
+    r'^(?:TOPIC|CHAPTER|UNIT|SECTION)\s+\d+\s+[A-Z][A-Z\s\'\-]+\s+[^\w\s]+\s*\d{1,3}$',
 ]
 
 
@@ -104,25 +110,23 @@ def is_header_footer_line(text: str, toc_titles: set) -> bool:
     if not trimmed:
         return False
     
-    # 1. 检查是否匹配 TOC 标题（pdf_oxide 从 TOC 注入的页眉）
-    normalized = re.sub(r'\s+', ' ', trimmed).strip()
-    normalized_lower = normalized.lower()
-    for title in toc_titles:
-        title_lower = title.lower() if not title.endswith('_lower') else title
-        if normalized_lower == title_lower:
-            return True
-        # 也检查是否包含 TOC 标题（处理 "4 TOPIC 1 REQUIREMENTS ENGINEERING" 这种格式）
-        if title_lower in normalized_lower and len(title_lower) > 10:
-            return True
+    # 移除 Markdown 标题前缀（# ## ### 等）以便匹配
+    clean_text = re.sub(r'^#+\s*', '', trimmed).strip()
     
-    # 2. 检查正则模式
+    # 1. 检查正则模式（页码、版权、网址等）
     for pattern in HEADER_FOOTER_PATTERNS:
         if re.search(pattern, trimmed, re.IGNORECASE):
             return True
+        # 也检查清理后的文本（处理 Markdown 标题格式的页眉）
+        if clean_text != trimmed and re.search(pattern, clean_text, re.IGNORECASE):
+            return True
     
-    # 3. 检查 "页码 + TOC标题" 格式（如 "4 TOPIC 1 REQUIREMENTS ENGINEERING"）
+    # 2. 检查 "页码 + TOC标题" 格式（如 "4 TOPIC 1 REQUIREMENTS ENGINEERING"）
+    # 只过滤带页码的，不过滤纯标题
+    normalized = re.sub(r'\s+', ' ', clean_text).strip()
+    normalized_lower = normalized.lower()
     for title in toc_titles:
-        title_lower = title.lower()
+        title_lower = title.lower() if not title.endswith('_lower') else title
         if len(title_lower) > 10:
             # 匹配 "数字 + 标题" 或 "标题 + 数字"
             if re.search(rf'^\d+\s+{re.escape(title_lower)}$', normalized_lower):
@@ -433,7 +437,7 @@ def fix_fragmented_tables(md_content: str) -> str:
     return '\n'.join(result)
 
 
-def fix_headings_and_paragraphs(md_content: str) -> str:
+def fix_headings_and_paragraphs(md_content: str, toc_titles: set = None) -> str:
     """修复标题和段落格式：
     1. 将 **1.1.2** **Title** 转换为 ### 1.1.2 Title
     2. 合并断裂的标题行
@@ -446,6 +450,8 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
     9. 修复被碎片化的表格
     10. 处理列表项（如 (a), (b), (c) 或 1., 2., 3.）
     """
+    if toc_titles is None:
+        toc_titles = set()
     lines = md_content.split('\n')
     result = []
     i = 0
@@ -457,6 +463,11 @@ def fix_headings_and_paragraphs(md_content: str) -> str:
         # 跳过空行
         if not stripped:
             result.append('')
+            i += 1
+            continue
+        
+        # 过滤页眉页脚（在转换为 Markdown 标题之前）
+        if is_header_footer_line(stripped, toc_titles):
             i += 1
             continue
         
@@ -1106,8 +1117,8 @@ def extract_with_oxide(pdf_bytes: bytes, start_page: int, end_page: int,
         except Exception as e:
             print(f"Warning: Table extraction failed for page {page_num + 1}: {e}", file=sys.stderr)
         
-        # 后处理：先修复标题和段落格式（合并断裂标题、分割多标题行）
-        fixed_content = fix_headings_and_paragraphs(md_content)
+        # 后处理：先修复标题和段落格式（合并断裂标题、分割多标题行），同时过滤页眉
+        fixed_content = fix_headings_and_paragraphs(md_content, toc_titles)
         
         # 后处理：修复表格内的空行（分隔符和数据行之间不能有空行）
         fixed_content = fix_table_empty_lines(fixed_content)
