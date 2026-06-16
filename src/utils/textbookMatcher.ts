@@ -678,12 +678,15 @@ function trimExtractedContent(
 
   // 2. 找到结束章节的下一个同级别节点
   const nextSibling = findNextSibling(endChapter, directoryItems);
+  console.log(`[trimExtractedContent] coveredChapters: "${covered}", endChapter: "${endChapter}", nextSibling: "${nextSibling}"`);
 
   let endIndex = lines.length;
   if (nextSibling) {
     const endPattern = buildHeadingPattern(nextSibling);
+    console.log(`[trimExtractedContent] endPattern: ${endPattern}`);
     for (let i = startIndex; i < lines.length; i++) {
       if (endPattern.test(lines[i].trim())) {
+        console.log(`[trimExtractedContent] Found next sibling at line ${i}: "${lines[i]}"`);
         endIndex = i;
         break;
       }
@@ -707,7 +710,7 @@ function buildHeadingPattern(chapterNum: string): RegExp {
 }
 
 /**
- * 在目录中找到指定章节的下一个同级别节点
+ * 在目录中找到指定章节的下一个同级别节点，返回章节号（如 "2.4"）
  * 例如 1.3 的下一个同级是 1.4；如果 1.4 不存在，则是 2.1（下一个 Topic 的第一节）
  */
 function findNextSibling(
@@ -748,13 +751,13 @@ function findNextSibling(
       const isNext = nums.slice(0, -1).every((n, j) => n === targetNums[j]) &&
                      nums[nums.length - 1] === targetNums[targetNums.length - 1] + 1;
       if (isNext) {
-        return directoryItems[i].title;
+        // 返回章节号（如 "2.4"），而不是完整标题
+        return nums.join('.');
       }
     }
 
     // 如果是更高级别的节点（如 2.1），说明跨 Topic 了
     if (nums.length === level && nums[0] > targetNums[0]) {
-      // 返回下一个 Topic 的第一个子节点
       // 继续查找
     }
   }
@@ -766,21 +769,7 @@ function findNextSibling(
     const nums = parseSection(directoryItems[i].title);
     if (!nums) continue;
     if (nums.length === level && nums[0] === nextTopicNum) {
-      // 找到下一个 Topic 的第一个子节点
-      // 需要找该 Topic 下的第一个子节点
-      const topicPrefix = nums.slice(0, level).join('.');
-      // 如果是 Topic 级别（如 "2"），找它的第一个子节点
-      for (let j = i + 1; j < directoryItems.length; j++) {
-        const childNums = parseSection(directoryItems[j].title);
-        if (!childNums) continue;
-        if (childNums.length > level && childNums.slice(0, level).every((n, k) => n === nums[k])) {
-          return directoryItems[j].title;
-        }
-        // 如果遇到更高级别的节点，停止
-        if (childNums.length <= level && childNums[0] > nums[0]) break;
-      }
-      // 如果 Topic 本身有页码，返回 Topic
-      return directoryItems[i].title;
+      return nums.join('.');
     }
   }
 
