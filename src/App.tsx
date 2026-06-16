@@ -163,6 +163,7 @@ export default function App() {
     timestamp: ''
   });
   const [scriptCopySuccess, setScriptCopySuccess] = useState<boolean>(false);
+  const [copyToast, setCopyToast] = useState<{ message: string; visible: boolean }>({ message: '', visible: false });
   const [recommendingId, setRecommendingId] = useState<string | null>(null);
   const [extractedContent, setExtractedContent] = useState<string>("");
   const [extractedImages, setExtractedImages] = useState<ExtractedImage[]>([]);
@@ -1653,11 +1654,35 @@ ${module.script.conclusion}
     }
   };
 
+  // 通用复制函数（fallback 方案）
+  const doCopy = (text: string) => {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  };
+
+  const showCopyToast = () => {
+    setScriptCopySuccess(true);
+    setCopyToast({ message: '✅ 复制成功！', visible: true });
+    setTimeout(() => setScriptCopySuccess(false), 2000);
+    setTimeout(() => setCopyToast(prev => ({ ...prev, visible: false })), 2500);
+  };
+
   const handleCopySimulationMarkdown = (markdown: string) => {
-    navigator.clipboard.writeText(markdown).then(() => {
-      setScriptCopySuccess(true);
-      setTimeout(() => setScriptCopySuccess(false), 2000);
-    });
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(markdown).then(showCopyToast).catch(() => {
+        doCopy(markdown);
+        showCopyToast();
+      });
+    } else {
+      doCopy(markdown);
+      showCopyToast();
+    }
   };
 
   const handleCopyScriptMarkdown = (script: GameScript) => {
@@ -1684,10 +1709,22 @@ ${c.options ? `* 候选项: ${c.options.join(" / ")}` : ''}
 ${script.conclusion}
     `.trim();
 
-    navigator.clipboard.writeText(formattedText).then(() => {
+    const showCopyToast = () => {
       setScriptCopySuccess(true);
+      setCopyToast({ message: '✅ 复制成功！', visible: true });
       setTimeout(() => setScriptCopySuccess(false), 2000);
-    });
+      setTimeout(() => setCopyToast(prev => ({ ...prev, visible: false })), 2500);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(formattedText).then(showCopyToast).catch(() => {
+        doCopy(formattedText);
+        showCopyToast();
+      });
+    } else {
+      doCopy(formattedText);
+      showCopyToast();
+    }
   };
 
   const handleGenerateFinalApp = async () => {
@@ -1756,6 +1793,13 @@ ${script.conclusion}
   return (
     <div className="flex flex-col h-screen bg-[#050508] text-slate-200 font-sans overflow-hidden relative z-10">
       
+      {/* Toast Notification */}
+      {copyToast.visible && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-emerald-500/90 backdrop-blur-sm text-white px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 text-sm font-semibold animate-bounce">
+          {copyToast.message}
+        </div>
+      )}
+
       {/* Immersive Theme Decor Backdrops */}
       <div className="absolute bottom-0 right-0 w-96 h-96 bg-cyan-500/10 blur-[120px] rounded-full -z-10 pointer-events-none"></div>
       <div className="absolute top-0 left-0 w-64 h-64 bg-blue-500/10 blur-[100px] rounded-full -z-10 pointer-events-none"></div>
@@ -2954,15 +2998,6 @@ API地址：https://api.deepseek.com/chat/completions`}
                           ) : isExtracted ? (
                             <span className="text-[9px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 border border-blue-500/20">
                               <BookOpen className="w-2.5 h-2.5" /> 已提取
-                            </span>
-                          ) : null}
-                          {isDone ? (
-                            <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
-                              <Check className="w-2.5 h-2.5" /> 已生成
-                            </span>
-                          ) : isGen ? (
-                            <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-amber-500/20">
-                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> 生成中...
                             </span>
                           ) : null}
                         </div>
