@@ -94,6 +94,71 @@ async function callDeepSeek(prompt: string, systemPrompt: string = "", model: st
   }
 }
 
+// DeepSeek streaming API client
+async function* callDeepSeekStream(prompt: string, systemPrompt: string = "", model: string = "", maxTokens: number = 16000): AsyncGenerator<string> {
+  const deepseekModel = model || process.env.DEEPSEEK_MODEL || "deepseek-chat";
+  const deepseekApiKey = process.env.DEEPSEEK_API_KEY || "";
+
+  if (!deepseekApiKey) {
+    throw new Error("DEEPSEEK_API_KEY is not configured");
+  }
+
+  const response = await fetch("https://api.deepseek.com/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${deepseekApiKey}`
+    },
+    body: JSON.stringify({
+      model: deepseekModel,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.7,
+      max_tokens: maxTokens,
+      stream: true
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`DeepSeek API error: ${response.status} - ${errorText}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("No response body");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data:")) continue;
+      const data = trimmed.slice(5).trim();
+      if (data === "[DONE]") return;
+
+      try {
+        const parsed = JSON.parse(data);
+        const content = parsed.choices?.[0]?.delta?.content || "";
+        if (content) yield content;
+      } catch {
+        // skip malformed JSON
+      }
+    }
+  }
+}
+
 // DashScope (阿里云通义千问) API client
 async function callDashScope(prompt: string, systemPrompt: string = "", model: string = "", jsonMode: boolean = true): Promise<string> {
   try {
@@ -1093,9 +1158,8 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
     let outputText: string;
     
     if (AI_PROVIDER === "deepseek") {
-      const scriptModel = process.env.DEEPSEEK_SCRIPT_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-chat";
-      console.log(`🔄 Using DeepSeek (${scriptModel}) for scenario script generation...`);
-      outputText = await callDeepSeek(promptText, systemInstruction, scriptModel, 6144, false);
+      console.log(`🔄 Using DeepSeek (deepseek-v4-flash) for scenario script generation...`);
+      outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 6144, false);
     } else if (AI_PROVIDER === "dashscope") {
       console.log("🔄 Using DashScope (通义千问) for scenario script generation...");
       outputText = await callDashScope(promptText, systemInstruction, "", false);
@@ -1150,72 +1214,60 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
 
 app.post("/api/generate-app-code", async (req, res) => {
   try {
-    const { bookTitle, uiTheme, primaryColor, modules } = req.body;
-    if (!modules || !Array.isArray(modules) || modules.length === 0) {
-      return res.status(400).json({ error: "Missing simulation blueprint modules." });
+    const { bookTitle, chapterTitle, coveredChapters, scriptMarkdown } = req.body;
+    if (!scriptMarkdown || typeof scriptMarkdown !== "string") {
+      return res.status(400).json({ error: "Missing scriptMarkdown." });
     }
 
-    const systemInstruction = `你是一名资深前端工程师和教育模拟器产品实现专家。
+    const systemInstruction = `你是一名资深前端工程师，擅长创建沉浸式、互动性强的Web端HTML场景模拟游戏。
 
-你的任务是根据一组教学模拟器 Markdown brief，生成一个可直接复制到 React/Vite 项目中运行的单文件 React + TypeScript 应用组件。
+你的任务是根据提供的教学互动脚本内容，生成一个完整的、可直接在浏览器中运行的HTML文件。
 
 硬性要求：
-- 只输出代码，不要输出解释文字。
-- 使用 React 函数组件，默认导出组件。
-- 不要调用任何外部 API，不要依赖后端。
-- 不要使用传统 quiz/题库模板。
-- 应根据 brief 中的场景对象、状态变量、交互流程、反馈规则，实现可视化、沉浸式、问题驱动的模拟互动。
-- 用内置状态管理模拟变量变化、学生操作、阶段推进和反馈。
-- 代码应包含样例数据常量，来自输入 brief。
-- 样式使用 Tailwind CSS className；不要引入 CSS 文件。
-- 可以使用 lucide-react 图标，但不要假设其他第三方 UI 库存在。
-- 输出一个完整 TSX 文件内容。`;
+- 只输出完整的HTML代码，包含<!DOCTYPE html>、<html>、<head>、<body>等完整结构
+- 不要输出任何解释文字
+- 使用纯HTML + CSS + JavaScript，不依赖任何外部库或框架
+- 样式使用内联<style>标签，脚本使用内联<script>标签
+- 不要调用任何外部API，不要依赖后端
+- 每个操作都要有丰富的可视化场景画面
+- 不要把所有内容局限在一个页面上，一个行为在一个页面完成，完成后进入新场景
+- 界面要精致、沉浸感强，适合教学演示
+- 代码要能直接保存为.html文件并在浏览器中打开运行`;
 
-    const promptText = `请基于以下 BookToGame 互动模拟器 brief，生成一个完整的 React/TypeScript 单文件应用组件。
+    const promptText = `根据以下要求，帮我实现一个web端的html。这是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。
 
-教材名称：
-${bookTitle || "未命名教材"}
+教材名称：${bookTitle || "未命名"}
+章节标题：${chapterTitle || "未命名"}
+${coveredChapters ? `覆盖章节：${coveredChapters}` : ""}
 
-视觉主题：
-${uiTheme || "minimal"}
+以下是该章节的互动脚本内容，请根据脚本中的场景、角色、交互流程、反馈规则等来实现HTML场景模拟游戏：
 
-强调色：
-${primaryColor || "#06b6d4"}
+${scriptMarkdown}`;
 
-模拟器 brief 列表：
-${modules.map((mod: any, idx: number) => `
-===== MODULE ${idx + 1}: ${mod.chapterIndex || ""} ${mod.title || ""} =====
-${mod.markdown || ""}
-`).join("\n\n")}
+    // Set up SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
 
-实现要求：
-1. 第一屏直接是可用的模拟器，不要做营销 landing page。
-2. 左侧或顶部提供模块切换。
-3. 每个模块要有独立的场景面板、状态变量面板、学生操作区、反馈区和学习反思区。
-4. 学生操作应改变状态变量或场景状态，而不是只判断对错。
-5. 反馈要解释变量变化背后的知识机制。
-6. 界面要精致、稳定、适合教学演示，避免文字溢出。
-7. 只输出 TSX 代码，不要 Markdown 代码围栏。`;
+    let fullCode = '';
+    for await (const chunk of callDeepSeekStream(promptText, systemInstruction, "deepseek-v4-flash", 16000)) {
+      fullCode += chunk;
+      res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+    }
 
-    const outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 12000, false);
-    const code = outputText
+    // Clean up code
+    const cleanedCode = fullCode
       .trim()
-      .replace(/^```(?:tsx|typescript|ts|jsx|javascript|js)?\s*/i, "")
+      .replace(/^```(?:html|HTML)?\s*/i, "")
       .replace(/\s*```$/i, "")
       .trim();
 
-    res.json({
-      code,
-      _meta: {
-        model: "deepseek-v4-flash",
-        provider: "deepseek",
-        systemInstruction,
-        userPrompt: promptText
-      }
-    });
+    res.write(`data: ${JSON.stringify({ done: true, code: cleanedCode })}\n\n`);
+    res.end();
   } catch (error: any) {
     console.error("Error generating app code:", error);
-    res.status(500).json({ error: error.message || "Failed to generate app code" });
+    res.write(`data: ${JSON.stringify({ error: error.message || "Failed to generate app code" })}\n\n`);
+    res.end();
   }
 });
 

@@ -236,6 +236,10 @@ function greet(name) {
   const [outputTab, setOutputTab] = useState<'code' | 'preview'>('preview');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
+  // Step 5 States: Slice selection for app building
+  const [selectedStep5ModuleId, setSelectedStep5ModuleId] = useState<string | null>(null);
+  const [streamingCode, setStreamingCode] = useState<string>("");
+
   // Helper functions to flatten new object types to strings for UI display
   const getSummaryText = (summary: BookModule['summary']): string => {
     if (typeof summary === 'string') return summary;
@@ -1728,25 +1732,28 @@ ${script.conclusion}
   };
 
   const handleGenerateFinalApp = async () => {
-    const blueprintModules = modules
-      .map(m => ({
-        id: m.id,
-        title: m.title,
-        chapterIndex: m.chapterIndex,
-        coveredChapters: m.coveredChapters,
-        markdown: getSimulationMarkdown(m)
-      }))
-      .filter(m => m.markdown.trim().length > 0);
+    if (!selectedStep5ModuleId) {
+      alert("请先选择一个切片");
+      return;
+    }
 
-    if (blueprintModules.length === 0) {
-      alert("请先在第四步为至少一个教学切片生成模拟器脚本。");
+    const mod = modules.find(m => m.id === selectedStep5ModuleId);
+    if (!mod) {
+      alert("未找到选中的切片");
+      return;
+    }
+
+    const markdown = getSimulationMarkdown(mod);
+    if (!markdown.trim()) {
+      alert("该切片还没有生成互动脚本，请先生成脚本");
       return;
     }
 
     setIsGeneratingApp(true);
     setOutputTab('code');
     setFinalCode('');
-    addAgentMessage(`🚀 正在调用 **DeepSeek V4 Flash** 生成独立互动模拟器应用...\n\n我会把第四步的 ${blueprintModules.length} 份 Markdown brief 作为核心输入，生成可复制到 React/Vite 项目中的 TSX 单文件代码。`);
+    setStreamingCode('');
+    addAgentMessage(`🚀 正在基于切片 **${mod.chapterIndex} · ${mod.title}** 的互动脚本生成场景模拟游戏...`);
 
     try {
       const response = await fetch('/api/generate-app-code', {
@@ -1754,27 +1761,66 @@ ${script.conclusion}
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           bookTitle,
-          uiTheme,
-          primaryColor,
-          modules: blueprintModules
+          chapterTitle: `${mod.chapterIndex} · ${mod.title}`,
+          coveredChapters: mod.coveredChapters,
+          scriptMarkdown: markdown
         })
       });
 
-      const rawText = await response.text();
       if (!response.ok) {
+        const rawText = await response.text();
         throw new Error(rawText || `HTTP ${response.status}`);
       }
 
-      const data = JSON.parse(rawText);
-      setFinalCode(data.code || '');
-      setIsGeneratingApp(false);
-      setOutputTab('code');
-      addAgentMessage(`✅ **DeepSeek V4 Flash 代码生成完成！**\n\n第五步已经基于第四步的模拟器 brief 生成了独立 React/TypeScript 应用代码。你可以在右侧代码区查看、复制，并继续交给 AI coding 或放入项目中运行。`, 'text');
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let accumulatedCode = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          const dataStr = trimmed.slice(5).trim();
+          try {
+            const data = JSON.parse(dataStr);
+            if (data.error) {
+              throw new Error(data.error);
+            }
+            if (data.chunk) {
+              accumulatedCode += data.chunk;
+              setStreamingCode(accumulatedCode);
+            }
+            if (data.done) {
+              accumulatedCode = data.code || accumulatedCode;
+              setFinalCode(accumulatedCode);
+              setStreamingCode('');
+              setIsGeneratingApp(false);
+              setOutputTab('preview');
+              addAgentMessage(`✅ **场景模拟游戏生成完成！**\n\n你可以在右侧预览效果，或切换到代码视图查看 HTML 源码。`, 'text');
+            }
+          } catch (parseErr: any) {
+            if (parseErr.message && !parseErr.message.includes('Unexpected')) {
+              throw parseErr;
+            }
+          }
+        }
+      }
     } catch (err: any) {
       setIsGeneratingApp(false);
       const message = err?.message || '未知错误';
-      setFinalCode(`// DeepSeek V4 Flash 代码生成失败\n// ${message}`);
-      addAgentMessage(`❌ **DeepSeek V4 Flash 代码生成失败**\n\n错误信息：${message}`);
+      setFinalCode(`<!-- DeepSeek V4 Flash 代码生成失败 -->\n<!-- ${message} -->`);
+      setStreamingCode('');
+      addAgentMessage(`❌ **场景模拟游戏生成失败**\n\n错误信息：${message}`);
     }
   };
   const handleCopyFinalCode = () => {
@@ -3542,7 +3588,7 @@ API地址：https://api.deepseek.com/chat/completions`}
             </>
           )}
 
-          {/* Step 5 View: UI Preferences and App Generation */}
+          {/* Step 5 View: App Building from selected slice */}
           {activeStep === 5 && (
             <div className="p-4 flex-1 flex flex-col md:flex-row gap-4 overflow-hidden h-full z-10 animate-fadeIn">
               
@@ -3554,14 +3600,18 @@ API地址：https://api.deepseek.com/chat/completions`}
 
                 {modules.map((mod) => {
                   const isDone = mod.scriptStatus === 'completed';
+                  const isSelected = selectedStep5ModuleId === mod.id;
                   
                   return (
                     <div 
                       key={mod.id}
-                      className={`text-left p-2.5 rounded-xl border transition flex flex-col gap-1 w-full shrink-0 ${
-                        isDone
-                          ? 'border-emerald-500/30 bg-emerald-500/5' 
-                          : 'border-white/5 bg-white/5'
+                      onClick={() => isDone && setSelectedStep5ModuleId(mod.id)}
+                      className={`text-left p-2.5 rounded-xl border transition flex flex-col gap-1 w-full shrink-0 cursor-pointer ${
+                        isSelected
+                          ? 'border-cyan-500/50 bg-cyan-500/10 ring-1 ring-cyan-500/30'
+                          : isDone
+                          ? 'border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10' 
+                          : 'border-white/5 bg-white/5 opacity-50'
                       }`}
                     >
                       <div className="flex items-center justify-between w-full shrink-0">
@@ -3582,7 +3632,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                         </div>
                       </div>
 
-                      <h5 className={`font-semibold text-xs leading-normal line-clamp-1 ${isDone ? 'text-emerald-400' : 'text-slate-300'}`}>
+                      <h5 className={`font-semibold text-xs leading-normal line-clamp-1 ${isSelected ? 'text-cyan-400' : isDone ? 'text-emerald-400' : 'text-slate-300'}`}>
                         {mod.title}
                       </h5>
                     </div>
@@ -3599,7 +3649,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                 </div>
               </div>
 
-              {/* Right: UI Preferences and Build */}
+              {/* Right: Build controls and output */}
               <div className="flex-1 overflow-y-auto z-10 w-full">
                 <div className="space-y-6 flex flex-col h-full">
               
@@ -3609,90 +3659,59 @@ API地址：https://api.deepseek.com/chat/completions`}
                   </div>
                   <div>
                     <h3 className="font-semibold text-base text-white">
-                      全书部署：一键生成您的专属定制 App 客户端游戏源码
+                      场景模拟游戏构建
                     </h3>
                     <p className="text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                      所有通过智能规划并已完成剧本加载的教育关卡现已就绪。告诉我们您的终极视觉偏好（深色朋克风或者二次元），我将利用大模型构建包含骨架逻辑和内容数据分离封装的成品应用。
+                      选择左侧一个已生成脚本的切片，点击"开始构建"，AI 将基于互动脚本内容生成沉浸式 HTML 场景模拟游戏。
                     </p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6">
                   
-                  {/* Preferences Left Pane */}
+                  {/* Build Controls */}
                   <div className="space-y-6">
                     
-                    {/* Theme Select */}
-                    <div className="space-y-3">
-                      <label className="text-xs font-semibold text-slate-300 block">主题风格 (UI Paradigm)</label>
-                      <div className="grid grid-cols-2 gap-3">
-                        {[
-                          { id: 'minimal', label: '极简学术 (Minimal)', desc: '简洁清晰的高端学术风格', color: 'bg-slate-100 hover:bg-white text-slate-900 border-slate-200' },
-                          { id: 'cyberpunk', label: '赛博朋克 (Cyberpunk)', desc: '暗黑系高对比霓虹发光材质', color: 'bg-[#0a0a0f] hover:bg-cyan-950 text-cyan-400 border-cyan-500/30' },
-                          { id: 'cartoon', label: '卡通奇迹 (Cartoon)', desc: '圆润有趣适合低龄化学生', color: 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border-amber-500/30' },
-                          { id: 'retro', label: '复古街机 (8-Bit Arc)', desc: '像素风格和CRT滤镜叠加', color: 'bg-fuchsia-950/30 hover:bg-fuchsia-900/40 text-fuchsia-400 border-fuchsia-500/30' },
-                        ].map(theme => (
-                          <div 
-                            key={theme.id}
-                            onClick={() => setUiTheme(theme.id as any)}
-                            className={`p-3 rounded-xl border cursor-pointer transition ${theme.color} ${uiTheme === theme.id ? 'ring-2 ring-cyan-500 shadow-md' : 'opacity-70'}`}
-                          >
-                            <div className="font-semibold text-sm flex items-center justify-between">
-                              {theme.label}
-                              {uiTheme === theme.id && <CheckCircle2 className="w-4 h-4" />}
+                    {/* Selected slice info */}
+                    {selectedStep5ModuleId && (
+                      <div className="bg-[#0a0a0f] border border-white/10 rounded-xl p-4">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">当前选中切片</div>
+                        {(() => {
+                          const mod = modules.find(m => m.id === selectedStep5ModuleId);
+                          if (!mod) return null;
+                          return (
+                            <div>
+                              <div className="text-sm font-semibold text-cyan-400">{mod.chapterIndex} · {mod.title}</div>
+                              <div className="text-xs text-slate-400 mt-1 line-clamp-3">
+                                {mod.coveredChapters && `覆盖章节: ${mod.coveredChapters}`}
+                              </div>
                             </div>
-                            <div className="text-[10px] mt-1 opacity-80">{theme.desc}</div>
-                          </div>
-                        ))}
+                          );
+                        })()}
                       </div>
-                    </div>
-
-                    {/* Primary Color Select */}
-                    <div className="space-y-3">
-                      <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-                        核心品牌色调 (Primary Tint)
-                        <span className="font-mono text-[10px] text-slate-500">{primaryColor}</span>
-                      </label>
-                      <div className="flex gap-3">
-                        {[
-                          { hex: '#06b6d4', ring: 'ring-cyan-400' },
-                          { hex: '#3b82f6', ring: 'ring-blue-400' },
-                          { hex: '#10b981', ring: 'ring-emerald-400' },
-                          { hex: '#f59e0b', ring: 'ring-amber-400' },
-                          { hex: '#ef4444', ring: 'ring-rose-400' },
-                          { hex: '#8b5cf6', ring: 'ring-violet-400' }
-                        ].map(color => (
-                          <div 
-                            key={color.hex}
-                            onClick={() => setPrimaryColor(color.hex)}
-                            className={`w-10 h-10 rounded-full cursor-pointer transition ${primaryColor === color.hex ? 'scale-110 ring-2 ring-offset-2 ring-offset-[#050508] ' + color.ring : 'hover:scale-105'}`}
-                            style={{ backgroundColor: color.hex }}
-                          />
-                        ))}
-                      </div>
-                    </div>
+                    )}
 
                     {/* Build Action */}
                     <div className="pt-4 border-t border-white/10">
                       <button
                         onClick={handleGenerateFinalApp}
-                        disabled={isGeneratingApp || !modules.some(m => m.scriptStatus === 'completed')}
+                        disabled={isGeneratingApp || !selectedStep5ModuleId}
                         className="w-full py-4 rounded-xl flex items-center justify-center gap-2 font-bold transition text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-500 hover:bg-cyan-600 cursor-pointer"
                       >
                         {isGeneratingApp ? (
                           <>
                             <RefreshCw className="w-5 h-5 animate-spin" />
-                            正在编译和整合所有教料资源...
+                            AI 正在生成场景模拟游戏...
                           </>
                         ) : (
                           <>
                             <Download className="w-5 h-5" />
-                            打包代码：生成最终教学互动 App！ 
+                            {selectedStep5ModuleId ? '开始构建' : '请先选择一个切片'}
                           </>
                         )}
                       </button>
                       <p className="text-center text-[10px] text-slate-500 mt-3 flex items-center justify-center gap-1">
-                        <Lock className="w-3 h-3" /> 数据私有化，不收集任何学生及课本数据
+                        <Lock className="w-3 h-3" /> 使用 DeepSeek V4 Flash 模型生成
                       </p>
                     </div>
 
@@ -3703,7 +3722,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                   <div className="bg-[#050508] border-b border-white/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
-                        <Settings className="w-4 h-4 text-cyan-400" /> App.tsx 最终应用
+                        <Settings className="w-4 h-4 text-cyan-400" /> 场景模拟游戏
                       </div>
                       
                       {finalCode && (
@@ -3752,34 +3771,46 @@ API地址：https://api.deepseek.com/chat/completions`}
                            {codeCopySuccess ? (
                              <><Check className="w-3.5 h-3.5" /> 已复制!</>
                            ) : (
-                             <><Copy className="w-3.5 h-3.5" /> 拷贝到本地执行</>
+                             <><Copy className="w-3.5 h-3.5" /> 拷贝 HTML 文件</>
                            )}
                          </button>
                       )}
                     </div>
                   </div>
 
-                  <div className="flex-1 overflow-auto text-[11px] font-mono whitespace-pre text-slate-400 leading-relaxed bg-[#0a0a0f] select-text w-full max-w-full flex flex-col">
+                  <div className="flex-1 overflow-auto bg-[#0a0a0f] select-text w-full max-w-full flex flex-col">
                     {isGeneratingApp ? (
-                      <div className="flex flex-col items-center justify-center flex-1 gap-4 text-cyan-500 animate-pulse py-12">
-                        <Terminal className="w-10 h-10 animate-spin" />
-                        <div className="text-center font-sans font-semibold text-sm">
-                          {">"} Building customized assets and routing mechanics...
+                      <div className="flex flex-col flex-1">
+                        {/* Loading indicator */}
+                        <div className="flex flex-col items-center justify-center gap-3 text-cyan-500 animate-pulse py-6 shrink-0">
+                          <Terminal className="w-8 h-8 animate-spin" />
+                          <div className="text-center font-sans font-semibold text-sm">
+                            {">"} AI 正在生成场景模拟游戏...
+                          </div>
                         </div>
+                        {/* Streaming output area */}
+                        {streamingCode && (
+                          <div className="flex-1 overflow-auto px-4 pb-4 min-h-0 border-t border-white/5">
+                            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 pt-2">
+                              AI 实时输出流
+                            </div>
+                            <pre className="text-cyan-200/80 text-[11px] font-mono whitespace-pre-wrap leading-relaxed">
+                              {streamingCode}
+                            </pre>
+                          </div>
+                        )}
                       </div>
                     ) : finalCode ? (
                       outputTab === 'preview' ? (
-                        <StandalonePreview
-                          bookTitle={bookTitle}
-                          modules={modules}
-                          uiTheme={uiTheme}
-                          primaryColor={primaryColor}
-                          isFullscreen={false}
-                          onToggleFullscreen={() => setIsFullscreen(true)}
+                        <iframe
+                          srcDoc={finalCode}
+                          className="w-full h-full border-0 min-h-[500px]"
+                          sandbox="allow-scripts allow-same-origin"
+                          title="Scene Simulation Preview"
                         />
                       ) : (
                         <div className="p-4 overflow-auto select-text flex-1">
-                          <pre className="text-cyan-200/80">{finalCode}</pre>
+                          <pre className="text-cyan-200/80 text-[11px] font-mono whitespace-pre leading-relaxed">{finalCode}</pre>
                         </div>
                       )
                     ) : (
