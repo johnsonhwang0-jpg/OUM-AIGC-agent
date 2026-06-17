@@ -451,9 +451,11 @@ function greet(name) {
         }
       }
 
+      let parsedModules: any[] = [];
+
       if (project.modules) {
         try {
-          const parsedModules = JSON.parse(project.modules);
+          parsedModules = JSON.parse(project.modules);
           if (Array.isArray(parsedModules) && parsedModules.length > 0) {
             setModules(parsedModules);
             setActiveStep(2);
@@ -519,8 +521,7 @@ function greet(name) {
 
       // 加载已保存的App代码
       const appCodeMap: Record<string, string> = {};
-      // 使用已解析的modules或当前modules状态
-      const modsToLoad = typeof parsedModules !== 'undefined' && Array.isArray(parsedModules) ? parsedModules : modules;
+      const modsToLoad = parsedModules.length > 0 ? parsedModules : modules;
       for (const mod of modsToLoad) {
         try {
           const codeResponse = await fetch(`/api/projects/${projectId}/app-code/${mod.id}`);
@@ -1817,6 +1818,18 @@ ${script.conclusion}
       setCodeCopySuccess(true);
       setTimeout(() => setCodeCopySuccess(false), 2000);
     });
+  };
+
+  const handleSelectStep5Module = (moduleId: string) => {
+    setSelectedStep5ModuleId(moduleId);
+    // Restore saved code if exists
+    const savedCode = moduleAppCodes[moduleId];
+    if (savedCode) {
+      setFinalCode(savedCode);
+      setOutputTab('preview');
+    } else {
+      setFinalCode('');
+    }
   };
 
   const getActiveModule = () => {
@@ -3594,7 +3607,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                   return (
                     <div 
                       key={mod.id}
-                      onClick={() => isDone && setSelectedStep5ModuleId(mod.id)}
+                      onClick={() => isDone && handleSelectStep5Module(mod.id)}
                       className={`text-left p-2.5 rounded-xl border transition flex flex-col gap-1 w-full shrink-0 cursor-pointer ${
                         isSelected
                           ? 'border-cyan-500/50 bg-cyan-500/10 ring-1 ring-cyan-500/30'
