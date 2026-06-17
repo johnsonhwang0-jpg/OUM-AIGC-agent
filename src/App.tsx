@@ -162,6 +162,24 @@ export default function App() {
     rawResponse: '',
     timestamp: ''
   });
+
+  // Step 5 API debug state
+  const [showAppApiDrawer, setShowAppApiDrawer] = useState<boolean>(false);
+  const [appApiDebugInfo, setAppApiDebugInfo] = useState<{
+    model: string;
+    systemPrompt: string;
+    userPrompt: string;
+    status: 'idle' | 'calling' | 'success' | 'error';
+    rawResponse: string;
+    timestamp: string;
+  }>({
+    model: 'deepseek-v4-flash',
+    systemPrompt: '根据用户的要求，实现web端的html。这个html是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。\n\n硬性要求：\n- 只输出完整的HTML代码，包含<!DOCTYPE html>、<html>、<head>、<body>等完整结构\n- 不要输出任何解释文字\n- 使用纯HTML + CSS + JavaScript，不依赖任何外部库或框架\n- 样式使用内联<style>标签，脚本使用内联<script>标签\n- 不要调用任何外部API，不要依赖后端\n- 界面要精致、沉浸感强，适合教学演示\n- 代码要能直接保存为.html文件并在浏览器中运行',
+    userPrompt: '',
+    status: 'idle',
+    rawResponse: '',
+    timestamp: ''
+  });
   const [scriptCopySuccess, setScriptCopySuccess] = useState<boolean>(false);
   const [copyToast, setCopyToast] = useState<{ message: string; visible: boolean }>({ message: '', visible: false });
   const [recommendingId, setRecommendingId] = useState<string | null>(null);
@@ -232,6 +250,7 @@ function greet(name) {
   const [primaryColor, setPrimaryColor] = useState<string>('#06b6d4');
   const [isGeneratingApp, setIsGeneratingApp] = useState(false);
   const [finalCode, setFinalCode] = useState<string>('');
+  const [appModel, setAppModel] = useState<string>('deepseek-v4-flash');
   const [codeCopySuccess, setCodeCopySuccess] = useState<boolean>(false);
   const [outputTab, setOutputTab] = useState<'code' | 'preview'>('preview');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -1770,6 +1789,22 @@ ${script.conclusion}
 
     setIsGeneratingApp(true);
     setFinalCode('');
+
+    const userPrompt = `Book: ${bookTitle}
+Chapter: ${mod.chapterIndex} · ${mod.title}
+Covered Chapters: ${mod.coveredChapters || 'N/A'}
+Script Markdown:
+${markdown.substring(0, 5000)}`;
+
+    setAppApiDebugInfo(prev => ({
+      ...prev,
+      model: appModel,
+      userPrompt,
+      status: 'calling',
+      rawResponse: '',
+      timestamp: new Date().toLocaleTimeString()
+    }));
+
     addAgentMessage(`🚀 正在基于切片 **${mod.chapterIndex} · ${mod.title}** 的互动脚本生成场景模拟游戏...`);
 
     try {
@@ -1780,18 +1815,32 @@ ${script.conclusion}
           bookTitle,
           chapterTitle: `${mod.chapterIndex} · ${mod.title}`,
           coveredChapters: mod.coveredChapters,
-          scriptMarkdown: markdown
+          scriptMarkdown: markdown,
+          model: appModel
         })
       });
 
       const rawText = await response.text();
       if (!response.ok) {
+        setAppApiDebugInfo(prev => ({
+          ...prev,
+          status: 'error',
+          rawResponse: `HTTP ${response.status}: ${rawText}`,
+          timestamp: new Date().toLocaleTimeString()
+        }));
         throw new Error(rawText || `HTTP ${response.status}`);
       }
 
       const data = JSON.parse(rawText);
       const generatedCode = data.code || '';
       setFinalCode(generatedCode);
+
+      setAppApiDebugInfo(prev => ({
+        ...prev,
+        status: 'success',
+        rawResponse: rawText.substring(0, 10000),
+        timestamp: new Date().toLocaleTimeString()
+      }));
       
       // Save generated code to backend and local state
       if (currentProjectId && generatedCode) {
@@ -1810,6 +1859,12 @@ ${script.conclusion}
       setIsGeneratingApp(false);
       const message = err?.message || '未知错误';
       setFinalCode(`<!-- DeepSeek V4 Flash 代码生成失败 -->\n<!-- ${message} -->`);
+      setAppApiDebugInfo(prev => ({
+        ...prev,
+        status: 'error',
+        rawResponse: prev.rawResponse || `Error: ${message}`,
+        timestamp: new Date().toLocaleTimeString()
+      }));
       addAgentMessage(`❌ **场景模拟游戏生成失败**\n\n错误信息：${message}`);
     }
   };
@@ -3590,6 +3645,74 @@ API地址：https://api.deepseek.com/chat/completions`}
             </>
           )}
 
+          {/* Step 5 API Debug Drawer */}
+          {showAppApiDrawer && (
+            <>
+              <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setShowAppApiDrawer(false)} />
+              <div className="fixed top-0 right-0 h-full w-[520px] bg-[#0a0a0f] border-l border-white/10 z-50 flex flex-col shadow-2xl">
+                <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <Settings className="w-4 h-4 text-cyan-400" />
+                    <h3 className="font-bold text-sm text-white">App 构建 API 调试面板</h3>
+                  </div>
+                  <button onClick={() => setShowAppApiDrawer(false)} className="p-1.5 hover:bg-white/10 rounded-lg transition cursor-pointer">
+                    <X className="w-4 h-4 text-slate-400" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">调用模型</label>
+                    <select
+                      value={appModel}
+                      onChange={(e) => setAppModel(e.target.value)}
+                      className="w-full bg-[#050508] border border-white/10 rounded-lg p-3 text-xs text-cyan-400 font-mono font-bold cursor-pointer appearance-none focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                    >
+                      <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                      <option value="qwen3.7-plus">qwen3.7-plus</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">调用状态</label>
+                    <div className={`rounded-lg p-3 text-xs font-bold flex items-center gap-2 ${
+                      appApiDebugInfo.status === 'idle' ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20' :
+                      appApiDebugInfo.status === 'calling' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                      appApiDebugInfo.status === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                      'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                    }`}>
+                      {appApiDebugInfo.status === 'idle' && <Info className="w-3.5 h-3.5" />}
+                      {appApiDebugInfo.status === 'calling' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                      {appApiDebugInfo.status === 'success' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                      {appApiDebugInfo.status === 'error' && <XCircle className="w-3.5 h-3.5" />}
+                      {appApiDebugInfo.status === 'idle' && '尚未调用'}
+                      {appApiDebugInfo.status === 'calling' && '正在调用中...'}
+                      {appApiDebugInfo.status === 'success' && '调用成功'}
+                      {appApiDebugInfo.status === 'error' && '调用失败'}
+                      {appApiDebugInfo.timestamp && <span className="ml-auto text-[10px] opacity-60 font-mono">{appApiDebugInfo.timestamp}</span>}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">系统指令</label>
+                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-48 overflow-y-auto">
+                      <pre className="text-[10px] text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">{appApiDebugInfo.systemPrompt}</pre>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">用户指令</label>
+                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-48 overflow-y-auto">
+                      <pre className="text-[10px] text-cyan-300 whitespace-pre-wrap leading-relaxed font-mono">{appApiDebugInfo.userPrompt || '（尚未生成）'}</pre>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">API 原始返回</label>
+                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-64 overflow-y-auto">
+                      <pre className="text-[10px] text-emerald-300 whitespace-pre-wrap leading-relaxed font-mono">{appApiDebugInfo.rawResponse || '（无返回结果）'}</pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
           {/* Step 5 View: App Building from selected slice */}
           {activeStep === 5 && (
             <div className="p-4 flex-1 flex flex-col md:flex-row gap-4 overflow-hidden h-full z-10 animate-fadeIn">
@@ -3695,23 +3818,32 @@ API地址：https://api.deepseek.com/chat/completions`}
 
                     {/* Build Action */}
                     <div className="pt-4 border-t border-white/10">
-                      <button
-                        onClick={handleGenerateFinalApp}
-                        disabled={isGeneratingApp || !selectedStep5ModuleId}
-                        className="w-full py-4 rounded-xl flex items-center justify-center gap-2 font-bold transition text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-500 hover:bg-cyan-600 cursor-pointer"
-                      >
-                        {isGeneratingApp ? (
-                          <>
-                            <RefreshCw className="w-5 h-5 animate-spin" />
-                            AI 正在生成场景模拟游戏...
-                          </>
-                        ) : (
-                          <>
-                            <Download className="w-5 h-5" />
-                            {selectedStep5ModuleId ? '开始构建' : '请先选择一个切片'}
-                          </>
-                        )}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleGenerateFinalApp}
+                          disabled={isGeneratingApp || !selectedStep5ModuleId}
+                          className="flex-1 py-4 rounded-xl flex items-center justify-center gap-2 font-bold transition text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-500 hover:bg-cyan-600 cursor-pointer"
+                        >
+                          {isGeneratingApp ? (
+                            <>
+                              <RefreshCw className="w-5 h-5 animate-spin" />
+                              AI 正在生成场景模拟游戏...
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-5 h-5" />
+                              {selectedStep5ModuleId ? '开始构建' : '请先选择一个切片'}
+                            </>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => setShowAppApiDrawer(true)}
+                          className="p-3 rounded-xl transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10 shrink-0"
+                          title="API 调试"
+                        >
+                          <Settings className="w-5 h-5" />
+                        </button>
+                      </div>
                       <p className="text-center text-[10px] text-slate-500 mt-3 flex items-center justify-center gap-1">
                         <Lock className="w-3 h-3" /> 使用 DeepSeek V4 Flash 模型生成
                       </p>
@@ -3896,14 +4028,12 @@ API地址：https://api.deepseek.com/chat/completions`}
           </div>
 
           {/* Sandbox Body wrapper */}
-          <div className="flex-1 max-w-4xl w-full mx-auto bg-slate-950 overflow-hidden rounded-b-2xl shadow-2xl border-x border-b border-white/10 flex flex-col min-h-[500px] mb-6">
-            <StandalonePreview
-              bookTitle={bookTitle}
-              modules={modules}
-              uiTheme={uiTheme}
-              primaryColor={primaryColor}
-              isFullscreen={true}
-              onToggleFullscreen={() => setIsFullscreen(false)}
+          <div className="flex-1 max-w-4xl w-full mx-auto overflow-hidden rounded-b-2xl shadow-2xl border-x border-b border-white/10 flex flex-col min-h-[500px] mb-6">
+            <iframe
+              srcDoc={finalCode}
+              className="w-full h-full border-0 flex-1"
+              sandbox="allow-scripts allow-same-origin"
+              title="Scene Simulation Fullscreen Preview"
             />
           </div>
 

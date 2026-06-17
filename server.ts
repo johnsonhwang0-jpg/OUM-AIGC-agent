@@ -162,16 +162,17 @@ async function* callDeepSeekStream(prompt: string, systemPrompt: string = "", mo
 }
 
 // DashScope (阿里云通义千问) API client
-async function callDashScope(prompt: string, systemPrompt: string = "", model: string = "", jsonMode: boolean = true): Promise<string> {
+async function callDashScope(prompt: string, systemPrompt: string = "", model: string = "", maxTokens: number = 4096, jsonMode: boolean = true): Promise<string> {
   try {
     const dashscopeModel = model || process.env.DASHSCOPE_MODEL || "qwen-plus";
     const dashscopeApiKey = process.env.DASHSCOPE_API_KEY || "";
+    const baseUrl = process.env.DASHSCOPE_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
     
     if (!dashscopeApiKey) {
       throw new Error("DASHSCOPE_API_KEY is not configured");
     }
     
-    const response = await fetch("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -184,7 +185,7 @@ async function callDashScope(prompt: string, systemPrompt: string = "", model: s
           { role: "user", content: prompt }
         ],
         temperature: 0.7,
-        max_tokens: 4096,
+        max_tokens: maxTokens,
         ...(jsonMode ? { response_format: { type: "json_object" } } : {})
       })
     });
@@ -1239,14 +1240,12 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
 
 app.post("/api/generate-app-code", async (req, res) => {
   try {
-    const { bookTitle, chapterTitle, coveredChapters, scriptMarkdown } = req.body;
+    const { bookTitle, chapterTitle, coveredChapters, scriptMarkdown, model } = req.body;
     if (!scriptMarkdown || typeof scriptMarkdown !== "string") {
       return res.status(400).json({ error: "Missing scriptMarkdown." });
     }
 
-    const systemInstruction = `你是一名资深前端工程师，擅长创建沉浸式、互动性强的Web端HTML场景模拟游戏。
-
-你的任务是根据提供的教学互动脚本内容，生成一个完整的、可直接在浏览器中运行的HTML文件。
+    const systemInstruction = `根据用户的要求，实现web端的html。这个html是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。
 
 硬性要求：
 - 只输出完整的HTML代码，包含<!DOCTYPE html>、<html>、<head>、<body>等完整结构
@@ -1254,10 +1253,8 @@ app.post("/api/generate-app-code", async (req, res) => {
 - 使用纯HTML + CSS + JavaScript，不依赖任何外部库或框架
 - 样式使用内联<style>标签，脚本使用内联<script>标签
 - 不要调用任何外部API，不要依赖后端
-- 每个操作都要有丰富的可视化场景画面
-- 不要把所有内容局限在一个页面上，一个行为在一个页面完成，完成后进入新场景
 - 界面要精致、沉浸感强，适合教学演示
-- 代码要能直接保存为.html文件并在浏览器中打开运行`;
+- 代码要能直接保存为.html文件并在浏览器中运行`;
 
     const promptText = `根据以下要求，帮我实现一个web端的html。这是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。
 
@@ -1269,14 +1266,22 @@ ${coveredChapters ? `覆盖章节：${coveredChapters}` : ""}
 
 ${scriptMarkdown}`;
 
-    const outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 16000, false);
+    let outputText: string;
+    const selectedModel = model || "deepseek-v4-flash";
+
+    if (selectedModel === "qwen3.7-plus") {
+      outputText = await callDashScope(promptText, systemInstruction, "qwen3.7-plus", 16000, false);
+    } else {
+      outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 16000, false);
+    }
+
     const code = outputText
       .trim()
       .replace(/^```(?:html|HTML)?\s*/i, "")
       .replace(/\s*```$/i, "")
       .trim();
 
-    res.json({ code });
+    res.json({ code, model: selectedModel });
   } catch (error: any) {
     console.error("Error generating app code:", error);
     res.status(500).json({ error: error.message || "Failed to generate app code" });
