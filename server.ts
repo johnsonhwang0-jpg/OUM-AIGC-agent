@@ -14,6 +14,8 @@ import {
   getModuleScripts,
   saveExtractedContent,
   getExtractedContents,
+  saveGeneratedAppCode,
+  getGeneratedAppCode,
   Project
 } from "./database.js";
 
@@ -499,6 +501,29 @@ app.post("/api/projects/:id/extracted", async (req, res) => {
   } catch (error) {
     console.error("Failed to save extracted content:", error);
     res.status(500).json({ error: "Failed to save extracted content" });
+  }
+});
+
+// 保存生成的App代码
+app.post("/api/projects/:id/app-code", async (req, res) => {
+  try {
+    const { moduleId, code } = req.body;
+    await saveGeneratedAppCode(req.params.id, moduleId, code);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to save app code:", error);
+    res.status(500).json({ error: "Failed to save app code" });
+  }
+});
+
+// 获取生成的App代码
+app.get("/api/projects/:id/app-code/:moduleId", async (req, res) => {
+  try {
+    const code = await getGeneratedAppCode(req.params.id, req.params.moduleId);
+    res.json({ code: code || null });
+  } catch (error) {
+    console.error("Failed to get app code:", error);
+    res.status(500).json({ error: "Failed to get app code" });
   }
 });
 

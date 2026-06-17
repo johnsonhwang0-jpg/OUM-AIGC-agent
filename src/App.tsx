@@ -238,6 +238,8 @@ function greet(name) {
 
   // Step 5 States: Slice selection for app building
   const [selectedStep5ModuleId, setSelectedStep5ModuleId] = useState<string | null>(null);
+  const [moduleAppCodes, setModuleAppCodes] = useState<Record<string, string>>({}); // moduleId -> generated code
+  const [moduleGenerating, setModuleGenerating] = useState<Record<string, boolean>>({}); // moduleId -> is generating
 
   // Helper functions to flatten new object types to strings for UI display
   const getSummaryText = (summary: BookModule['summary']): string => {
@@ -514,6 +516,23 @@ function greet(name) {
         });
         setExtractedModules(extractedMap);
       }
+
+      // 加载已保存的App代码
+      const appCodeMap: Record<string, string> = {};
+      // 使用已解析的modules或当前modules状态
+      const modsToLoad = typeof parsedModules !== 'undefined' && Array.isArray(parsedModules) ? parsedModules : modules;
+      for (const mod of modsToLoad) {
+        try {
+          const codeResponse = await fetch(`/api/projects/${projectId}/app-code/${mod.id}`);
+          if (codeResponse.ok) {
+            const codeData = await codeResponse.json();
+            if (codeData.code) {
+              appCodeMap[mod.id] = codeData.code;
+            }
+          }
+        } catch {}
+      }
+      setModuleAppCodes(appCodeMap);
 
       let msg = `📂 **已加载项目：${project.name}**\n\n`;
       if (project.pdfFileName) msg += `📄 PDF：${project.pdfFileName}\n`;
@@ -1214,7 +1233,7 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
           rawResponse: `HTTP ${response.status}: ${errorText}`,
           timestamp: new Date().toLocaleTimeString()
         }));
-        throw new Error("Script generation request error");
+        throw new Error(`Script generation request error: HTTP ${response.status} - ${errorText}`);
       }
 
       const rawText = await response.text();
@@ -1770,7 +1789,19 @@ ${script.conclusion}
       }
 
       const data = JSON.parse(rawText);
-      setFinalCode(data.code || '');
+      const generatedCode = data.code || '';
+      setFinalCode(generatedCode);
+      
+      // Save generated code to backend and local state
+      if (currentProjectId && generatedCode) {
+        setModuleAppCodes(prev => ({ ...prev, [selectedStep5ModuleId]: generatedCode }));
+        fetch(`/api/projects/${currentProjectId}/app-code`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ moduleId: selectedStep5ModuleId, code: generatedCode })
+        }).catch(err => console.error("保存App代码失败:", err));
+      }
+      
       setIsGeneratingApp(false);
       setOutputTab('preview');
       addAgentMessage(`✅ **场景模拟游戏生成完成！**\n\n你可以在右侧预览效果，或切换到代码视图查看 HTML 源码。`, 'text');

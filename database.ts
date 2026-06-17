@@ -36,6 +36,14 @@ export interface ExtractedContent {
   createdAt: string;
 }
 
+export interface GeneratedAppCode {
+  id: string;
+  projectId: string;
+  moduleId: string;
+  code: string;
+  createdAt: string;
+}
+
 async function initDatabase(): Promise<Database> {
   const SQL = await initSqlJs();
 
@@ -104,6 +112,19 @@ async function initDatabase(): Promise<Database> {
   `);
 
   database.run(`CREATE INDEX IF NOT EXISTS idx_extracted_project ON extracted_content(projectId)`);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS generated_app_code (
+      id TEXT PRIMARY KEY,
+      projectId TEXT NOT NULL,
+      moduleId TEXT NOT NULL,
+      code TEXT,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
+    )
+  `);
+
+  database.run(`CREATE INDEX IF NOT EXISTS idx_app_code_project ON generated_app_code(projectId)`);
 
   saveDatabase(database);
 
@@ -381,4 +402,28 @@ export async function closeDatabase(): Promise<void> {
     db.close();
     db = null;
   }
+}
+
+export async function saveGeneratedAppCode(projectId: string, moduleId: string, code: string): Promise<void> {
+  const database = await getDatabase();
+  const id = `appcode-${projectId}-${moduleId}`;
+  const now = new Date().toISOString();
+
+  database.run(
+    `INSERT OR REPLACE INTO generated_app_code (id, projectId, moduleId, code, createdAt)
+     VALUES (?, ?, ?, ?, ?)`,
+    [id, projectId, moduleId, code, now]
+  );
+  saveDatabase(database);
+}
+
+export async function getGeneratedAppCode(projectId: string, moduleId: string): Promise<string | null> {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT code FROM generated_app_code WHERE projectId = ? AND moduleId = ?`, [projectId, moduleId]);
+
+  if (result.length === 0 || result[0].values.length === 0) {
+    return null;
+  }
+
+  return result[0].values[0][0] as string;
 }
