@@ -1244,30 +1244,17 @@ ${coveredChapters ? `覆盖章节：${coveredChapters}` : ""}
 
 ${scriptMarkdown}`;
 
-    // Set up SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-
-    let fullCode = '';
-    for await (const chunk of callDeepSeekStream(promptText, systemInstruction, "deepseek-v4-flash", 16000)) {
-      fullCode += chunk;
-      res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
-    }
-
-    // Clean up code
-    const cleanedCode = fullCode
+    const outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 16000, false);
+    const code = outputText
       .trim()
       .replace(/^```(?:html|HTML)?\s*/i, "")
       .replace(/\s*```$/i, "")
       .trim();
 
-    res.write(`data: ${JSON.stringify({ done: true, code: cleanedCode })}\n\n`);
-    res.end();
+    res.json({ code });
   } catch (error: any) {
     console.error("Error generating app code:", error);
-    res.write(`data: ${JSON.stringify({ error: error.message || "Failed to generate app code" })}\n\n`);
-    res.end();
+    res.status(500).json({ error: error.message || "Failed to generate app code" });
   }
 });
 

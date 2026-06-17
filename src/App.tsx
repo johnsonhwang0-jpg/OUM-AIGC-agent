@@ -238,7 +238,6 @@ function greet(name) {
 
   // Step 5 States: Slice selection for app building
   const [selectedStep5ModuleId, setSelectedStep5ModuleId] = useState<string | null>(null);
-  const [streamingCode, setStreamingCode] = useState<string>("");
 
   // Helper functions to flatten new object types to strings for UI display
   const getSummaryText = (summary: BookModule['summary']): string => {
@@ -1750,9 +1749,7 @@ ${script.conclusion}
     }
 
     setIsGeneratingApp(true);
-    setOutputTab('code');
     setFinalCode('');
-    setStreamingCode('');
     addAgentMessage(`🚀 正在基于切片 **${mod.chapterIndex} · ${mod.title}** 的互动脚本生成场景模拟游戏...`);
 
     try {
@@ -1767,59 +1764,20 @@ ${script.conclusion}
         })
       });
 
+      const rawText = await response.text();
       if (!response.ok) {
-        const rawText = await response.text();
         throw new Error(rawText || `HTTP ${response.status}`);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let accumulatedCode = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data:')) continue;
-          const dataStr = trimmed.slice(5).trim();
-          try {
-            const data = JSON.parse(dataStr);
-            if (data.error) {
-              throw new Error(data.error);
-            }
-            if (data.chunk) {
-              accumulatedCode += data.chunk;
-              setStreamingCode(accumulatedCode);
-            }
-            if (data.done) {
-              accumulatedCode = data.code || accumulatedCode;
-              setFinalCode(accumulatedCode);
-              setStreamingCode('');
-              setIsGeneratingApp(false);
-              setOutputTab('preview');
-              addAgentMessage(`✅ **场景模拟游戏生成完成！**\n\n你可以在右侧预览效果，或切换到代码视图查看 HTML 源码。`, 'text');
-            }
-          } catch (parseErr: any) {
-            if (parseErr.message && !parseErr.message.includes('Unexpected')) {
-              throw parseErr;
-            }
-          }
-        }
-      }
+      const data = JSON.parse(rawText);
+      setFinalCode(data.code || '');
+      setIsGeneratingApp(false);
+      setOutputTab('preview');
+      addAgentMessage(`✅ **场景模拟游戏生成完成！**\n\n你可以在右侧预览效果，或切换到代码视图查看 HTML 源码。`, 'text');
     } catch (err: any) {
       setIsGeneratingApp(false);
       const message = err?.message || '未知错误';
       setFinalCode(`<!-- DeepSeek V4 Flash 代码生成失败 -->\n<!-- ${message} -->`);
-      setStreamingCode('');
       addAgentMessage(`❌ **场景模拟游戏生成失败**\n\n错误信息：${message}`);
     }
   };
@@ -3780,25 +3738,11 @@ API地址：https://api.deepseek.com/chat/completions`}
 
                   <div className="flex-1 overflow-auto bg-[#0a0a0f] select-text w-full max-w-full flex flex-col">
                     {isGeneratingApp ? (
-                      <div className="flex flex-col flex-1">
-                        {/* Loading indicator */}
-                        <div className="flex flex-col items-center justify-center gap-3 text-cyan-500 animate-pulse py-6 shrink-0">
-                          <Terminal className="w-8 h-8 animate-spin" />
-                          <div className="text-center font-sans font-semibold text-sm">
-                            {">"} AI 正在生成场景模拟游戏...
-                          </div>
+                      <div className="flex flex-col items-center justify-center flex-1 gap-4 text-cyan-500 animate-pulse py-12">
+                        <Terminal className="w-10 h-10 animate-spin" />
+                        <div className="text-center font-sans font-semibold text-sm">
+                          {">"} AI 正在生成场景模拟游戏...
                         </div>
-                        {/* Streaming output area */}
-                        {streamingCode && (
-                          <div className="flex-1 overflow-auto px-4 pb-4 min-h-0 border-t border-white/5">
-                            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 pt-2">
-                              AI 实时输出流
-                            </div>
-                            <pre className="text-cyan-200/80 text-[11px] font-mono whitespace-pre-wrap leading-relaxed">
-                              {streamingCode}
-                            </pre>
-                          </div>
-                        )}
                       </div>
                     ) : finalCode ? (
                       outputTab === 'preview' ? (
