@@ -3544,106 +3544,162 @@ API地址：https://api.deepseek.com/chat/completions`}
 
           {/* Step 5 View: UI Preferences and App Generation */}
           {activeStep === 5 && (
-            <div className="flex-1 overflow-y-auto p-6 z-10 w-full animate-fadeIn">
-              <div className="max-w-4xl mx-auto space-y-6 flex flex-col">
+            <div className="p-4 flex-1 flex flex-col md:flex-row gap-4 overflow-hidden h-full z-10 animate-fadeIn">
               
-              <div className="bg-gradient-to-r from-cyan-950/40 to-[#0a0a0f] border border-cyan-500/30 rounded-2xl p-6 flex flex-col md:flex-row items-center gap-5 shadow-lg">
-                <div className="p-3 bg-cyan-500/20 text-cyan-400 border border-cyan-400/20 rounded-xl">
-                  <Gamepad2 className="w-8 h-8 animate-pulse" />
+              {/* Left sidebar: Modules list */}
+              <div className="w-full md:w-64 border border-white/10 rounded-2xl bg-[#0a0a0f] p-3 space-y-2 shrink-0 flex flex-col overflow-y-auto max-h-[220px] md:max-h-none">
+                <div className="text-[11px] font-bold text-slate-500 px-2 tracking-wider uppercase mb-1 shrink-0">
+                  待构建切片 (Chapter List)
                 </div>
-                <div>
-                  <h3 className="font-semibold text-base text-white">
-                    全书部署：一键生成您的专属定制 App 客户端游戏源码
-                  </h3>
-                  <p className="text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                    所有通过智能规划并已完成剧本加载的教育关卡现已就绪。告诉我们您的终极视觉偏好（深色朋克风或者二次元），我将利用大模型构建包含骨架逻辑和内容数据分离封装的成品应用。
-                  </p>
+
+                {modules.map((mod) => {
+                  const isDone = mod.scriptStatus === 'completed';
+                  
+                  return (
+                    <div 
+                      key={mod.id}
+                      className={`text-left p-2.5 rounded-xl border transition flex flex-col gap-1 w-full shrink-0 ${
+                        isDone
+                          ? 'border-emerald-500/30 bg-emerald-500/5' 
+                          : 'border-white/5 bg-white/5'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full shrink-0">
+                        <span className="text-[10px] font-bold text-slate-400 font-mono tracking-wide">
+                          {mod.chapterIndex}
+                        </span>
+
+                        <div className="flex items-center gap-1">
+                          {isDone ? (
+                            <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
+                              <Check className="w-2.5 h-2.5" /> 脚本就绪
+                            </span>
+                          ) : (
+                            <span className="text-[9px] bg-white/5 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-white/5 italic">
+                              未就绪
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <h5 className={`font-semibold text-xs leading-normal line-clamp-1 ${isDone ? 'text-emerald-400' : 'text-slate-300'}`}>
+                        {mod.title}
+                      </h5>
+                    </div>
+                  );
+                })}
+
+                <div className="pt-2 shrink-0 border-t border-white/10 mt-auto">
+                  <button 
+                    onClick={() => setActiveStep(4)}
+                    className="w-full text-center text-xs font-semibold py-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl block border border-white/10 transition cursor-pointer"
+                  >
+                    ⚙️ 返回编辑模拟器脚本
+                  </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6">
-                
-                {/* Preferences Left Pane */}
-                <div className="space-y-6">
-                  
-                  {/* Theme Select */}
-                  <div className="space-y-3">
-                    <label className="text-xs font-semibold text-slate-300 block">主题风格 (UI Paradigm)</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      {[
-                        { id: 'minimal', label: '极简学术 (Minimal)', desc: '简洁清晰的高端学术风格', color: 'bg-slate-100 hover:bg-white text-slate-900 border-slate-200' },
-                        { id: 'cyberpunk', label: '赛博朋克 (Cyberpunk)', desc: '暗黑系高对比霓虹发光材质', color: 'bg-[#0a0a0f] hover:bg-cyan-950 text-cyan-400 border-cyan-500/30' },
-                        { id: 'cartoon', label: '卡通奇迹 (Cartoon)', desc: '圆润有趣适合低龄化学生', color: 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border-amber-500/30' },
-                        { id: 'retro', label: '复古街机 (8-Bit Arc)', desc: '像素风格和CRT滤镜叠加', color: 'bg-fuchsia-950/30 hover:bg-fuchsia-900/40 text-fuchsia-400 border-fuchsia-500/30' },
-                      ].map(theme => (
-                        <div 
-                          key={theme.id}
-                          onClick={() => setUiTheme(theme.id as any)}
-                          className={`p-3 rounded-xl border cursor-pointer transition ${theme.color} ${uiTheme === theme.id ? 'ring-2 ring-cyan-500 shadow-md' : 'opacity-70'}`}
-                        >
-                          <div className="font-semibold text-sm flex items-center justify-between">
-                            {theme.label}
-                            {uiTheme === theme.id && <CheckCircle2 className="w-4 h-4" />}
-                          </div>
-                          <div className="text-[10px] mt-1 opacity-80">{theme.desc}</div>
-                        </div>
-                      ))}
-                    </div>
+              {/* Right: UI Preferences and Build */}
+              <div className="flex-1 overflow-y-auto z-10 w-full">
+                <div className="space-y-6 flex flex-col h-full">
+              
+                <div className="bg-gradient-to-r from-cyan-950/40 to-[#0a0a0f] border border-cyan-500/30 rounded-2xl p-6 flex flex-col md:flex-row items-center gap-5 shadow-lg">
+                  <div className="p-3 bg-cyan-500/20 text-cyan-400 border border-cyan-400/20 rounded-xl">
+                    <Gamepad2 className="w-8 h-8 animate-pulse" />
                   </div>
-
-                  {/* Primary Color Select */}
-                  <div className="space-y-3">
-                    <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-                      核心品牌色调 (Primary Tint)
-                      <span className="font-mono text-[10px] text-slate-500">{primaryColor}</span>
-                    </label>
-                    <div className="flex gap-3">
-                      {[
-                        { hex: '#06b6d4', ring: 'ring-cyan-400' },
-                        { hex: '#3b82f6', ring: 'ring-blue-400' },
-                        { hex: '#10b981', ring: 'ring-emerald-400' },
-                        { hex: '#f59e0b', ring: 'ring-amber-400' },
-                        { hex: '#ef4444', ring: 'ring-rose-400' },
-                        { hex: '#8b5cf6', ring: 'ring-violet-400' }
-                      ].map(color => (
-                        <div 
-                          key={color.hex}
-                          onClick={() => setPrimaryColor(color.hex)}
-                          className={`w-10 h-10 rounded-full cursor-pointer transition ${primaryColor === color.hex ? 'scale-110 ring-2 ring-offset-2 ring-offset-[#050508] ' + color.ring : 'hover:scale-105'}`}
-                          style={{ backgroundColor: color.hex }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Build Action */}
-                  <div className="pt-4 border-t border-white/10">
-                    <button
-                      onClick={handleGenerateFinalApp}
-                      disabled={isGeneratingApp || !modules.some(m => m.scriptStatus === 'completed')}
-                      className="w-full py-4 rounded-xl flex items-center justify-center gap-2 font-bold transition text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-500 hover:bg-cyan-600 cursor-pointer"
-                    >
-                      {isGeneratingApp ? (
-                        <>
-                          <RefreshCw className="w-5 h-5 animate-spin" />
-                          正在编译和整合所有教料资源...
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-5 h-5" />
-                          打包代码：生成最终教学互动 App！ 
-                        </>
-                      )}
-                    </button>
-                    <p className="text-center text-[10px] text-slate-500 mt-3 flex items-center justify-center gap-1">
-                      <Lock className="w-3 h-3" /> 数据私有化，不收集任何学生及课本数据
+                  <div>
+                    <h3 className="font-semibold text-base text-white">
+                      全书部署：一键生成您的专属定制 App 客户端游戏源码
+                    </h3>
+                    <p className="text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                      所有通过智能规划并已完成剧本加载的教育关卡现已就绪。告诉我们您的终极视觉偏好（深色朋克风或者二次元），我将利用大模型构建包含骨架逻辑和内容数据分离封装的成品应用。
                     </p>
                   </div>
-
                 </div>
 
-                {/* Live Output Pane */}
-                <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl flex flex-col overflow-hidden h-full min-h-[400px]">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6">
+                  
+                  {/* Preferences Left Pane */}
+                  <div className="space-y-6">
+                    
+                    {/* Theme Select */}
+                    <div className="space-y-3">
+                      <label className="text-xs font-semibold text-slate-300 block">主题风格 (UI Paradigm)</label>
+                      <div className="grid grid-cols-2 gap-3">
+                        {[
+                          { id: 'minimal', label: '极简学术 (Minimal)', desc: '简洁清晰的高端学术风格', color: 'bg-slate-100 hover:bg-white text-slate-900 border-slate-200' },
+                          { id: 'cyberpunk', label: '赛博朋克 (Cyberpunk)', desc: '暗黑系高对比霓虹发光材质', color: 'bg-[#0a0a0f] hover:bg-cyan-950 text-cyan-400 border-cyan-500/30' },
+                          { id: 'cartoon', label: '卡通奇迹 (Cartoon)', desc: '圆润有趣适合低龄化学生', color: 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border-amber-500/30' },
+                          { id: 'retro', label: '复古街机 (8-Bit Arc)', desc: '像素风格和CRT滤镜叠加', color: 'bg-fuchsia-950/30 hover:bg-fuchsia-900/40 text-fuchsia-400 border-fuchsia-500/30' },
+                        ].map(theme => (
+                          <div 
+                            key={theme.id}
+                            onClick={() => setUiTheme(theme.id as any)}
+                            className={`p-3 rounded-xl border cursor-pointer transition ${theme.color} ${uiTheme === theme.id ? 'ring-2 ring-cyan-500 shadow-md' : 'opacity-70'}`}
+                          >
+                            <div className="font-semibold text-sm flex items-center justify-between">
+                              {theme.label}
+                              {uiTheme === theme.id && <CheckCircle2 className="w-4 h-4" />}
+                            </div>
+                            <div className="text-[10px] mt-1 opacity-80">{theme.desc}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Primary Color Select */}
+                    <div className="space-y-3">
+                      <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                        核心品牌色调 (Primary Tint)
+                        <span className="font-mono text-[10px] text-slate-500">{primaryColor}</span>
+                      </label>
+                      <div className="flex gap-3">
+                        {[
+                          { hex: '#06b6d4', ring: 'ring-cyan-400' },
+                          { hex: '#3b82f6', ring: 'ring-blue-400' },
+                          { hex: '#10b981', ring: 'ring-emerald-400' },
+                          { hex: '#f59e0b', ring: 'ring-amber-400' },
+                          { hex: '#ef4444', ring: 'ring-rose-400' },
+                          { hex: '#8b5cf6', ring: 'ring-violet-400' }
+                        ].map(color => (
+                          <div 
+                            key={color.hex}
+                            onClick={() => setPrimaryColor(color.hex)}
+                            className={`w-10 h-10 rounded-full cursor-pointer transition ${primaryColor === color.hex ? 'scale-110 ring-2 ring-offset-2 ring-offset-[#050508] ' + color.ring : 'hover:scale-105'}`}
+                            style={{ backgroundColor: color.hex }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Build Action */}
+                    <div className="pt-4 border-t border-white/10">
+                      <button
+                        onClick={handleGenerateFinalApp}
+                        disabled={isGeneratingApp || !modules.some(m => m.scriptStatus === 'completed')}
+                        className="w-full py-4 rounded-xl flex items-center justify-center gap-2 font-bold transition text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-500 hover:bg-cyan-600 cursor-pointer"
+                      >
+                        {isGeneratingApp ? (
+                          <>
+                            <RefreshCw className="w-5 h-5 animate-spin" />
+                            正在编译和整合所有教料资源...
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-5 h-5" />
+                            打包代码：生成最终教学互动 App！ 
+                          </>
+                        )}
+                      </button>
+                      <p className="text-center text-[10px] text-slate-500 mt-3 flex items-center justify-center gap-1">
+                        <Lock className="w-3 h-3" /> 数据私有化，不收集任何学生及课本数据
+                      </p>
+                    </div>
+
+                  </div>
+
+                  {/* Live Output Pane */}
+                  <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl flex flex-col overflow-hidden h-full min-h-[400px]">
                   <div className="bg-[#050508] border-b border-white/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
@@ -3737,6 +3793,7 @@ API地址：https://api.deepseek.com/chat/completions`}
 
               </div>
               </div>
+            </div>
             </div>
           )}
 
