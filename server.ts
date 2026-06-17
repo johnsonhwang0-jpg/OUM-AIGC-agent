@@ -54,6 +54,7 @@ async function callDeepSeek(prompt: string, systemPrompt: string = "", model: st
         ],
         temperature: 0.7,
         max_tokens: maxTokens,
+        stop: null,
         ...(jsonMode ? { response_format: { type: "json_object" } } : {})
       });
 
@@ -186,6 +187,7 @@ async function callDashScope(prompt: string, systemPrompt: string = "", model: s
         ],
         temperature: 0.7,
         max_tokens: maxTokens,
+        stop: null,
         ...(jsonMode ? { response_format: { type: "json_object" } } : {})
       })
     });
@@ -1245,22 +1247,9 @@ app.post("/api/generate-app-code", async (req, res) => {
       return res.status(400).json({ error: "Missing scriptMarkdown." });
     }
 
-    const systemInstruction = `根据用户的要求，实现web端的html。这个html是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。
-
-硬性要求：
-- 只输出完整的HTML代码，包含<!DOCTYPE html>、<html>、<head>、<body>等完整结构
-- 不要输出任何解释文字
-- 使用纯HTML + CSS + JavaScript，不依赖任何外部库或框架
-- 样式使用内联<style>标签，脚本使用内联<script>标签
-- 不要调用任何外部API，不要依赖后端
-- 界面要精致、沉浸感强，适合教学演示
-- 代码要能直接保存为.html文件并在浏览器中运行`;
+    const systemInstruction = `你是一个顶级的全栈工程师，必须输出可直接运行的完整代码，注重UI美感和交互细节，如果代码被截断要主动重试。`;
 
     const promptText = `根据以下要求，帮我实现一个web端的html。这是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。
-
-教材名称：${bookTitle || "未命名"}
-章节标题：${chapterTitle || "未命名"}
-${coveredChapters ? `覆盖章节：${coveredChapters}` : ""}
 
 以下是该章节的互动脚本内容，请根据脚本中的场景、角色、交互流程、反馈规则等来实现HTML场景模拟游戏：
 
