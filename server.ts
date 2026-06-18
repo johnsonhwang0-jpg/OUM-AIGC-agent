@@ -2479,25 +2479,7 @@ function getMockScript(chapterTitle: string, gameType: string) {
 
 // Handle Vite dev server vs production static asset serving
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    // Vite Dev Server middleware mode
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    
-    app.use(vite.middlewares);
-    console.log("⚡ Vite middleware initialized in Development mode.");
-  } else {
-    // Production serving of static compiled assets
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-    console.log("📦 Production assets statically mounted.");
-  }
-
+  // Register API routes BEFORE Vite middleware so /api/* requests are handled by Express
   // Prompt Template API routes
   app.get("/api/prompt-templates", async (req, res) => {
     try {
@@ -2631,6 +2613,26 @@ async function startServer() {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // Static assets and Vite middleware (registered after API routes)
+  if (process.env.NODE_ENV !== "production") {
+    // Vite Dev Server middleware mode
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    
+    app.use(vite.middlewares);
+    console.log("⚡ Vite middleware initialized in Development mode.");
+  } else {
+    // Production serving of static compiled assets
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+    console.log("📦 Production assets statically mounted.");
+  }
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 Full-stack Book-to-Game server running on http://0.0.0.0:${PORT} [${SERVER_VERSION}]`);

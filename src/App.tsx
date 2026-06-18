@@ -2306,7 +2306,12 @@ ${script.conclusion}
                                       <FileText className="w-3.5 h-3.5" />
                                     </div>
                                     <div>
-                                      <p className="text-sm font-semibold text-white truncate leading-tight">{project.name}</p>
+                                      <div className="flex items-center gap-2">
+                                        <p className="text-sm font-semibold text-white truncate leading-tight">{project.name}</p>
+                                        <span className="text-[9px] text-slate-600 font-mono bg-slate-800/50 px-1.5 py-0.5 rounded shrink-0" title={project.id}>
+                                          {project.id.split('-').slice(-2).join('-')}
+                                        </span>
+                                      </div>
                                       <p className="text-[11px] text-slate-400 mt-0.5">
                                         {project.bookTitle || "未指定教材"}
                                         {project.modules ? ` • ${JSON.parse(project.modules).length} 个切片` : ""}
