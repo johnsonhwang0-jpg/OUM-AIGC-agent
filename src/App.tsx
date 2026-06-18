@@ -6,8 +6,9 @@ import {
   Award, Trophy, ChevronRight, CornerDownRight, Volume2, Gamepad, Lock, Code2, Terminal,
   Maximize2, Minimize2, X, Eye
 } from "lucide-react";
+import { useLanguage, type TranslationKey } from "./i18n/LanguageContext";
 
-// Error Boundary 组件 - 防止整个应用崩溃
+// Error Boundary component - prevents the entire app from crashing
 export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
   constructor(props: { children: ReactNode }) {
     super(props);
@@ -20,18 +21,18 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError
     console.error("React Error Boundary caught:", error, errorInfo);
   }
   render() {
-    if (this.state.hasError) {
+    if (this.state.error) {
       return (
         <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center p-8">
           <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-8 max-w-lg text-center">
             <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-            <h2 className="text-xl font-bold text-red-400 mb-2">应用发生错误</h2>
-            <p className="text-slate-400 text-sm mb-4">{this.state.error?.message}</p>
+            <h2 className="text-xl font-bold text-red-400 mb-2">Application Error</h2>
+            <p className="text-slate-400 text-sm mb-4">{this.state.error.message}</p>
             <button 
               onClick={() => window.location.reload()}
               className="px-4 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition"
             >
-              刷新页面
+              Refresh Page
             </button>
           </div>
         </div>
@@ -113,6 +114,7 @@ function CollapsibleSection({ title, defaultOpen = false, children }: { title: s
 }
 
 export default function App() {
+  const { t, language } = useLanguage();
   // Draggable split workspace sizing engine
   const [leftWidth, setLeftWidth] = useState<number>(450);
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -157,7 +159,9 @@ export default function App() {
     {
       id: "welcome",
       sender: "agent",
-      text: "您好！我是您的 **AI 游戏课件规划师**。🧙‍♂️\n\n我可以帮您将任何枯燥的**PDF课本/论文**转换成一整套**趣味盎然的主题探索互动游戏**。\n\n请在右侧选择一个我为您准备的**经典课程模版**开始体验，或者直接拖放您的 **PDF 课本文件**，由我来进行人工智能解析与游戏关卡架构！",
+      text: language === "en" 
+        ? "Hello! I'm your **AI Game Course Planner**. 🧙‍♂️\n\nI can help you transform any boring **PDF textbook/paper** into a complete set of **fun themed interactive games**.\n\nPlease select a **classic course template** I've prepared on the right to start, or drag and drop your **PDF textbook** for me to analyze and architect the game levels!"
+        : "您好！我是您的 **AI 游戏课件规划师**。🧙‍♂️\n\n我可以帮您将任何枯燥的**PDF课本/论文**转换成一整套**趣味盎然的主题探索互动游戏**。\n\n请在右侧选择一个我为您准备的**经典课程模版**开始体验，或者直接拖放您的 **PDF 课本文件**，由我来进行人工智能解析与游戏关卡架构！",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       type: "text"
     }
@@ -715,7 +719,7 @@ function greet(name) {
 
   // Delete a project
   const handleDeleteProject = useCallback(async (projectId: string) => {
-    if (!confirm("确定要删除这个项目吗？此操作不可撤销。")) return;
+    if (!confirm(language === "en" ? "Are you sure you want to delete this project? This cannot be undone." : "确定要删除这个项目吗？此操作不可撤销。")) return;
     try {
       const response = await fetch(`/api/projects/${projectId}`, { method: "DELETE" });
       if (response.ok) {
@@ -1027,15 +1031,15 @@ function greet(name) {
     }
 
     if (!bookTitle || !bookTitle.trim()) {
-      alert("⚠️ 请先在左侧选择一本书或上传PDF！\n\n当前未检测到课本名称。");
+      alert(language === "en" ? "⚠️ Please select a book or upload PDF first!\n\nNo textbook name detected." : "⚠️ 请先在左侧选择一本书或上传PDF！\n\n当前未检测到课本名称。");
       return;
     }
     if (!directoryItems || directoryItems.length === 0) {
-      alert("⚠️ 当前课本没有可用的目录数据！\n\n请先确认左侧已选择/上传了课本。");
+      alert(language === "en" ? "⚠️ No directory data available for this textbook!\n\nPlease confirm a textbook has been selected/uploaded on the left." : "⚠️ 当前课本没有可用的目录数据！\n\n请先确认左侧已选择/上传了课本。");
       return;
     }
     if (!bookContentText || !bookContentText.trim()) {
-      alert("⚠️ 当前课本内容为空！\n\n请重新选择或上传PDF。");
+      alert(language === "en" ? "⚠️ Textbook content is empty!\n\nPlease re-select or upload PDF." : "⚠️ 当前课本内容为空！\n\n请重新选择或上传PDF。");
       return;
     }
 
@@ -1820,7 +1824,7 @@ ${script.conclusion}
 
     const markdown = getSimulationMarkdown(mod);
     if (!markdown.trim()) {
-      alert("该切片还没有生成互动脚本，请先生成脚本");
+      alert(language === "en" ? "This module doesn't have an interactive script yet. Please generate the script first." : "该切片还没有生成互动脚本，请先生成脚本");
       return;
     }
 
@@ -1971,11 +1975,11 @@ ${script.conclusion}
               </div>
               <div>
                 <div className="font-semibold text-sm flex items-center gap-1.5 text-white">
-                  ND教学互动AIGC-Agent
+                  ND Teaching Interactive AIGC Agent
                 </div>
                 <div className="text-[11px] text-cyan-400 flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-cyan-455 text-cyan-400" />
-                  智能内容切片与互动剧本生成
+                  {t("step2")}
                 </div>
               </div>
             </div>
@@ -1988,7 +1992,7 @@ ${script.conclusion}
                 title="系统设置"
               >
                 <Settings className="w-3 h-3" />
-                系统设置
+                {t("systemSettings")}
               </button>
               <div className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400">
                 version 1.0.23
@@ -2024,13 +2028,13 @@ ${script.conclusion}
                       <div className="mt-3 pt-3 border-t border-white/10 flex flex-col gap-2">
                         <div className="text-xs text-cyan-200 font-semibold flex items-center gap-1.5 bg-cyan-950/20 border border-cyan-500/20 p-2 rounded-lg">
                           <CheckCircle2 className="w-4 h-4 text-cyan-405 text-cyan-400 shrink-0" />
-                          课程大纲结构准备生成完毕！
+                          {language === "en" ? "Course outline structure is ready!" : "课程大纲结构准备生成完毕！"}
                         </div>
                         <button 
                           onClick={() => setActiveStep(2)}
                           className="w-full bg-cyan-500 hover:bg-cyan-600 text-white py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition shadow-[0_0_15px_rgba(6,182,212,0.3)] border border-cyan-400/25 cursor-pointer"
                         >
-                          立即查看/编辑大纲清单 <ArrowRight className="w-3 h-3" />
+                          {language === "en" ? "View/Edit Outline" : "立即查看/编辑大纲清单"} <ArrowRight className="w-3 h-3" />
                         </button>
                       </div>
                     )}
@@ -2067,7 +2071,7 @@ ${script.conclusion}
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              placeholder="向 AI 代理咨询改进玩法、生成规则提示..."
+              placeholder={language === "en" ? "Ask AI agent about gameplay improvements, rule prompts..." : "向 AI 代理咨询改进玩法、生成规则提示..."}
               className="flex-1 bg-white/5 hover:bg-white/10 focus:bg-[#050508] border border-white/10 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none rounded-xl px-4 py-2.5 text-sm font-sans text-white placeholder:text-slate-600 transition"
             />
             <button 
@@ -2088,7 +2092,7 @@ ${script.conclusion}
           className={`w-1 cursor-col-resize hover:w-2 shrink-0 h-full transition-all relative z-25 flex items-center justify-center group ${
             isDragging ? 'bg-cyan-500 w-2 shadow-[0_0_15px_rgba(6,182,212,0.8)]' : 'bg-white/5 hover:bg-cyan-500/40 border-r border-white/5'
           }`}
-          title="左右拖拽调整物理区域占比 (拖曳此分割线)"
+          title={language === "en" ? "Drag to adjust panel ratio" : "左右拖拽调整物理区域占比 (拖曳此分割线)"}
         >
           {/* Draggable grip tactile dots */}
           <div className="absolute top-1/2 -track-y-1/2 flex flex-col gap-1.5 pointer-events-none opacity-40 group-hover:opacity-100">
@@ -2108,10 +2112,10 @@ ${script.conclusion}
             <div className="flex items-center gap-2 text-slate-200">
               <Layers className="w-5 h-5 text-cyan-400" />
               <span className="font-semibold text-sm">
-                {activeStep === 1 ? "第一阶段：分析并挂载教材数据源" : 
-                 activeStep === 2 ? "第二阶段：教学进度大纲大盘与规则编辑" : 
-                 activeStep === 3 ? "第三阶段：切片原文校对与映射" :
-                 "第四阶段：UI主题渲染与独立游戏代码导出"}
+                {activeStep === 1 ? (language === "en" ? "Phase 1: Analyze & Mount Textbook Data" : "第一阶段：分析并挂载教材数据源") : 
+                 activeStep === 2 ? (language === "en" ? "Phase 2: Teaching Outline Dashboard & Rule Editing" : "第二阶段：教学进度大纲大盘与规则编辑") : 
+                 activeStep === 3 ? (language === "en" ? "Phase 3: Slice Text Proofreading & Mapping" : "第三阶段：切片原文校对与映射") :
+                 (language === "en" ? "Phase 4: UI Theme Rendering & Game Code Export" : "第四阶段：UI主题渲染与独立游戏代码导出")}
               </span>
             </div>
             
@@ -2125,7 +2129,7 @@ ${script.conclusion}
                     : 'bg-white/5 border-white/10 text-slate-450 text-slate-400 hover:bg-white/10 hover:text-white'
                 }`}
               >
-                1. 导入课件
+                {language === "en" ? "1. Import" : "1. 导入课件"}
               </button>
               <button 
                 onClick={() => modules.length > 0 && setActiveStep(2)}
@@ -2138,7 +2142,7 @@ ${script.conclusion}
                     : 'bg-white/5 border-white/10 text-slate-450 text-slate-400 hover:bg-white/10 hover:text-white'
                 }`}
               >
-                2. 课程切片
+                {language === "en" ? "2. Slice" : "2. 课程切片"}
               </button>
               <button 
                 onClick={async () => {
@@ -2159,7 +2163,7 @@ ${script.conclusion}
                     : 'bg-white/5 border-white/10 text-slate-450 text-slate-400 hover:bg-white/10 hover:text-white'
                 }`}
               >
-                3. 切片内容提取
+                {language === "en" ? "3. Extract" : "3. 切片内容提取"}
               </button>
               <button 
                 onClick={async () => {
@@ -2180,7 +2184,7 @@ ${script.conclusion}
                     : 'bg-white/5 border-white/10 text-slate-450 text-slate-400 hover:bg-white/10 hover:text-white'
                 }`}
               >
-                4. 互动脚本生成
+                {language === "en" ? "4. Script" : "4. 互动脚本生成"}
               </button>
               <button 
                 onClick={() => modules.some(m => m.scriptStatus === 'completed') && setActiveStep(5)}
@@ -2193,7 +2197,7 @@ ${script.conclusion}
                     : 'bg-white/5 border-white/10 text-slate-450 text-slate-400 hover:bg-white/10 hover:text-white'
                 }`}
               >
-                5. App 构建
+                {language === "en" ? "5. Build App" : "5. App 构建"}
               </button>
             </div>
           </div>
@@ -2213,10 +2217,12 @@ ${script.conclusion}
                       </div>
                       <div>
                         <h3 className="font-semibold text-base font-display text-white">
-                          一书变多关：一站式 AI 教学方案生成器
+                          {language === "en" ? "Turn Books into Games: One-Stop AI Teaching Solution Generator" : "一书变多关：一站式 AI 教学方案生成器"}
                         </h3>
                         <p className="text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                          在下方挂载您已准备的小学、初高中或者成人专业培训 PDF 教料。系统将智能识别内容，秒级提炼子单元并配套高可玩性的连连看、剧情抉择、代码拼图等闯关，供您定制和下载！
+                          {language === "en" 
+                            ? "Upload your elementary, middle school, or adult professional training PDF textbook below. The system will intelligently identify content, instantly extract sub-units, and provide highly playable matching games, story choices, code puzzles and more for you to customize and download!"
+                            : "在下方挂载您已准备的小学、初高中或者成人专业培训 PDF 教料。系统将智能识别内容，秒级提炼子单元并配套高可玩性的连连看、剧情抉择、代码拼图等闯关，供您定制和下载！"}
                         </p>
                       </div>
                     </div>
@@ -2237,7 +2243,7 @@ ${script.conclusion}
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="text-sm font-semibold text-cyan-400 flex items-center gap-2">
                           <FileText className="w-4 h-4" />
-                          我的项目列表
+                          {language === "en" ? "My Projects" : "我的项目列表"}
                         </h4>
                         <div className="flex items-center gap-3">
                           {selectedProjects.size > 0 && (
@@ -2355,7 +2361,7 @@ ${script.conclusion}
                     className="px-4 py-2 text-xs font-bold bg-cyan-500 hover:bg-cyan-400 active:scale-95 text-white shadow-[0_0_12px_rgba(6,182,212,0.4)] hover:shadow-[0_0_16px_rgba(6,182,212,0.6)] rounded-xl transition-all duration-200 flex items-center gap-1.5 cursor-pointer shrink-0"
                   >
                     <FileText className="w-3.5 h-3.5" />
-                    我的项目 ({projectList.length})
+                    {language === "en" ? `My Projects (${projectList.length})` : `我的项目 (${projectList.length})`}
                   </button>
                 </div>
 
@@ -2609,16 +2615,16 @@ ${script.conclusion}
                 }`}
               >
                 {isParsing ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    教材切片解析中...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    教材内容智能切片
-                  </>
-                )}
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        {language === "en" ? "Parsing..." : "教材切片解析中..."}
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        {language === "en" ? "Smart Content Slicing" : "教材内容智能切片"}
+                      </>
+                    )}
               </button>
             </div>
           </div>
@@ -3306,7 +3312,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                             tr: ({ node, ...props }) => (<tr className="border-b border-white/10 hover:bg-white/5 transition" {...props} />),
                             th: ({ node, ...props }) => (<th className="text-left px-3 py-2 text-cyan-300 font-semibold border-r border-white/5 last:border-r-0" {...props} />),
                             td: ({ node, ...props }) => (<td className="px-3 py-2 text-slate-300 border-r border-white/5 last:border-r-0 align-top" {...props} />),
-                          }}>{activeModuleId && extractingModuleId === activeModuleId ? "⏳ 正在从 PDF 提取内容..." : (extractedContent || "请点击左侧列表选择章节查看原文")}</ReactMarkdown>
+                          }}>{activeModuleId && extractingModuleId === activeModuleId ? (language === "en" ? "⏳ Extracting content from PDF..." : "⏳ 正在从 PDF 提取内容...") : (extractedContent || (language === "en" ? "Please select a chapter from the left to view original text" : "请点击左侧列表选择章节查看原文"))}</ReactMarkdown>
                         </div>
                       
                       {activeModule && (
@@ -3536,7 +3542,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                         </span>
                         <div className="text-[11px] text-slate-300 bg-black/50 border border-white/5 p-3 rounded-xl max-h-44 overflow-y-auto select-text leading-relaxed font-sans scrollbar-thin scrollbar-thumb-white/10">
                           <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-                            {activeModuleId && extractingModuleId === activeModuleId ? "正在提取教材原文..." : (extractedContent || "暂无原文内容")}
+                            {activeModuleId && extractingModuleId === activeModuleId ? (language === "en" ? "Extracting textbook content..." : "正在提取教材原文...") : (extractedContent || (language === "en" ? "No original text content yet" : "暂无原文内容"))}
                           </ReactMarkdown>
                         </div>
                       </div>

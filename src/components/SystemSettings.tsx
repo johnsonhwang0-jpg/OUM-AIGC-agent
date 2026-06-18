@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ArrowLeft, Settings, Globe, FileText, Brain } from "lucide-react";
+import { useLanguage } from "../i18n/LanguageContext";
 
 type SettingsTab = "models" | "prompts" | "language";
 
@@ -8,6 +9,7 @@ interface SystemSettingsProps {
 }
 
 export default function SystemSettings({ onBack }: SystemSettingsProps) {
+  const { t, language, setLanguage } = useLanguage();
   const [activeTab, setActiveTab] = useState<SettingsTab>("models");
 
   return (
@@ -20,7 +22,7 @@ export default function SystemSettings({ onBack }: SystemSettingsProps) {
           </button>
           <div className="flex items-center gap-2">
             <Settings className="w-5 h-5 text-purple-400" />
-            <h1 className="text-lg font-bold">系统设置</h1>
+            <h1 className="text-lg font-bold">{t("systemSettings")}</h1>
           </div>
         </div>
         <div className="flex gap-1 bg-white/5 rounded-lg p-1">
@@ -31,7 +33,7 @@ export default function SystemSettings({ onBack }: SystemSettingsProps) {
             }`}
           >
             <Brain className="w-3.5 h-3.5" />
-            模型管理
+            {t("modelManagement")}
           </button>
           <button
             onClick={() => setActiveTab("prompts")}
@@ -40,7 +42,7 @@ export default function SystemSettings({ onBack }: SystemSettingsProps) {
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            提示词管理
+            {t("promptManagement")}
           </button>
           <button
             onClick={() => setActiveTab("language")}
@@ -49,7 +51,7 @@ export default function SystemSettings({ onBack }: SystemSettingsProps) {
             }`}
           >
             <Globe className="w-3.5 h-3.5" />
-            语言设置
+            {t("languageSettings")}
           </button>
         </div>
       </div>
@@ -66,19 +68,18 @@ export default function SystemSettings({ onBack }: SystemSettingsProps) {
 
 // Models Tab
 function ModelsTab() {
+  const { t } = useLanguage();
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="max-w-4xl mx-auto">
         <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <Brain className="w-5 h-5 text-cyan-400" />
-          模型配置
+          {t("modelConfig")}
         </h2>
-        <p className="text-sm text-slate-400 mb-6">
-          管理 AI 模型的 API 密钥、基础 URL 和参数配置。当前核心功能（切片、脚本生成、App构建）使用环境变量中的配置。
-        </p>
+        <p className="text-sm text-slate-400 mb-6">{t("modelConfigDesc")}</p>
         <div className="bg-white/5 border border-white/10 rounded-xl p-8 text-center text-slate-400">
-          <p>模型管理功能开发中...</p>
-          <p className="text-xs mt-2">当前使用 .env 中的 AI_PROVIDER 和 API 密钥</p>
+          <p>{t("modelConfigDev")}</p>
+          <p className="text-xs mt-2">{t("modelConfigEnv")}</p>
         </div>
       </div>
     </div>
@@ -87,30 +88,29 @@ function ModelsTab() {
 
 // Prompts Tab
 function PromptsTab() {
+  const { t } = useLanguage();
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="max-w-4xl mx-auto">
         <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <FileText className="w-5 h-5 text-purple-400" />
-          提示词模板
+          {t("promptTemplates")}
         </h2>
-        <p className="text-sm text-slate-400 mb-6">
-          管理各阶段 AI 调用的提示词模板，包括课程切片、脚本生成、App 构建等。
-        </p>
+        <p className="text-sm text-slate-400 mb-6">{t("promptTemplatesDesc")}</p>
         <div className="space-y-4">
           <PromptCard
-            title="课程切片提示词"
-            description="用于将教材目录解析为结构化切片数据"
+            title={t("slicePrompt")}
+            description={t("slicePromptDesc")}
             endpoint="/api/parse-book"
           />
           <PromptCard
-            title="互动脚本生成提示词"
-            description="根据切片内容生成互动教学脚本"
+            title={t("scriptPrompt")}
+            description={t("scriptPromptDesc")}
             endpoint="/api/generate-script"
           />
           <PromptCard
-            title="App 构建提示词"
-            description="将脚本转换为可运行的 HTML 游戏应用"
+            title={t("appPrompt")}
+            description={t("appPromptDesc")}
             endpoint="/api/generate-app-code"
           />
         </div>
@@ -120,6 +120,7 @@ function PromptsTab() {
 }
 
 function PromptCard({ title, description, endpoint }: { title: string; description: string; endpoint: string }) {
+  const { t } = useLanguage();
   return (
     <div className="bg-white/5 border border-white/10 rounded-xl p-5 hover:border-purple-500/30 transition">
       <div className="flex items-start justify-between mb-2">
@@ -129,10 +130,10 @@ function PromptCard({ title, description, endpoint }: { title: string; descripti
       <p className="text-sm text-slate-400 mb-3">{description}</p>
       <div className="flex gap-2">
         <button className="text-xs px-3 py-1.5 bg-purple-500/20 text-purple-300 rounded-lg hover:bg-purple-500/30 transition cursor-pointer">
-          编辑
+          {t("edit")}
         </button>
         <button className="text-xs px-3 py-1.5 bg-white/5 text-slate-400 rounded-lg hover:bg-white/10 hover:text-white transition cursor-pointer">
-          查看历史版本
+          {t("viewHistory")}
         </button>
       </div>
     </div>
@@ -141,12 +142,11 @@ function PromptCard({ title, description, endpoint }: { title: string; descripti
 
 // Language Tab
 function LanguageTab() {
-  const [language, setLanguage] = useState("zh-CN");
+  const { t, language, setLanguage } = useLanguage();
 
   const languages = [
-    { value: "zh-CN", label: "简体中文", flag: "🇨🇳" },
-    { value: "zh-TW", label: "繁體中文", flag: "🇹🇼" },
-    { value: "en", label: "English", flag: "🇬🇧" },
+    { value: "zh" as const, label: t("simplifiedChinese"), flag: "🇨🇳" },
+    { value: "en" as const, label: t("english"), flag: "🇬🇧" },
   ];
 
   return (
@@ -154,11 +154,9 @@ function LanguageTab() {
       <div className="max-w-4xl mx-auto">
         <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <Globe className="w-5 h-5 text-green-400" />
-          语言设置
+          {t("languageSetting")}
         </h2>
-        <p className="text-sm text-slate-400 mb-6">
-          选择界面显示语言。当前仅支持中文界面，其他语言开发中。
-        </p>
+        <p className="text-sm text-slate-400 mb-6">{t("languageSettingDesc")}</p>
         <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
           {languages.map((lang, idx) => (
             <button
@@ -182,9 +180,7 @@ function LanguageTab() {
             </button>
           ))}
         </div>
-        <p className="text-xs text-slate-500 mt-4 text-center">
-          提示：AI 输出语言由提示词中的语言指令控制，不受此设置影响
-        </p>
+        <p className="text-xs text-slate-500 mt-4 text-center">{t("languageTip")}</p>
       </div>
     </div>
   );
