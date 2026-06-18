@@ -52,6 +52,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import ModelManagement from "./components/ModelManagement";
+import SystemSettings from "./components/SystemSettings";
 
 // Extract valid HTML from AI response, stripping markdown fences and explanatory text
 function extractValidHtml(raw: string): string {
@@ -1931,9 +1932,9 @@ ${script.conclusion}
 
   const activeModule = getActiveModule();
 
-  // Model Management full-screen page
+  // System Settings full-screen page
   if (showModelManagement) {
-    return <ModelManagement onBack={() => setShowModelManagement(false)} />;
+    return <SystemSettings onBack={() => setShowModelManagement(false)} />;
   }
 
   return (
@@ -1984,10 +1985,10 @@ ${script.conclusion}
               <button
                 onClick={() => setShowModelManagement(true)}
                 className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer flex items-center gap-1"
-                title="模型管理"
+                title="系统设置"
               >
                 <Settings className="w-3 h-3" />
-                模型管理
+                系统设置
               </button>
               <div className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400">
                 version 1.0.23
