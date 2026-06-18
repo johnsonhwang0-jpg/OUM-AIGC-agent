@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowLeft, Settings, Globe, FileText, Brain } from "lucide-react";
 import { useLanguage } from "../i18n/LanguageContext";
+import { PromptTab } from "./ModelManagement";
 
 type SettingsTab = "models" | "prompts" | "language";
 
@@ -59,7 +60,7 @@ export default function SystemSettings({ onBack }: SystemSettingsProps) {
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         {activeTab === "models" && <ModelsTab />}
-        {activeTab === "prompts" && <PromptsTab />}
+        {activeTab === "prompts" && <PromptTab language={language} />}
         {activeTab === "language" && <LanguageTab />}
       </div>
     </div>
@@ -81,60 +82,6 @@ function ModelsTab() {
           <p>{t("modelConfigDev")}</p>
           <p className="text-xs mt-2">{t("modelConfigEnv")}</p>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// Prompts Tab
-function PromptsTab() {
-  const { t } = useLanguage();
-  return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="max-w-4xl mx-auto">
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <FileText className="w-5 h-5 text-purple-400" />
-          {t("promptTemplates")}
-        </h2>
-        <p className="text-sm text-slate-400 mb-6">{t("promptTemplatesDesc")}</p>
-        <div className="space-y-4">
-          <PromptCard
-            title={t("slicePrompt")}
-            description={t("slicePromptDesc")}
-            endpoint="/api/parse-book"
-          />
-          <PromptCard
-            title={t("scriptPrompt")}
-            description={t("scriptPromptDesc")}
-            endpoint="/api/generate-script"
-          />
-          <PromptCard
-            title={t("appPrompt")}
-            description={t("appPromptDesc")}
-            endpoint="/api/generate-app-code"
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PromptCard({ title, description, endpoint }: { title: string; description: string; endpoint: string }) {
-  const { t } = useLanguage();
-  return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-5 hover:border-purple-500/30 transition">
-      <div className="flex items-start justify-between mb-2">
-        <h3 className="font-medium text-white">{title}</h3>
-        <code className="text-xs font-mono bg-white/10 px-2 py-1 rounded text-slate-400">{endpoint}</code>
-      </div>
-      <p className="text-sm text-slate-400 mb-3">{description}</p>
-      <div className="flex gap-2">
-        <button className="text-xs px-3 py-1.5 bg-purple-500/20 text-purple-300 rounded-lg hover:bg-purple-500/30 transition cursor-pointer">
-          {t("edit")}
-        </button>
-        <button className="text-xs px-3 py-1.5 bg-white/5 text-slate-400 rounded-lg hover:bg-white/10 hover:text-white transition cursor-pointer">
-          {t("viewHistory")}
-        </button>
       </div>
     </div>
   );
