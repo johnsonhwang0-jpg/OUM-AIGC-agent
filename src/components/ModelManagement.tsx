@@ -23,6 +23,57 @@ interface PromptVersion {
   createdAt: string;
 }
 
+// Default prompts pre-populated from current system usage
+const getDefaultPrompts = (): PromptTemplate[] => {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: "prompt-simulation-blueprint",
+      name: "Simulation Blueprint (Interactive Script)",
+      systemPrompt: `你是一名"教学模拟产品设计师 + 互动学习脚本架构师"。
+
+你的任务不是生成 quiz、选择题、判断题、填空题、题库、剧情问答或换皮闯关。
+你的任务是把一个教学切片转化为一份可交给 AI coding agent 实现的"可视化、沉浸式、问题驱动的互动模拟器生成脚本"。
+
+核心原则：
+1. 每个模拟必须围绕一个综合问题场景。学生进入具体情境，扮演具体角色，面对必须使用本切片知识才能解决的任务。
+2. 互动必须是"应用知识干预场景"，不是"回忆知识回答问题"。学生应观察场景、调整变量、选择策略、安排步骤、诊断原因、分配资源、预测后果或优化方案。
+3. 知识点必须变成场景机制。切片中的概念、关系、流程、判断标准必须映射为可观察对象、状态变量、用户操作、反馈规则、成功/失败条件。
+4. 反馈必须体现因果。每次操作后的反馈要说明场景发生了什么变化、为什么会这样、对应教材中的哪个机制、下一步应如何调整。
+5. 视觉设计要服务教学内容。不同学科应生成不同模拟形态，例如应急处置、课堂/角色实践、变量实验室、诊断决策、系统优化、流程搭建、情境推理、证据研判等。不要套用固定玩法模板。
+
+输出要求：
+- 使用中文。
+- 输出结构化 Markdown，不要输出 JSON，不要输出代码。
+- 这份 Markdown 将被 AI coding agent 直接用来生成网页应用，所以必须具体、可实现、可渲染、可编辑。
+- 必须包含页面布局、主要组件、场景对象、状态变量、交互阶段、操作反馈、知识机制解释和完成条件。`,
+      userPromptTemplate: `Book: {{bookTitle}}
+Chapter: {{chapterIndex}} - {{chapterTitle}}
+Summary: {{summary}}
+Info Density: {{infoDensity}}
+Cohesion: {{cohesion}}
+Design Rationale: {{designRationale}}
+Extracted Content: {{extractedContent}}`,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "prompt-app-code-gen",
+      name: "App Code Generation (HTML Scene Game)",
+      systemPrompt: "你是一个顶级的全栈工程师，必须输出可直接运行的完整代码，注重UI美感和交互细节，如果代码被截断要主动重试。只需要输出代码，不需要解释文字。",
+      userPromptTemplate: `根据以下要求，帮我实现一个web端的html。这是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。
+
+以下是该章节的互动脚本内容，请根据脚本中的场景、角色、交互流程、反馈规则等来实现HTML场景模拟游戏：
+
+{{scriptMarkdown}}`,
+      isActive: false,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+};
+
 interface ModelConfig {
   id: string;
   name: string;
@@ -103,44 +154,18 @@ export default function ModelManagement({ onBack }: { onBack: () => void }) {
 
 // ==================== Prompt Tab ====================
 function PromptTab({ language }: { language: "zh" | "en" }) {
-  const [templates, setTemplates] = useState<PromptTemplate[]>([]);
+  const [templates, setTemplates] = useState<PromptTemplate[]>(() => getDefaultPrompts());
   const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<Partial<PromptTemplate> | null>(null);
-  const [versions, setVersions] = useState<PromptVersion[]>([]);
+  const [versions, setVersions] = useState<Record<string, PromptVersion[]>>({});
   const [showVersions, setShowVersions] = useState(false);
   const [editingNote, setEditingNote] = useState<string | null>(null);
   const [noteValue, setNoteValue] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    fetchTemplates();
-  }, []);
+  const templateVersions = selectedTemplate ? (versions[selectedTemplate.id] || []) : [];
 
-  useEffect(() => {
-    if (selectedTemplate) {
-      fetchVersions(selectedTemplate.id);
-    }
-  }, [selectedTemplate]);
-
-  const fetchTemplates = async () => {
-    try {
-      const res = await fetch("/api/prompt-templates");
-      if (res.ok) setTemplates(await res.json());
-    } catch (e) {
-      console.error("Failed to fetch templates:", e);
-    }
-  };
-
-  const fetchVersions = async (templateId: string) => {
-    try {
-      const res = await fetch(`/api/prompt-templates/${templateId}/versions`);
-      if (res.ok) setVersions(await res.json());
-    } catch (e) {
-      console.error("Failed to fetch versions:", e);
-    }
-  };
-
-  const handleCreate = async () => {
+  const handleCreate = () => {
     setEditingTemplate({
       name: language === "en" ? "New Prompt Template" : "新提示词模板",
       systemPrompt: "",
@@ -154,28 +179,31 @@ function PromptTab({ language }: { language: "zh" | "en" }) {
     setEditingTemplate({ ...t });
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!editingTemplate) return;
     setLoading(true);
     try {
+      const now = new Date().toISOString();
       if (editingTemplate.id) {
-        await fetch(`/api/prompt-templates/${editingTemplate.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(editingTemplate),
-        });
-      } else {
-        const res = await fetch("/api/prompt-templates", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(editingTemplate),
-        });
-        if (res.ok) {
-          const created = await res.json();
-          setSelectedTemplate(created);
+        // Update existing
+        setTemplates(prev => prev.map(t => t.id === editingTemplate.id ? { ...t, ...editingTemplate, updatedAt: now } as PromptTemplate : t));
+        if (selectedTemplate?.id === editingTemplate.id) {
+          setSelectedTemplate(prev => prev ? { ...prev, ...editingTemplate, updatedAt: now } as PromptTemplate : null);
         }
+      } else {
+        // Create new
+        const newTemplate: PromptTemplate = {
+          id: `prompt-${Date.now()}`,
+          name: editingTemplate.name || (language === "en" ? "Untitled" : "未命名"),
+          systemPrompt: editingTemplate.systemPrompt || null,
+          userPromptTemplate: editingTemplate.userPromptTemplate || null,
+          isActive: editingTemplate.isActive || false,
+          createdAt: now,
+          updatedAt: now,
+        };
+        setTemplates(prev => [...prev, newTemplate]);
+        setSelectedTemplate(newTemplate);
       }
-      await fetchTemplates();
       setEditingTemplate(null);
     } catch (e) {
       console.error("Failed to save:", e);
@@ -184,64 +212,51 @@ function PromptTab({ language }: { language: "zh" | "en" }) {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (!confirm(language === "en" ? "Are you sure you want to delete this prompt template?" : "确定删除此提示词模板？")) return;
-    try {
-      await fetch(`/api/prompt-templates/${id}`, { method: "DELETE" });
-      if (selectedTemplate?.id === id) setSelectedTemplate(null);
-      await fetchTemplates();
-    } catch (e) {
-      console.error("Failed to delete:", e);
-    }
+    setTemplates(prev => prev.filter(t => t.id !== id));
+    if (selectedTemplate?.id === id) setSelectedTemplate(null);
   };
 
-  const handleSaveVersion = async () => {
+  const handleSaveVersion = () => {
     if (!selectedTemplate) return;
-    const nextVersion = versions.length > 0 ? Math.max(...versions.map(v => v.version)) + 1 : 1;
-    setLoading(true);
-    try {
-      await fetch(`/api/prompt-templates/${selectedTemplate.id}/versions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemPrompt: selectedTemplate.systemPrompt,
-          userPromptTemplate: selectedTemplate.userPromptTemplate,
-          version: nextVersion,
-        }),
-      });
-      await fetchVersions(selectedTemplate.id);
-    } catch (e) {
-      console.error("Failed to save version:", e);
-    } finally {
-      setLoading(false);
-    }
+    const currentVersions = versions[selectedTemplate.id] || [];
+    const nextVersion = currentVersions.length > 0 ? Math.max(...currentVersions.map(v => v.version)) + 1 : 1;
+    const now = new Date().toISOString();
+    const newVersion: PromptVersion = {
+      id: `ver-${Date.now()}`,
+      promptTemplateId: selectedTemplate.id,
+      systemPrompt: selectedTemplate.systemPrompt,
+      userPromptTemplate: selectedTemplate.userPromptTemplate,
+      version: nextVersion,
+      note: null,
+      effectRating: null,
+      createdAt: now,
+    };
+    setVersions(prev => ({
+      ...prev,
+      [selectedTemplate.id]: [...(prev[selectedTemplate.id] || []), newVersion],
+    }));
   };
 
-  const handleUpdateNote = async (versionId: string) => {
-    setLoading(true);
-    try {
-      await fetch(`/api/prompt-versions/${versionId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note: noteValue }),
-      });
-      setEditingNote(null);
-      if (selectedTemplate) await fetchVersions(selectedTemplate.id);
-    } catch (e) {
-      console.error("Failed to update note:", e);
-    } finally {
-      setLoading(false);
-    }
+  const handleUpdateNote = (versionId: string) => {
+    if (!selectedTemplate) return;
+    setVersions(prev => ({
+      ...prev,
+      [selectedTemplate.id]: (prev[selectedTemplate.id] || []).map(v =>
+        v.id === versionId ? { ...v, note: noteValue } : v
+      ),
+    }));
+    setEditingNote(null);
   };
 
-  const handleDeleteVersion = async (versionId: string) => {
+  const handleDeleteVersion = (versionId: string) => {
     if (!confirm(language === "en" ? "Are you sure you want to delete this version?" : "确定删除此版本？")) return;
-    try {
-      await fetch(`/api/prompt-versions/${versionId}`, { method: "DELETE" });
-      if (selectedTemplate) await fetchVersions(selectedTemplate.id);
-    } catch (e) {
-      console.error("Failed to delete version:", e);
-    }
+    if (!selectedTemplate) return;
+    setVersions(prev => ({
+      ...prev,
+      [selectedTemplate.id]: (prev[selectedTemplate.id] || []).filter(v => v.id !== versionId),
+    }));
   };
 
   const handleRestoreVersion = (v: PromptVersion) => {
@@ -406,7 +421,7 @@ function PromptTab({ language }: { language: "zh" | "en" }) {
                   }`}
                 >
                   <GitBranch className="w-3.5 h-3.5" />
-                  {language === "en" ? "History" : "历史版本"} ({versions.length})
+                  {language === "en" ? "History" : "历史版本"} ({templateVersions.length})
                 </button>
                 <button
                   onClick={() => handleDelete(selectedTemplate.id)}
@@ -437,7 +452,7 @@ function PromptTab({ language }: { language: "zh" | "en" }) {
             {showVersions && (
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-slate-300">{language === "en" ? "History Versions" : "历史版本"}</h3>
-                {versions.map(v => (
+                {templateVersions.map(v => (
                   <div key={v.id} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -482,13 +497,13 @@ function PromptTab({ language }: { language: "zh" | "en" }) {
                             className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs"
                             onChange={e => {
                               const rating = e.target.value;
-                              fetch(`/api/prompt-versions/${v.id}`, {
-                                method: "PUT",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ effectRating: rating || undefined }),
-                              }).then(() => {
-                                if (selectedTemplate) fetchVersions(selectedTemplate.id);
-                              });
+                              if (!selectedTemplate) return;
+                              setVersions(prev => ({
+                                ...prev,
+                                [selectedTemplate.id]: (prev[selectedTemplate.id] || []).map(ver =>
+                                  ver.id === v.id ? { ...ver, effectRating: rating || null } : ver
+                                ),
+                              }));
                             }}
                             defaultValue={v.effectRating || ""}
                           >
@@ -528,7 +543,7 @@ function PromptTab({ language }: { language: "zh" | "en" }) {
                     )}
                   </div>
                 ))}
-                {versions.length === 0 && (
+                {templateVersions.length === 0 && (
                   <div className="text-center text-slate-500 text-sm py-4">{language === "en" ? "No history versions" : "暂无历史版本"}</div>
                 )}
               </div>
