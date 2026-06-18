@@ -51,6 +51,41 @@ import StandalonePreview from "./components/StandalonePreview";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
+import ModelManagement from "./components/ModelManagement";
+
+// Extract valid HTML from AI response, stripping markdown fences and explanatory text
+function extractValidHtml(raw: string): string {
+  if (!raw) return '';
+  
+  let code = raw.trim();
+  
+  // Remove markdown code block markers (html, HTML, or empty)
+  code = code.replace(/^```(?:html|HTML)?\s*\n?/i, "");
+  code = code.replace(/\n?\s*```$/i, "");
+  code = code.replace(/```(?:html|HTML)?\s*\n?/gi, "");
+  code = code.trim();
+  
+  // Find the actual HTML content by looking for <!DOCTYPE or <html
+  const doctypeIdx = code.indexOf('<!DOCTYPE');
+  const htmlIdx = code.indexOf('<html');
+  
+  if (doctypeIdx !== -1) {
+    // Found DOCTYPE, extract from there to the end
+    return code.substring(doctypeIdx);
+  } else if (htmlIdx !== -1) {
+    // Found <html tag, extract from there and prepend DOCTYPE
+    return '<!DOCTYPE html>\n' + code.substring(htmlIdx);
+  }
+  
+  // If no DOCTYPE or <html found, try to find any < tag
+  const firstTagIdx = code.indexOf('<');
+  if (firstTagIdx !== -1) {
+    return code.substring(firstTagIdx);
+  }
+  
+  // Fallback: return as-is
+  return code;
+}
 
 function CollapsibleSection({ title, defaultOpen = false, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -146,6 +181,7 @@ export default function App() {
   const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
   const [scriptGenerating, setScriptGenerating] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<'simulator' | 'code' | 'original' | 'edit'>('simulator');
+  const [showModelManagement, setShowModelManagement] = useState<boolean>(false);
   const [showApiDrawer, setShowApiDrawer] = useState<boolean>(false);
   const [apiDebugInfo, setApiDebugInfo] = useState<{
     model: string;
@@ -174,7 +210,7 @@ export default function App() {
     timestamp: string;
   }>({
     model: 'deepseek-v4-flash',
-    systemPrompt: '你是一个顶级的全栈工程师，必须输出可直接运行的完整代码，注重UI美感和交互细节，如果代码被截断要主动重试。',
+    systemPrompt: '你是一个顶级的全栈工程师，必须输出可直接运行的完整代码，注重UI美感和交互细节，如果代码被截断要主动重试。只需要输出代码，不需要解释文字。',
     userPrompt: '',
     status: 'idle',
     rawResponse: '',
@@ -547,7 +583,7 @@ function greet(name) {
           if (codeResponse.ok) {
             const codeData = await codeResponse.json();
             if (codeData.code) {
-              appCodeMap[mod.id] = codeData.code;
+              appCodeMap[mod.id] = extractValidHtml(codeData.code);
             }
           }
         } catch {}
@@ -1830,7 +1866,11 @@ ${script.conclusion}
       }
 
       const data = JSON.parse(rawText);
-      const generatedCode = data.code || '';
+      let generatedCode = data.code || '';
+      
+      // Extract valid HTML from AI response
+      generatedCode = extractValidHtml(generatedCode);
+      
       setFinalCode(generatedCode);
 
       setAppApiDebugInfo(prev => ({
@@ -1891,6 +1931,11 @@ ${script.conclusion}
 
   const activeModule = getActiveModule();
 
+  // Model Management full-screen page
+  if (showModelManagement) {
+    return <ModelManagement onBack={() => setShowModelManagement(false)} />;
+  }
+
   return (
     <div className="flex flex-col h-screen bg-[#050508] text-slate-200 font-sans overflow-hidden relative z-10">
       
@@ -1935,8 +1980,18 @@ ${script.conclusion}
             </div>
             
             {/* Minimal decoration */}
-            <div className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400">
-              version 1.0.23
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowModelManagement(true)}
+                className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer flex items-center gap-1"
+                title="模型管理"
+              >
+                <Settings className="w-3 h-3" />
+                模型管理
+              </button>
+              <div className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400">
+                version 1.0.23
+              </div>
             </div>
           </div>
 

@@ -16,7 +16,24 @@ import {
   getExtractedContents,
   saveGeneratedAppCode,
   getGeneratedAppCode,
-  Project
+  Project,
+  PromptTemplate,
+  PromptVersion,
+  ModelConfig,
+  getAllPromptTemplates,
+  getPromptTemplate,
+  createPromptTemplate,
+  updatePromptTemplate,
+  deletePromptTemplate,
+  getPromptVersions,
+  createPromptVersion,
+  updatePromptVersion,
+  deletePromptVersion,
+  getAllModelConfigs,
+  getModelConfig,
+  createModelConfig,
+  updateModelConfig,
+  deleteModelConfig
 } from "./database.js";
 
 // Load environment variables
@@ -36,7 +53,7 @@ app.use("/api/pdf-images", express.static(path.join(process.cwd(), "uploads", "p
 // AI Provider configuration
 const AI_PROVIDER = process.env.AI_PROVIDER || "deepseek"; // "deepseek", "dashscope", "gemini", "ollama", or "huggingface"
 
-// DeepSeek API client
+// DeepSeek API client with auto-continue on truncation
 async function callDeepSeek(prompt: string, systemPrompt: string = "", model: string = "", maxTokens: number = 4096, jsonMode: boolean = true): Promise<string> {
   try {
     const deepseekModel = model || process.env.DEEPSEEK_MODEL || "deepseek-chat";
@@ -46,51 +63,74 @@ async function callDeepSeek(prompt: string, systemPrompt: string = "", model: st
       throw new Error("DEEPSEEK_API_KEY is not configured");
     }
     
-    const requestBody = JSON.stringify({
+    let accumulated = "";
+    const maxRounds = 5; // prevent infinite loops
+
+    for (let round = 0; round < maxRounds; round++) {
+      const messages: any[] = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt }
+      ];
+      // If we have accumulated content, add it as assistant message for continuation
+      if (accumulated) {
+        messages.push({ role: "assistant", content: accumulated });
+        messages.push({ role: "user", content: "继续，不要停。如果代码还没写完，请接着上一段继续输出剩余部分。" });
+      }
+
+      const requestBody = JSON.stringify({
         model: deepseekModel,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt }
-        ],
+        messages,
         temperature: 0.7,
         max_tokens: maxTokens,
         stop: null,
-        ...(jsonMode ? { response_format: { type: "json_object" } } : {})
+        ...(jsonMode && round === 0 ? { response_format: { type: "json_object" } } : {})
       });
 
-    let response: Response | null = null;
-    let lastError: unknown = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        response = await fetch("https://api.deepseek.com/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${deepseekApiKey}`
-          },
-          body: requestBody
-        });
-        lastError = null;
-        break;
-      } catch (err) {
-        lastError = err;
-        if (attempt === 2) throw err;
-        console.warn("DeepSeek fetch aborted, retrying once...");
-        await new Promise(resolve => setTimeout(resolve, 700));
+      let response: Response | null = null;
+      let lastError: unknown = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          response = await fetch("https://api.deepseek.com/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${deepseekApiKey}`
+            },
+            body: requestBody
+          });
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err;
+          if (attempt === 2) throw err;
+          console.warn("DeepSeek fetch aborted, retrying once...");
+          await new Promise(resolve => setTimeout(resolve, 700));
+        }
       }
+
+      if (!response) {
+        throw lastError || new Error("DeepSeek API request failed");
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`DeepSeek API error: ${response.status} - ${errorText}`);
+      }
+      
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || "";
+      const finishReason = data.choices?.[0]?.finish_reason;
+      
+      accumulated += content;
+      console.log(`DeepSeek round ${round + 1}: +${content.length} chars, finish_reason=${finishReason}`);
+      
+      if (finishReason !== "length") {
+        break; // complete response, no truncation
+      }
+      // finish_reason === "length": output was truncated, continue
     }
 
-    if (!response) {
-      throw lastError || new Error("DeepSeek API request failed");
-    }
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`DeepSeek API error: ${response.status} - ${errorText}`);
-    }
-    
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || "";
+    return accumulated;
   } catch (error) {
     console.error("DeepSeek call failed:", error);
     throw error;
@@ -162,7 +202,7 @@ async function* callDeepSeekStream(prompt: string, systemPrompt: string = "", mo
   }
 }
 
-// DashScope (阿里云通义千问) API client
+// DashScope (阿里云通义千问) API client with auto-continue on truncation
 async function callDashScope(prompt: string, systemPrompt: string = "", model: string = "", maxTokens: number = 4096, jsonMode: boolean = true): Promise<string> {
   try {
     const dashscopeModel = model || process.env.DASHSCOPE_MODEL || "qwen-plus";
@@ -173,32 +213,53 @@ async function callDashScope(prompt: string, systemPrompt: string = "", model: s
       throw new Error("DASHSCOPE_API_KEY is not configured");
     }
     
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${dashscopeApiKey}`
-      },
-      body: JSON.stringify({
-        model: dashscopeModel,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        temperature: 0.7,
-        max_tokens: maxTokens,
-        stop: null,
-        ...(jsonMode ? { response_format: { type: "json_object" } } : {})
-      })
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`DashScope API error: ${response.status} - ${errorText}`);
+    let accumulated = "";
+    const maxRounds = 5;
+
+    for (let round = 0; round < maxRounds; round++) {
+      const messages: any[] = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt }
+      ];
+      if (accumulated) {
+        messages.push({ role: "assistant", content: accumulated });
+        messages.push({ role: "user", content: "继续，不要停。如果代码还没写完，请接着上一段继续输出剩余部分。" });
+      }
+
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${dashscopeApiKey}`
+        },
+        body: JSON.stringify({
+          model: dashscopeModel,
+          messages,
+          temperature: 0.7,
+          max_tokens: maxTokens,
+          stop: null,
+          ...(jsonMode && round === 0 ? { response_format: { type: "json_object" } } : {})
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`DashScope API error: ${response.status} - ${errorText}`);
+      }
+      
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || "";
+      const finishReason = data.choices?.[0]?.finish_reason;
+      
+      accumulated += content;
+      console.log(`DashScope round ${round + 1}: +${content.length} chars, finish_reason=${finishReason}`);
+      
+      if (finishReason !== "length") {
+        break;
+      }
     }
-    
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || "";
+
+    return accumulated;
   } catch (error) {
     console.error("DashScope call failed:", error);
     throw error;
@@ -1122,31 +1183,35 @@ app.post("/api/generate-script", async (req, res) => {
       return res.status(400).json({ error: "Missing required chapter metadata (chapterTitle)." });
     }
 
-    const systemInstruction = `你是一名“教学模拟产品设计师 + 互动学习脚本架构师”。
+    const systemInstruction = `你是一名"教学模拟产品设计师 + 互动学习脚本架构师"。
 
 你的任务不是生成 quiz、选择题、判断题、填空题、题库、剧情问答或换皮闯关。
-你的任务是把一个教学切片转化为一份可交给 AI coding agent 实现的“可视化、沉浸式、问题驱动的互动模拟器生成脚本”。
+你的任务是把一个教学切片转化为一份可交给 AI coding agent 实现的"沉浸式、问题驱动的互动模拟器生成脚本"。
+
+这份脚本应该专注描述功能、交互和用户体验（UX），不要指定任何视觉样式（颜色、字体、布局、动画等）。视觉设计由后续的 AI coding agent 负责。
 
 核心原则：
 1. 每个模拟必须围绕一个综合问题场景。学生进入具体情境，扮演具体角色，面对必须使用本切片知识才能解决的任务。
-2. 互动必须是“应用知识干预场景”，不是“回忆知识回答问题”。学生应观察场景、调整变量、选择策略、安排步骤、诊断原因、分配资源、预测后果或优化方案。
+2. 互动必须是"应用知识干预场景"，不是"回忆知识回答问题"。学生应观察场景、调整变量、选择策略、安排步骤、诊断原因、分配资源、预测后果或优化方案。
 3. 知识点必须变成场景机制。切片中的概念、关系、流程、判断标准必须映射为可观察对象、状态变量、用户操作、反馈规则、成功/失败条件。
 4. 反馈必须体现因果。每次操作后的反馈要说明场景发生了什么变化、为什么会这样、对应教材中的哪个机制、下一步应如何调整。
-5. 视觉设计要服务教学内容。不同学科应生成不同模拟形态，例如应急处置、课堂/角色实践、变量实验室、诊断决策、系统优化、流程搭建、情境推理、证据研判等。不要套用固定玩法模板。
+5. 不同学科应生成不同模拟形态，例如应急处置、课堂/角色实践、变量实验室、诊断决策、系统优化、流程搭建、情境推理、证据研判等。不要套用固定玩法模板。
 
 输出要求：
 - 使用中文。
 - 输出结构化 Markdown，不要输出 JSON，不要输出代码。
-- 这份 Markdown 将被 AI coding agent 直接用来生成网页应用，所以必须具体、可实现、可渲染、可编辑。
-- 必须包含页面布局、主要组件、场景对象、状态变量、交互阶段、操作反馈、知识机制解释和完成条件。
+- 这份 Markdown 将被 AI coding agent 直接用来生成网页应用，所以必须具体、可实现、可交互。
+- 不要指定任何视觉样式（颜色、字体、布局、动画、图标等），只描述功能、交互逻辑和用户体验。
+- 必须包含每个步骤的交互场景、用户操作、交互结果、关联知识点。
 
 禁止：
-- “请选择正确答案”
+- "请选择正确答案"
 - A/B/C/D 答题卡
 - 判断题/填空题/单纯问答
 - 只有剧情，没有可操作对象或状态变化
 - 只有讲解，没有模拟任务
-- 每个阶段只是一个 quiz question`;
+- 每个阶段只是一个 quiz question
+- 指定颜色、字体、布局、动画等视觉样式`;
 
     const promptText = `请基于以下教学切片，生成一份“可交给 AI coding 实现的沉浸式学习模拟器脚本”。
 
@@ -1169,17 +1234,34 @@ ${designRationale || "未提供"}
 教材原文：
 ${(extractedContent || "General academic curriculum rules relative to " + chapterTitle).substring(0, 8000)}
 
-请先判断这个教学切片最适合被转化成哪一种互动模拟形式，然后输出结构化 Markdown。建议包含以下章节：
+请输出以下5个部分的结构化 Markdown：
 
-# 模拟器标题
-## 1. 教学切片理解
-## 2. 模拟器概念
-## 3. 可视化场景设计
-## 4. 状态变量与知识机制映射
-## 5. 交互流程
-## 6. 操作反馈规则
-## 7. 完成条件与学习反思
-## 8. 给 AI coding 的实现说明
+# 1. 教学切片理解
+- **核心知识点**：列出本切片的关键概念、原理、流程或判断标准
+- **综合实践情景**：这些知识点组织在一起，是用来理解、面对、解决什么样的综合性大问题/大情景的？描述一个贯穿整个模拟的大场景
+
+# 2. 整体流程简要设计
+- 描述整个模拟的逻辑流程和情景推进
+- 每个环节如何把对应的知识点融入实践案例
+- 环节之间的故事衔接如何保持情景的合理性、连贯性、流畅性
+
+# 3. 模拟脚本互动流程设计
+输出分步骤的详细流程，每个步骤包含：
+- **步骤编号**：如"第一步"、"第二步"
+- **交互场景描述**：在大情景中遇到了什么小流程节点？当前场景是什么？需要用户解决什么问题？
+- **用户交互方式**：用户具体怎么操作？（如拖拽排序、调整滑块、选择策略、分配资源、诊断原因、预测后果等）
+- **交互结果反馈**：每种操作会返回什么结果？场景如何变化？为什么这样变化？
+- **关联知识点**：这个步骤对应教学切片中的哪些知识点？
+
+# 4. 总结 Feedback 设计
+- 基于用户在所有步骤中的整体互动过程，最后给出什么样的总结性反馈？
+- 反馈应涵盖哪些维度？（如知识应用正确性、决策合理性、遗漏的关键点等）
+- 如何根据用户的表现给出差异化的反馈？
+
+# 5. 特殊要求说明
+- 语言要求（如使用中文/英文）
+- 不要出现课后反思填空等与模拟无关的内容
+- 其他需要注意的事项
 
 请确保它不是题库，而是一个学生可以通过观察、干预、验证、修正来完成的互动模拟器。`;
 
@@ -1247,7 +1329,7 @@ app.post("/api/generate-app-code", async (req, res) => {
       return res.status(400).json({ error: "Missing scriptMarkdown." });
     }
 
-    const systemInstruction = `你是一个顶级的全栈工程师，必须输出可直接运行的完整代码，注重UI美感和交互细节，如果代码被截断要主动重试。`;
+    const systemInstruction = `你是一个顶级的全栈工程师，必须输出可直接运行的完整代码，注重UI美感和交互细节，如果代码被截断要主动重试。只需要输出代码，不需要解释文字。`;
 
     const promptText = `根据以下要求，帮我实现一个web端的html。这是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。
 
@@ -1259,16 +1341,19 @@ ${scriptMarkdown}`;
     const selectedModel = model || "deepseek-v4-flash";
 
     if (selectedModel === "qwen3.7-plus") {
-      outputText = await callDashScope(promptText, systemInstruction, "qwen3.7-plus", 16000, false);
+      outputText = await callDashScope(promptText, systemInstruction, "qwen3.7-plus", 32000, false);
     } else {
-      outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 16000, false);
+      outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 32000, false);
     }
 
-    const code = outputText
-      .trim()
-      .replace(/^```(?:html|HTML)?\s*/i, "")
-      .replace(/\s*```$/i, "")
-      .trim();
+    // Strip markdown code fences and any explanatory text before/after code
+    let code = outputText.trim();
+    // Remove markdown code block markers
+    code = code.replace(/^```(?:html|HTML)?\s*\n?/i, "");
+    code = code.replace(/\n?\s*```$/i, "");
+    // Handle multiple code block markers (from auto-continue)
+    code = code.replace(/```(?:html|HTML)?\s*\n?/gi, "");
+    code = code.trim();
 
     res.json({ code, model: selectedModel });
   } catch (error: any) {
@@ -2412,6 +2497,140 @@ async function startServer() {
     });
     console.log("📦 Production assets statically mounted.");
   }
+
+  // Prompt Template API routes
+  app.get("/api/prompt-templates", async (req, res) => {
+    try {
+      const templates = await getAllPromptTemplates();
+      res.json(templates);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/prompt-templates/:id", async (req, res) => {
+    try {
+      const template = await getPromptTemplate(req.params.id);
+      if (!template) return res.status(404).json({ error: "Prompt template not found" });
+      res.json(template);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/prompt-templates", async (req, res) => {
+    try {
+      const template = await createPromptTemplate(req.body);
+      res.json(template);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/prompt-templates/:id", async (req, res) => {
+    try {
+      const template = await updatePromptTemplate(req.params.id, req.body);
+      if (!template) return res.status(404).json({ error: "Prompt template not found" });
+      res.json(template);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/prompt-templates/:id", async (req, res) => {
+    try {
+      await deletePromptTemplate(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Prompt Version API routes
+  app.get("/api/prompt-templates/:templateId/versions", async (req, res) => {
+    try {
+      const versions = await getPromptVersions(req.params.templateId);
+      res.json(versions);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/prompt-templates/:templateId/versions", async (req, res) => {
+    try {
+      const version = await createPromptVersion({ ...req.body, promptTemplateId: req.params.templateId });
+      res.json(version);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/prompt-versions/:id", async (req, res) => {
+    try {
+      const version = await updatePromptVersion(req.params.id, req.body);
+      if (!version) return res.status(404).json({ error: "Prompt version not found" });
+      res.json(version);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/prompt-versions/:id", async (req, res) => {
+    try {
+      await deletePromptVersion(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Model Config API routes
+  app.get("/api/model-configs", async (req, res) => {
+    try {
+      const configs = await getAllModelConfigs();
+      res.json(configs);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/model-configs/:id", async (req, res) => {
+    try {
+      const config = await getModelConfig(req.params.id);
+      if (!config) return res.status(404).json({ error: "Model config not found" });
+      res.json(config);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/model-configs", async (req, res) => {
+    try {
+      const config = await createModelConfig(req.body);
+      res.json(config);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/model-configs/:id", async (req, res) => {
+    try {
+      const config = await updateModelConfig(req.params.id, req.body);
+      if (!config) return res.status(404).json({ error: "Model config not found" });
+      res.json(config);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/model-configs/:id", async (req, res) => {
+    try {
+      await deleteModelConfig(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 Full-stack Book-to-Game server running on http://0.0.0.0:${PORT} [${SERVER_VERSION}]`);
