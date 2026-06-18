@@ -316,7 +316,7 @@ function greet(name) {
     if (typeof infoDensity === 'string') return infoDensity || '';
     if (infoDensity && typeof infoDensity === 'object') {
       const d = infoDensity as InfoDensity;
-      return `概念数: ${d.conceptCount}, 事实数: ${d.factCount}, 抽象度: ${d.abstractLevel}, 嵌套: ${d.nestingLevel || '无'}, 建议时长: ${d.suggestedMinutes || '10-15'}\n${d.rationale}`;
+      return language === "en" ? `Concepts: ${d.conceptCount}, Facts: ${d.factCount}, Abstraction: ${d.abstractLevel}, Nesting: ${d.nestingLevel || 'None'}, Suggested: ${d.suggestedMinutes || '10-15'}\n${d.rationale}` : `概念数: ${d.conceptCount}, 事实数: ${d.factCount}, 抽象度: ${d.abstractLevel}, 嵌套: ${d.nestingLevel || '无'}, 建议时长: ${d.suggestedMinutes || '10-15'}\n${d.rationale}`;
     }
     return '';
   };
@@ -325,7 +325,7 @@ function greet(name) {
     if (typeof cohesionDetail === 'string') return cohesionDetail || '';
     if (cohesionDetail && typeof cohesionDetail === 'object') {
       const c = cohesionDetail as CohesionDetail;
-      return `类型: ${c.cohesionType}\n核心问题: ${c.coreQuestion}\n${c.mechanism}`;
+      return language === "en" ? `Type: ${c.cohesionType}\nCore Question: ${c.coreQuestion}\n${c.mechanism}` : `类型: ${c.cohesionType}\n核心问题: ${c.coreQuestion}\n${c.mechanism}`;
     }
     return '';
   };
@@ -419,10 +419,10 @@ function greet(name) {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ moduleId: mod.id, content: result.extractedOriginalText })
-            }).catch(err => console.error("保存提取内容失败:", err));
+            }).catch(err => console.error(language === "en" ? "Failed to save extracted content:" : "保存提取内容失败:", err));
           }
         } catch (err) {
-          setExtractedModules(prev => ({ ...prev, [mod.id]: `⚠️ 提取失败: ${(err as Error).message}` }));
+          setExtractedModules(prev => ({ ...prev, [mod.id]: language === "en" ? `⚠️ Extraction failed: ${(err as Error).message}` : `⚠️ 提取失败: ${(err as Error).message}` }));
         } finally {
           setExtractingModuleId(prev => prev === mod.id ? null : prev);
         }
@@ -439,7 +439,7 @@ function greet(name) {
       setExtractedContent(extractedModules[activeModuleId]);
       setExtractedImages(moduleImages[activeModuleId] || []);
     } else if (activeModuleId && !extractingModuleId) {
-      setExtractedContent("⏳ 正在提取中...");
+      setExtractedContent(language === "en" ? "⏳ Extracting..." : "⏳ 正在提取中...");
       setExtractedImages([]);
     }
   }, [activeModuleId, extractedModules, extractingModuleId, moduleImages]);
@@ -454,7 +454,9 @@ function greet(name) {
       setDirectoryItems(parseTextToDirectory(template.content));
       setPdfFileName(""); // reset custom pdf
       
-      const briefAgentText = `已载入模板课本：**${template.title}** (${template.subject})。\n\n这是一部涵盖丰富知识点的学习材料。请点击底下固定的 **“✨ 教材内容智能切片”** 按钮开展智能拆分！我将为它量身定做趣味互动学习模型。`;
+      const briefAgentText = language === "en"
+        ? `Loaded template textbook: **${template.title}** (${template.subject}).\n\nThis is a learning material covering rich knowledge points. Please click the fixed **"✨ Smart Textbook Content Slicing"** button below to start intelligent splitting! I will customize a fun interactive learning model for it.`
+        : `已载入模板课本：**${template.title}** (${template.subject})。\n\n这是一部涵盖丰富知识点的学习材料。请点击底下固定的 **"✨ 教材内容智能切片"** 按钮开展智能拆分！我将为它量身定做趣味互动学习模型。`;
       addAgentMessage(briefAgentText);
     }
   };
@@ -595,24 +597,24 @@ function greet(name) {
       }
       setModuleAppCodes(appCodeMap);
 
-      let msg = `📂 **已加载项目：${project.name}**\n\n`;
-      if (project.pdfFileName) msg += `📄 PDF：${project.pdfFileName}\n`;
-      if (project.bookTitle) msg += `📖 教材：《${project.bookTitle}》\n`;
+      let msg = language === "en" ? `📂 **Loaded project: ${project.name}**\n\n` : `📂 **已加载项目：${project.name}**\n\n`;
+      if (project.pdfFileName) msg += language === "en" ? `📄 PDF: ${project.pdfFileName}\n` : `📄 PDF：${project.pdfFileName}\n`;
+      if (project.bookTitle) msg += language === "en" ? `📖 Textbook: 《${project.bookTitle}》\n` : `📖 教材：《${project.bookTitle}》\n`;
       if (project.directoryItems) {
         try {
           const dirs = JSON.parse(project.directoryItems);
-          msg += `📑 目录：${Array.isArray(dirs) ? dirs.length : 0} 个章节节点\n`;
+          msg += language === "en" ? `📑 Directory: ${Array.isArray(dirs) ? dirs.length : 0} chapters\n` : `📑 目录：${Array.isArray(dirs) ? dirs.length : 0} 个章节节点\n`;
         } catch {}
       }
       if (project.modules) {
         try {
           const mods = JSON.parse(project.modules);
           if (Array.isArray(mods) && mods.length > 0) {
-            msg += `🧩 策划大纲：${mods.length} 个切片\n`;
+            msg += language === "en" ? `🧩 Planning outline: ${mods.length} slices\n` : `🧩 策划大纲：${mods.length} 个切片\n`;
           }
         } catch {}
       }
-      msg += `\n您可以继续之前的编辑工作。`;
+      msg += language === "en" ? `\nYou can continue your previous editing work.` : `\n您可以继续之前的编辑工作。`;
       try { addAgentMessage(msg); } catch (e) { console.error("addAgentMessage error:", e); }
 
       setShowProjectList(false);
@@ -620,7 +622,7 @@ function greet(name) {
       console.error("Failed to load project:", err);
       // 即使出错，如果数据已经加载成功，不显示错误提示
       if (!bookTitle && !modules.length) {
-        alert("加载项目失败，请重试。");
+        alert(language === "en" ? "Failed to load project, please try again." : "加载项目失败，请重试。");
       }
     }
   }, [addAgentMessage]);
@@ -763,7 +765,7 @@ function greet(name) {
   // Batch delete selected projects
   const handleBatchDelete = useCallback(async () => {
     if (selectedProjects.size === 0) return;
-    if (!confirm(`确定要删除选中的 ${selectedProjects.size} 个项目吗？此操作不可撤销。`)) return;
+    if (!confirm(language === "en" ? `Are you sure you want to delete the selected ${selectedProjects.size} projects? This cannot be undone.` : `确定要删除选中的 ${selectedProjects.size} 个项目吗？此操作不可撤销。`)) return;
     
     try {
       // Delete all selected projects
@@ -810,17 +812,17 @@ function greet(name) {
   // Save modules to localStorage
   const saveModulesToStorage = useCallback(() => {
     if (modules.length === 0) {
-      alert("当前没有可保存的切片数据！");
+      alert(language === "en" ? "No modules to save!" : "当前没有可保存的切片数据！");
       return;
     }
     try {
       const modulesJson = JSON.stringify(modules);
       localStorage.setItem(SAVED_MODULES_KEY, modulesJson);
       setHasSavedModules(true);
-      alert(`✅ 已成功保存 ${modules.length} 个切片！下次加载将优先使用保存的切片。`);
+      alert(language === "en" ? `✅ Successfully saved ${modules.length} modules! Saved modules will be prioritized next time.` : `✅ 已成功保存 ${modules.length} 个切片！下次加载将优先使用保存的切片。`);
     } catch (err) {
-      console.error("保存切片失败:", err);
-      alert("保存切片失败，请检查浏览器存储空间。");
+      console.error(language === "en" ? "Failed to save modules:" : "保存切片失败:", err);
+      alert(language === "en" ? "Failed to save modules, please check browser storage space." : "保存切片失败，请检查浏览器存储空间。");
     }
   }, [modules, SAVED_MODULES_KEY]);
 
@@ -829,25 +831,29 @@ function greet(name) {
     try {
       const saved = localStorage.getItem(SAVED_MODULES_KEY);
       if (!saved) {
-        alert("没有找到已保存的切片数据。");
+        alert(language === "en" ? "No saved modules found." : "没有找到已保存的切片数据。");
         return false;
       }
       const parsedModules: BookModule[] = JSON.parse(saved);
       if (!Array.isArray(parsedModules) || parsedModules.length === 0) {
-        alert("保存的切片数据格式无效。");
+        alert(language === "en" ? "Invalid saved module data format." : "保存的切片数据格式无效。");
         return false;
       }
       setModules(parsedModules);
       setActiveStep(2);
       addAgentMessage(
-        `📂 **已加载保存的切片方案！**\n\n已从本地存储中恢复了 **${parsedModules.length} 个核心教学单元**：\n` +
-        parsedModules.map(m => ` - **${m.sliceId || m.chapterIndex} ${m.title}**: ${typeof m.summary === 'string' ? m.summary : (m.summary as any)?.learnedPoints?.[0] || '核心概念'}`).join("\n") +
-        `\n\n您可以直接使用这些切片继续后续操作，或者点击"🔄 重新 AI 切片"按钮生成新的切片方案。`
+        language === "en"
+          ? `📂 **Loaded saved slice plan!**\n\nRestored **${parsedModules.length} core teaching units** from local storage:\n` +
+            parsedModules.map(m => ` - **${m.sliceId || m.chapterIndex} ${m.title}**: ${typeof m.summary === 'string' ? m.summary : (m.summary as any)?.learnedPoints?.[0] || 'Core concept'}`).join("\n") +
+            `\n\nYou can directly use these slices to continue, or click "🔄 Re-AI Slice" to generate a new plan.`
+          : `📂 **已加载保存的切片方案！**\n\n已从本地存储中恢复了 **${parsedModules.length} 个核心教学单元**：\n` +
+            parsedModules.map(m => ` - **${m.sliceId || m.chapterIndex} ${m.title}**: ${typeof m.summary === 'string' ? m.summary : (m.summary as any)?.learnedPoints?.[0] || '核心概念'}`).join("\n") +
+            `\n\n您可以直接使用这些切片继续后续操作，或者点击"🔄 重新 AI 切片"按钮生成新的切片方案。`
       );
       return true;
     } catch (err) {
-      console.error("加载切片失败:", err);
-      alert("加载切片失败，请检查数据格式。");
+      console.error(language === "en" ? "Failed to load modules:" : "加载切片失败:", err);
+      alert(language === "en" ? "Failed to load modules, please check data format." : "加载切片失败，请检查数据格式。");
       return false;
     }
   }, [SAVED_MODULES_KEY, addAgentMessage]);
@@ -857,15 +863,16 @@ function greet(name) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
-    if (file.type !== "application/pdf") {
-      alert("请上传有效的 PDF 格式教材文档。");
+
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      alert(language === "en" ? "Please upload a valid PDF document." : "请上传有效的 PDF 格式教材文档。");
       return;
     }
 
     setPdfFileName(file.name);
     setBookTitle(file.name.replace(/\.[^/.]+$/, ""));
     setPdfReaderLoading(true);
-    setPdfExtractionProgress("正在挂载 PDF 解析器并提取文本数据...");
+    setPdfExtractionProgress(language === "en" ? "Mounting PDF parser and extracting text data..." : "正在挂载 PDF 解析器并提取文本数据...");
 
     const fileReader = new FileReader();
     fileReader.onload = async (e) => {
@@ -875,7 +882,7 @@ function greet(name) {
         // Safely extract text utilizing client-side CDN pdf.js
         const pdfjsLib = (window as any)['pdfjs-dist/build/pdf'];
         if (!pdfjsLib) {
-          throw new Error("PDF.js 脚本未能在本容器内及时加载，请尝试刷新。");
+          throw new Error(language === "en" ? "PDF.js script failed to load in time, please try refreshing." : "PDF.js 脚本未能在本容器内及时加载，请尝试刷新。");
         }
         
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
@@ -884,7 +891,7 @@ function greet(name) {
         const pdf = await loadingTask.promise;
         const totalPages = pdf.numPages;
         
-        setPdfExtractionProgress(`正在解析 PDF (共 ${totalPages} 页)...`);
+        setPdfExtractionProgress(language === "en" ? `Parsing PDF (${totalPages} pages)...` : `正在解析 PDF (共 ${totalPages} 页)...`);
         
         let extractedText = "";
         const pagesTextList: string[] = [];
@@ -892,7 +899,7 @@ function greet(name) {
         const pageLimit = Math.min(totalPages, 150);
         
         for (let i = 1; i <= pageLimit; i++) {
-          setPdfExtractionProgress(`正在逐页提取文本及页码对齐数据 (${i} / ${pageLimit})...`);
+          setPdfExtractionProgress(language === "en" ? `Extracting text and aligning page data (${i} / ${pageLimit})...` : `正在逐页提取文本及页码对齐数据 (${i} / ${pageLimit})...`);
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
           const pageStrings = textContent.items.map((item: any) => item.str);
@@ -902,7 +909,7 @@ function greet(name) {
         }
 
         if (!extractedText.trim()) {
-          throw new Error("该 PDF 似乎是扫描版或图片文档，未能提取到物理文本。我们已为您装载演示用模拟大纲。");
+          throw new Error(language === "en" ? "This PDF appears to be a scanned or image document and no text could be extracted. A demo simulation outline has been loaded for you." : "该 PDF 似乎是扫描版或图片文档，未能提取到物理文本。我们已为您装载演示用模拟大纲。");
         }
 
         setPdfPagesText(pagesTextList);
@@ -936,10 +943,14 @@ function greet(name) {
               []
             );
             setShowProjectList(true);
-            addAgentMessage(`📦 **成功收到您上传的教材电子书：**\n《${file.name}》\n\n项目 **"${projectName}"** 已创建并保存到数据库！\n\n我已在浏览器终端成功无损读取了前 **${pageLimit} 页** 的文本（约 ${extractedText.length} 字），并智能探测出**印刷页与PDF物理页的偏差偏移量 (Offset) 为 \`${autoOffset >= 0 ? "+" : ""}${autoOffset}\` 页**。\n\n系统已对教材页面完成了降噪对齐与目录抽取。我已为您打开左侧的“我的项目”列表，您可以看到新创建的项目。接下来，请在右侧页面底部点击 **"✨ 教材内容智能切片"**，我们即可完成智能内容切块！`);
+            addAgentMessage(language === "en"
+              ? `📦 **Successfully received your uploaded textbook eBook:**\n《${file.name}》\n\nProject **"${projectName}"** has been created and saved to the database!\n\nI have successfully read the first **${pageLimit} pages** of text in the browser terminal (about ${extractedText.length} characters), and intelligently detected that the **offset between printed pages and PDF physical pages is \`${autoOffset >= 0 ? "+" : ""}${autoOffset}\` pages**.\n\nThe system has completed noise reduction alignment and directory extraction for textbook pages. I have opened the "My Projects" list on the left for you, where you can see the newly created project. Next, please click **"✨ Smart Textbook Content Slicing"** at the bottom of the right page, and we can complete intelligent content chunking!`
+              : `📦 **成功收到您上传的教材电子书：**\n《${file.name}》\n\n项目 **"${projectName}"** 已创建并保存到数据库！\n\n我已在浏览器终端成功无损读取了前 **${pageLimit} 页** 的文本（约 ${extractedText.length} 字），并智能探测出**印刷页与PDF物理页的偏差偏移量 (Offset) 为 \`${autoOffset >= 0 ? "+" : ""}${autoOffset}\` 页**。\n\n系统已对教材页面完成了降噪对齐与目录抽取。我已为您打开左侧的"我的项目"列表，您可以看到新创建的项目。接下来，请在右侧页面底部点击 **"✨ 教材内容智能切片"**，我们即可完成智能内容切块！`);
           } catch (err) {
             console.error("Failed to create project in base64Reader:", err);
-            addAgentMessage(`📦 **成功收到您上传的教材电子书：**\n《${file.name}》\n\n项目 **"${projectName}"** 已收到并完成解析，但数据库存储时遇到问题：${(err as Error).message || err}。您仍可在当前会话中体验完整教学切片与大纲设计！`);
+            addAgentMessage(language === "en"
+              ? `📦 **Successfully received your uploaded textbook eBook:**\n《${file.name}》\n\nProject **"${projectName}"** has been received and parsed, but encountered an issue when saving to the database: ${(err as Error).message || err}. You can still experience the complete teaching slice and outline design in the current session!`
+              : `📦 **成功收到您上传的教材电子书：**\n《${file.name}》\n\n项目 **"${projectName}"** 已收到并完成解析，但数据库存储时遇到问题：${(err as Error).message || err}。您仍可在当前会话中体验完整教学切片与大纲设计！`);
           }
         };
         base64Reader.readAsDataURL(file);
@@ -952,7 +963,9 @@ function greet(name) {
         setBookTitle(TEMPLATE_BOOKS[0].title);
         setBookContentText(sampleText);
         setDirectoryItems(parseTextToDirectory(sampleText));
-        addAgentMessage(`⚠️ **PDF读取提醒：** ${err.message || "由于文件版本或者同源限制原因无法静默提取。"}\n\n不用担心！我已经为你自动载入了通用的**《高阶综合科学教材纲要》**文本作为底页，现在您仍然可以点击右侧页面底部 **“✨ 教材内容智能切片”**，完美体验全套 AI 节点设计流程！`);
+        addAgentMessage(language === "en"
+          ? `⚠️ **PDF Reading Reminder:** ${err.message || "Unable to silently extract due to file version or same-origin restrictions."}\n\nDon't worry! I have automatically loaded a generic **"Advanced Comprehensive Science Textbook Outline"** text as the base page for you. You can still click **"✨ Smart Textbook Content Slicing"** at the bottom of the right page to perfectly experience the full AI node design process!`
+          : `⚠️ **PDF读取提醒：** ${err.message || "由于文件版本或者同源限制原因无法静默提取。"}\n\n不用担心！我已经为你自动载入了通用的**《高阶综合科学教材纲要》**文本作为底页，现在您仍然可以点击右侧页面底部 **"✨ 教材内容智能切片"**，完美体验全套 AI 节点设计流程！`);
       }
     };
     fileReader.readAsArrayBuffer(file);
@@ -1051,11 +1064,17 @@ function greet(name) {
     const existingProjectId = currentProjectId;
 
     addAgentMessage(
-      `🪐 正在为《${bookTitle}》生成 AI 切片方案...\n\n` +
-      `📚 书名：${bookTitle}\n` +
-      `📂 目录章节数：${directoryItems.length}\n` +
-      `📋 目录预览：${directoryItems.slice(0, 3).map(d => d.title).join("、")}...\n\n` +
-      `正在使用 **DeepSeek V4 Flash** 模型分析目录结构，请稍候 3-8 秒...`
+      language === "en"
+        ? `🪐 Generating AI slice plan for 《${bookTitle}》...\n\n` +
+          `📚 Book: ${bookTitle}\n` +
+          `📂 Directory chapters: ${directoryItems.length}\n` +
+          `📋 Directory preview: ${directoryItems.slice(0, 3).map(d => d.title).join(", ")}...\n\n` +
+          `Analyzing directory structure with **DeepSeek V4 Flash** model, please wait 3-8 seconds...`
+        : `🪐 正在为《${bookTitle}》生成 AI 切片方案...\n\n` +
+          `📚 书名：${bookTitle}\n` +
+          `📂 目录章节数：${directoryItems.length}\n` +
+          `📋 目录预览：${directoryItems.slice(0, 3).map(d => d.title).join("、")}...\n\n` +
+          `正在使用 **DeepSeek V4 Flash** 模型分析目录结构，请稍候 3-8 秒...`
     );
 
     // 构造API请求数据 - 完全使用当前状态值
@@ -1080,7 +1099,7 @@ function greet(name) {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.message || errorData?.error || `分析失败 - 状态码: ${response.status}`);
+        throw new Error(errorData?.message || errorData?.error || (language === "en" ? `Analysis failed - Status code: ${response.status}` : `分析失败 - 状态码: ${response.status}`));
       }
 
       const rawResponse: any = await response.json();
@@ -1114,7 +1133,7 @@ function greet(name) {
       const rawModules = data.slices || data.modules || [];
 
       if (rawModules.length === 0) {
-        throw new Error("AI返回的切片为空，请重试或检查prompt");
+        throw new Error(language === "en" ? "AI returned empty slices, please retry or check the prompt" : "AI返回的切片为空，请重试或检查prompt");
       }
 
       const formattedModules: BookModule[] = rawModules.map((mod: any, index: number) => {
@@ -1205,16 +1224,20 @@ function greet(name) {
       }).join("\n");
 
       addAgentMessage(
-        `🎉 **学科游戏化分层规划方案已制定就绪！**\n\n我已将书籍《${responseTitle || bookTitle}》细切为 **${formattedModules.length} 个核心教学单元**：\n` +
-        moduleSummaries +
-        `\n\n在右侧的工作区中，您现在可以对这一套课程大纲开展**自由编辑与完全订正**。您可以修改任何章节标题，或者自定义真实的冲突模拟场景及核心玩法规范！数据已自动保存到数据库中。`,
+        language === "en"
+          ? `🎉 **Subject gamification layered planning plan is ready!**\n\nI have sliced the book 《${responseTitle || bookTitle}》 into **${formattedModules.length} core teaching units**:\n` +
+            moduleSummaries +
+            `\n\nIn the workspace on the right, you can now **freely edit and fully correct** this set of curriculum outlines. You can modify any chapter title, or customize real conflict simulation scenarios and core gameplay specifications! Data has been automatically saved to the database.`
+          : `🎉 **学科游戏化分层规划方案已制定就绪！**\n\n我已将书籍《${responseTitle || bookTitle}》细切为 **${formattedModules.length} 个核心教学单元**：\n` +
+            moduleSummaries +
+            `\n\n在右侧的工作区中，您现在可以对这一套课程大纲开展**自由编辑与完全订正**。您可以修改任何章节标题，或者自定义真实的冲突模拟场景及核心玩法规范！数据已自动保存到数据库中。`,
         "blueprint_ready"
       );
 
     } catch (err: any) {
       console.error("❌ handleSplitBook error:", err);
       setIsParsing(false);
-      setParseError(err.message || "网络请求超时，请重试。");
+      setParseError(err.message || (language === "en" ? "Network request timed out, please try again." : "网络请求超时，请重试。"));
       setAiMeta({
         model: aiMeta?.model || "unknown",
         provider: aiMeta?.provider || "unknown",
@@ -1223,8 +1246,10 @@ function greet(name) {
         callTime: new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         status: 'fail'
       });
-      addAgentMessage(`❌ **AI 切片生成失败**\n\n错误信息：${err.message || "未知错误"}\n\n请检查：\n1. 终端是否显示 API Key 配置正确\n2. 网络是否能访问 DeepSeek API\n3. 浏览器控制台的详细错误日志`);
-      alert(`切片生成失败：${err.message || "未知错误"}`);
+      addAgentMessage(language === "en"
+        ? `❌ **AI Slice Generation Failed**\n\nError message: ${err.message || "Unknown error"}\n\nPlease check:\n1. Whether the API Key is correctly configured in the terminal\n2. Whether the network can access the DeepSeek API\n3. Detailed error logs in the browser console`
+        : `❌ **AI 切片生成失败**\n\n错误信息：${err.message || "未知错误"}\n\n请检查：\n1. 终端是否显示 API Key 配置正确\n2. 网络是否能访问 DeepSeek API\n3. 浏览器控制台的详细错误日志`);
+      alert(language === "en" ? `Script generation failed: ${err.message || "Unknown error"}` : `切片生成失败：${err.message || "未知错误"}`);
     }
   };
 
@@ -1353,11 +1378,11 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
     if (!pdfData || pdfPagesText.length > 0) return;
     try {
       setPdfReaderLoading(true);
-      setPdfExtractionProgress("正在从存储的 PDF 文件重新提取文本...");
+      setPdfExtractionProgress(language === "en" ? "Re-extracting text from stored PDF file..." : "正在从存储的 PDF 文件重新提取文本...");
       
       const pdfjsLib = (window as any)['pdfjs-dist/build/pdf'];
       if (!pdfjsLib) {
-        throw new Error("PDF.js 脚本未能在本容器内及时加载，请尝试刷新。");
+        throw new Error(language === "en" ? "PDF.js script failed to load in time, please try refreshing." : "PDF.js 脚本未能在本容器内及时加载，请尝试刷新。");
       }
       
       pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
@@ -1372,14 +1397,14 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
       const pdf = await loadingTask.promise;
       const totalPages = pdf.numPages;
       
-      setPdfExtractionProgress(`正在解析 PDF (共 ${totalPages} 页)...`);
+      setPdfExtractionProgress(language === "en" ? `Parsing PDF (${totalPages} pages)...` : `正在解析 PDF (共 ${totalPages} 页)...`);
       
       let extractedText = "";
       const pagesTextList: string[] = [];
       const pageLimit = Math.min(totalPages, 150);
       
       for (let i = 1; i <= pageLimit; i++) {
-        setPdfExtractionProgress(`正在逐页提取文本及页码对齐数据 (${i} / ${pageLimit})...`);
+        setPdfExtractionProgress(language === "en" ? `Extracting text and aligning page data (${i} / ${pageLimit})...` : `正在逐页提取文本及页码对齐数据 (${i} / ${pageLimit})...`);
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
         const pageStrings = textContent.items.map((item: any) => item.str);
@@ -1415,9 +1440,13 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
     setActiveTab('original'); // Set view mode to original textbook by default
     
     addAgentMessage(
-      "📋 **已为您进入第三阶段：分块教材内容精确审查！**\n\n" +
-      "为了保障游戏关卡与实际教材考点的无缝精准对接，我们已经基于您选定的教材目录大纲，为您精准提取/对齐了每一章节的**教材原文段落**。\n\n" +
-      "您可以点击下方 **「📖 教材原文映射 (Original text)」** 选项卡对每一部分原文内容进行校对。当您确定内容准确无误后，只需点击 **「✨ 开启本章仿真合成」** 按钮，即可个性化、快速构建配套的游戏仿真剧本及高水平答题库！"
+      language === "en"
+        ? "📋 **You have now entered Phase 3: Block-by-block textbook content review!**\n\n" +
+          "To ensure seamless alignment between game levels and actual textbook exam points, we have precisely extracted/aligned the **original textbook paragraphs** for each chapter based on your selected textbook outline.\n\n" +
+          "You can click the **\"📖 Original Text Mapping\"** tab below to proofread each section. Once you've confirmed the content is accurate, simply click the **\"✨ Start Simulation Synthesis\"** button to quickly build a customized game simulation script and high-quality quiz bank!"
+        : "📋 **已为您进入第三阶段：分块教材内容精确审查！**\n\n" +
+          "为了保障游戏关卡与实际教材考点的无缝精准对接，我们已经基于您选定的教材目录大纲，为您精准提取/对齐了每一章节的**教材原文段落**。\n\n" +
+          "您可以点击下方 **「📖 教材原文映射 (Original text)」** 选项卡对每一部分原文内容进行校对。当您确定内容准确无误后，只需点击 **「✨ 开启本章仿真合成」** 按钮，即可个性化、快速构建配套的游戏仿真剧本及高水平答题库！"
     );
     
     // Pick the first module to view in Simulator
@@ -1482,7 +1511,9 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
       }));
       
       // Update Agent companion statement to praise user
-      addAgentMessage(`🏆 **试炼捷报！** 刚刚在关卡单元 **“${modules.find(m => m.id === script.moduleId)?.title}”** 中完成了仿真测试，最终斩获比分：**${gameSession.score + (gameSession.isCorrect ? 10 : 0)} 分**！\n学子们通过这套答题，能够立刻对章节的难点加深物理概念。您可以随时在下方切换其他模块进行校准！`);
+      addAgentMessage(language === "en"
+        ? `🏆 **Trial Report!** Just completed the simulation test in level unit **"${modules.find(m => m.id === script.moduleId)?.title}"**, with a final score of: **${gameSession.score + (gameSession.isCorrect ? 10 : 0)} points**!\nThrough this quiz, students can immediately deepen their physical concepts for chapter difficulties. You can switch to other modules below for calibration at any time!`
+        : `🏆 **试炼捷报！** 刚刚在关卡单元 **"${modules.find(m => m.id === script.moduleId)?.title}"** 中完成了仿真测试，最终斩获比分：**${gameSession.score + (gameSession.isCorrect ? 10 : 0)} 分**！\n学子们通过这套答题，能够立刻对章节的难点加深物理概念。您可以随时在下方切换其他模块进行校准！`);
     } else {
       setGameSession(prev => ({
         ...prev,
@@ -1548,7 +1579,9 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
     } catch (err: any) {
       console.error(err);
       setChatLoading(false);
-      addAgentMessage("😊 抱歉，我的网络微处理器开小差了。但我已经帮您把教学数据牢牢存储在内存中了，您可以在右侧直接点选和编辑！");
+      addAgentMessage(language === "en"
+        ? "😊 Sorry, my network microprocessor is daydreaming. But I have securely stored your teaching data in memory, you can directly select and edit on the right!"
+        : "😊 抱歉，我的网络微处理器开小差了。但我已经帮您把教学数据牢牢存储在内存中了，您可以在右侧直接点选和编辑！");
     }
   };
 
@@ -1635,42 +1668,44 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
     const newIdx = `0${modules.length + 1}`.slice(-2);
     const newMod: BookModule = {
       id: `custom-mod-${Date.now()}`,
-      chapterIndex: `章节 ${newIdx}`,
-      title: "自拟新知识主题 (Custom Concept Node)",
+      chapterIndex: language === "en" ? `Chapter ${newIdx}` : `章节 ${newIdx}`,
+      title: language === "en" ? "Custom Knowledge Theme (Custom Concept Node)" : "自拟新知识主题 (Custom Concept Node)",
       coveredChapters: `${modules.length + 1}.1`,
-      summary: "围绕该自拟节点，进行更具探索性和创造性的多模态课业考究。",
-      infoDensity: "根据单学时极限，精炼切面，负荷处在自学吸收的最佳区间内。",
-      cohesionDetail: "此单元的核心考点属于因果串联结构，极其适合进行联合探究与思维内化。",
+      summary: language === "en" ? "Conduct more exploratory and creative multimodal academic inquiry around this custom node." : "围绕该自拟节点，进行更具探索性和创造性的多模态课业考究。",
+      infoDensity: language === "en" ? "Based on single-class-hour limits, refine facets to optimal self-study absorption load." : "根据单学时极限，精炼切面，负荷处在自学吸收的最佳区间内。",
+      cohesionDetail: language === "en" ? "The core test point of this unit belongs to causal chain structure, highly suitable for joint inquiry and thinking internalization." : "此单元的核心考点属于因果串联结构，极其适合进行联合探究与思维内化。",
       gameType: "quiz",
-      gameTitle: "新知识英雄决斗 (The Concept Duel)",
-      gameRules: "玩家面临多级学术决策，必须依靠精密的逻辑和教材知识才能克服各种科学魔障。",
-      duration: "10分钟",
-      designRationale: "使用单人闭环探究游戏，让学员亲自在危机中做出策略抉择，加深原理运用。",
+      gameTitle: language === "en" ? "Knowledge Hero Duel (The Concept Duel)" : "新知识英雄决斗 (The Concept Duel)",
+      gameRules: language === "en" ? "Players face multi-level academic decisions, must rely on precise logic and textbook knowledge to overcome various scientific obstacles." : "玩家面临多级学术决策，必须依靠精密的逻辑和教材知识才能克服各种科学魔障。",
+      duration: language === "en" ? "10 minutes" : "10分钟",
+      designRationale: language === "en" ? "Use single-player closed-loop exploration game, let learners personally make strategy choices in crisis, deepen principle application." : "使用单人闭环探究游戏，让学员亲自在危机中做出策略抉择，加深原理运用。",
       scriptStatus: 'pending'
     };
     setModules(prev => [...prev, newMod]);
     
-    addUserMessage(`➕ 增加了一个全新的课程单元：章节 ${newIdx}`);
-    addAgentMessage(`好的！我已经为您创建了全新的自定义单元。您可以在大纲面板中直接写入定制的教材细节，稍后我们将为您一次性生成专属游戏剧本！`);
+    addUserMessage(language === "en" ? `➕ Added a brand new course unit: Chapter ${newIdx}` : `➕ 增加了一个全新的课程单元：章节 ${newIdx}`);
+    addAgentMessage(language === "en"
+      ? "Alright! I've created a brand new custom module for you. You can directly write customized textbook details in the outline panel, and later we'll generate your exclusive game script all at once!"
+      : "好的！我已经为您创建了全新的自定义单元。您可以在大纲面板中直接写入定制的教材细节，稍后我们将为您一次性生成专属游戏剧本！");
   };
 
   // Deletes single curriculum chapter
   const handleDeleteModule = (id: string) => {
     const deletedMod = modules.find(m => m.id === id);
     setModules(prev => prev.filter(m => m.id !== id));
-    addUserMessage(`🗑️ 移除了课程关卡：${deletedMod?.title || "未定义章节"}`);
+    addUserMessage(language === "en" ? `🗑️ Removed course level: ${deletedMod?.title || "Undefined chapter"}` : `🗑️ 移除了课程关卡：${deletedMod?.title || "未定义章节"}`);
   };
 
   // Helper translations Chinese tags helper
   const getGameTypeChinese = (type: GameType) => {
     switch (type) {
-      case "quiz": return "知识抢答 (Quiz)";
-      case "cross-match": return "消消乐搭配 (Match)";
-      case "fill-blank": return "填空魔法 (Fill-Blank)";
-      case "interactive-story": return "文字冒险 (Narrative)";
-      case "coding-puzzle": return "代码拼图 (Code Logic)";
-      case "math-quest": return "算术极速逃脱 (Math Run)";
-      default: return "互动试炼";
+      case "quiz": return language === "en" ? "Knowledge Quiz" : "知识抢答 (Quiz)";
+      case "cross-match": return language === "en" ? "Concept Matching" : "消消乐搭配 (Match)";
+      case "fill-blank": return language === "en" ? "Fill-in-Blank" : "填空魔法 (Fill-Blank)";
+      case "interactive-story": return language === "en" ? "Interactive Narrative" : "文字冒险 (Narrative)";
+      case "coding-puzzle": return language === "en" ? "Code Logic Puzzle" : "代码拼图 (Code Logic)";
+      case "math-quest": return language === "en" ? "Math Run" : "算术极速逃脱 (Math Run)";
+      default: return language === "en" ? "Interactive Challenge" : "互动试炼";
     }
   };
 
@@ -1751,7 +1786,7 @@ ${module.script.conclusion}
 
   const showCopyToast = () => {
     setScriptCopySuccess(true);
-    setCopyToast({ message: '✅ 复制成功！', visible: true });
+    setCopyToast({ message: language === "en" ? '✅ Copied successfully!' : '✅ 复制成功！', visible: true });
     setTimeout(() => setScriptCopySuccess(false), 2000);
     setTimeout(() => setCopyToast(prev => ({ ...prev, visible: false })), 2500);
   };
@@ -1794,7 +1829,7 @@ ${script.conclusion}
 
     const showCopyToast = () => {
       setScriptCopySuccess(true);
-      setCopyToast({ message: '✅ 复制成功！', visible: true });
+      setCopyToast({ message: language === "en" ? '✅ Copied successfully!' : '✅ 复制成功！', visible: true });
       setTimeout(() => setScriptCopySuccess(false), 2000);
       setTimeout(() => setCopyToast(prev => ({ ...prev, visible: false })), 2500);
     };
@@ -1812,13 +1847,13 @@ ${script.conclusion}
 
   const handleGenerateFinalApp = async () => {
     if (!selectedStep5ModuleId) {
-      alert("请先选择一个切片");
+      alert(language === "en" ? "Please select a slice first" : "请先选择一个切片");
       return;
     }
 
     const mod = modules.find(m => m.id === selectedStep5ModuleId);
     if (!mod) {
-      alert("未找到选中的切片");
+      alert(language === "en" ? "Selected slice not found" : "未找到选中的切片");
       return;
     }
 
@@ -1844,7 +1879,9 @@ ${script.conclusion}
       timestamp: new Date().toLocaleTimeString()
     }));
 
-    addAgentMessage(`🚀 正在基于切片 **${mod.chapterIndex} · ${mod.title}** 的互动脚本生成场景模拟游戏...`);
+    addAgentMessage(language === "en"
+      ? `🚀 Generating scenario simulation game based on slice **${mod.chapterIndex} · ${mod.title}** interactive script...`
+      : `🚀 正在基于切片 **${mod.chapterIndex} · ${mod.title}** 的互动脚本生成场景模拟游戏...`);
 
     try {
       const response = await fetch('/api/generate-app-code', {
@@ -1892,23 +1929,27 @@ ${script.conclusion}
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ moduleId: selectedStep5ModuleId, code: generatedCode })
-        }).catch(err => console.error("保存App代码失败:", err));
+        }).catch(err => console.error(language === "en" ? "Failed to save App code:" : "保存App代码失败:", err));
       }
       
       setIsGeneratingApp(false);
       setOutputTab('preview');
-      addAgentMessage(`✅ **场景模拟游戏生成完成！**\n\n你可以在右侧预览效果，或切换到代码视图查看 HTML 源码。`, 'text');
+      addAgentMessage(language === "en"
+        ? `✅ **Scenario simulation game generated successfully!**\n\nYou can preview the effect on the right, or switch to the code view to see the HTML source code.`
+        : `✅ **场景模拟游戏生成完成！**\n\n你可以在右侧预览效果，或切换到代码视图查看 HTML 源码。`, 'text');
     } catch (err: any) {
       setIsGeneratingApp(false);
-      const message = err?.message || '未知错误';
-      setFinalCode(`<!-- DeepSeek V4 Flash 代码生成失败 -->\n<!-- ${message} -->`);
+      const message = err?.message || (language === "en" ? "Unknown error" : "未知错误");
+      setFinalCode(`<!-- ${language === "en" ? "DeepSeek V4 Flash code generation failed" : "DeepSeek V4 Flash 代码生成失败"} -->\n<!-- ${message} -->`);
       setAppApiDebugInfo(prev => ({
         ...prev,
         status: 'error',
         rawResponse: prev.rawResponse || `Error: ${message}`,
         timestamp: new Date().toLocaleTimeString()
       }));
-      addAgentMessage(`❌ **场景模拟游戏生成失败**\n\n错误信息：${message}`);
+      addAgentMessage(language === "en"
+        ? `❌ **Scenario simulation game generation failed**\n\nError message: ${message}`
+        : `❌ **场景模拟游戏生成失败**\n\n错误信息：${message}`);
     }
   };
   const handleCopyFinalCode = () => {
@@ -1979,7 +2020,7 @@ ${script.conclusion}
                 </div>
                 <div className="text-[11px] text-cyan-400 flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-cyan-455 text-cyan-400" />
-                  {t("step2")}
+                  version 1.0.23
                 </div>
               </div>
             </div>
@@ -1989,14 +2030,11 @@ ${script.conclusion}
               <button
                 onClick={() => setShowModelManagement(true)}
                 className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer flex items-center gap-1"
-                title="系统设置"
+                title={t("systemSettingsTitle")}
               >
                 <Settings className="w-3 h-3" />
                 {t("systemSettings")}
               </button>
-              <div className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400">
-                version 1.0.23
-              </div>
             </div>
           </div>
 
@@ -2034,7 +2072,7 @@ ${script.conclusion}
                           onClick={() => setActiveStep(2)}
                           className="w-full bg-cyan-500 hover:bg-cyan-600 text-white py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition shadow-[0_0_15px_rgba(6,182,212,0.3)] border border-cyan-400/25 cursor-pointer"
                         >
-                          {language === "en" ? "View/Edit Outline" : "立即查看/编辑大纲清单"} <ArrowRight className="w-3 h-3" />
+                          {t("viewEditOutline")} <ArrowRight className="w-3 h-3" />
                         </button>
                       </div>
                     )}
@@ -2071,7 +2109,7 @@ ${script.conclusion}
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              placeholder={language === "en" ? "Ask AI agent about gameplay improvements, rule prompts..." : "向 AI 代理咨询改进玩法、生成规则提示..."}
+              placeholder={t("chatPlaceholder")}
               className="flex-1 bg-white/5 hover:bg-white/10 focus:bg-[#050508] border border-white/10 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none rounded-xl px-4 py-2.5 text-sm font-sans text-white placeholder:text-slate-600 transition"
             />
             <button 
@@ -2092,7 +2130,7 @@ ${script.conclusion}
           className={`w-1 cursor-col-resize hover:w-2 shrink-0 h-full transition-all relative z-25 flex items-center justify-center group ${
             isDragging ? 'bg-cyan-500 w-2 shadow-[0_0_15px_rgba(6,182,212,0.8)]' : 'bg-white/5 hover:bg-cyan-500/40 border-r border-white/5'
           }`}
-          title={language === "en" ? "Drag to adjust panel ratio" : "左右拖拽调整物理区域占比 (拖曳此分割线)"}
+          title={t("dragResize")}
         >
           {/* Draggable grip tactile dots */}
           <div className="absolute top-1/2 -track-y-1/2 flex flex-col gap-1.5 pointer-events-none opacity-40 group-hover:opacity-100">
@@ -2233,7 +2271,7 @@ ${script.conclusion}
                       className="px-4 py-2.5 text-xs font-bold bg-cyan-500 hover:bg-cyan-400 active:scale-95 text-white shadow-[0_0_12px_rgba(6,182,212,0.4)] hover:shadow-[0_0_16px_rgba(6,182,212,0.6)] rounded-xl transition flex items-center justify-center gap-1.5 shrink-0 self-stretch md:self-center cursor-pointer"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
-                      使用样例数据
+                      {language === "en" ? "Use Demo Data" : "使用样例数据"}
                     </button>
                   </div>
 
@@ -2249,16 +2287,16 @@ ${script.conclusion}
                           {selectedProjects.size > 0 && (
                             <div className="flex items-center gap-2">
                               <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-                                已选 {selectedProjects.size} 项
+                                {language === "en" ? `Selected ${selectedProjects.size}` : `已选 ${selectedProjects.size} 项`}
                               </span>
                               <button
                                 type="button"
                                 onClick={handleBatchDelete}
                                 className="text-[10px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 px-2 py-0.5 rounded-full border border-red-500/20 transition cursor-pointer flex items-center gap-1"
-                                title="批量删除"
+                                title={t("batchDelete")}
                               >
                                 <Trash2 className="w-3 h-3" />
-                                删除
+                                {t("batchDelete")}
                               </button>
                             </div>
                           )}
@@ -2267,15 +2305,15 @@ ${script.conclusion}
                             onClick={selectAllProjects}
                             className="text-[10px] font-bold text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded-full border border-white/10 transition cursor-pointer"
                           >
-                            {selectedProjects.size === projectList.length ? '取消全选' : '全选'}
+                            {selectedProjects.size === projectList.length ? (language === "en" ? "Deselect All" : "取消全选") : (language === "en" ? "Select All" : "全选")}
                           </button>
                           <span className="text-[10px] font-bold text-slate-500 bg-white/5 px-2 py-0.5 rounded-full border border-white/10">
-                            {projectList.length} 个项目
+                            {projectList.length} {t("projectCount")}
                           </span>
                         </div>
                       </div>
                       {projectList.length === 0 ? (
-                        <p className="text-xs text-slate-400 text-center py-8">暂无保存的项目</p>
+                        <p className="text-xs text-slate-400 text-center py-8">{t("noProjectsSaved")}</p>
                       ) : (
                         <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
                           {projectList.map(project => (
@@ -2320,8 +2358,8 @@ ${script.conclusion}
                                         </span>
                                       </div>
                                       <p className="text-[11px] text-slate-400 mt-0.5">
-                                        {project.bookTitle || "未指定教材"}
-                                        {project.modules ? ` • ${JSON.parse(project.modules).length} 个切片` : ""}
+                                        {project.bookTitle || (language === "en" ? "No textbook specified" : "未指定教材")}
+                                        {project.modules ? ` • ${JSON.parse(project.modules).length} ${language === "en" ? "slices" : "个切片"}` : ""}
                                       </p>
                                     </div>
                                   </div>
@@ -2337,7 +2375,7 @@ ${script.conclusion}
                                   handleDeleteProject(project.id);
                                 }}
                                 className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition opacity-0 group-hover:opacity-100"
-                                title="删除项目"
+                                title={t("deleteProject")}
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -2353,7 +2391,7 @@ ${script.conclusion}
                 <div className="flex items-center justify-between gap-3">
                   <h4 className="text-sm font-semibold text-white flex items-center gap-2">
                     <Upload className="w-4 h-4 text-cyan-400" />
-                    上传本地 PDF 开辟自定义教材（100% 真实解析）
+                    {language === "en" ? "Upload Local PDF for Custom Textbook" : "上传本地 PDF 开辟自定义教材"}
                   </h4>
                   <button
                     type="button"
@@ -2380,24 +2418,24 @@ ${script.conclusion}
                   {pdfFileName ? (
                     <div className="space-y-1.5">
                       <span className="text-sm font-medium text-emerald-400 flex items-center gap-1.5 justify-center">
-                        <Check className="w-4 h-4" /> 已绑定文档：{pdfFileName}
+                        <Check className="w-4 h-4" /> {t("boundDocument")}：{pdfFileName}
                       </span>
-                      <p className="text-xs text-slate-500">点击或再次拖拽文件可以自由重新更换</p>
+                      <p className="text-xs text-slate-500">{t("clickOrDragReplace")}</p>
                     </div>
                   ) : pdfData ? (
                     <div className="space-y-1.5">
                       <span className="text-sm font-medium text-cyan-400 flex items-center gap-1.5 justify-center">
-                        <Check className="w-4 h-4" /> 已从项目加载 PDF
+                        <Check className="w-4 h-4" /> {t("loadedFromProject")}
                       </span>
-                      <p className="text-xs text-slate-500">PDF 文件已还原，点击可替换</p>
+                      <p className="text-xs text-slate-500">{t("pdfRestoredReplace")}</p>
                     </div>
                   ) : (
                     <div>
                       <p className="text-sm font-semibold text-white">
-                        将 PDF 电子书拖拽至此，或点此浏览上传
+                        {language === "en" ? "Drag PDF here or click to upload" : "将 PDF 电子书拖拽至此，或点此浏览上传"}
                       </p>
                       <p className="text-xs text-slate-550 text-slate-500 mt-1">
-                        支持任意格式 PDF 发掘内容，客户端自动抽取最核心物理内容发送大模型
+                        {language === "en" ? "Supports any PDF format, client-side auto-extraction" : "支持任意格式 PDF 发掘内容，客户端自动抽取最核心物理内容发送大模型"}
                       </p>
                     </div>
                   )}
@@ -2417,7 +2455,7 @@ ${script.conclusion}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <h4 className="text-sm font-semibold text-white flex items-center gap-2">
                     <Edit3 className="w-4 h-4 text-cyan-400" />
-                    教材提取文本预览与校验（支持补充或自拟内容）
+                    {language === "en" ? "Textbook Content Preview & Verification" : "教材提取文本预览与校验（支持补充或自拟内容）"}
                   </h4>
 
                   {/* Mode switcher tabs */}
@@ -2433,7 +2471,7 @@ ${script.conclusion}
                         }`}
                       >
                         <Layers className="w-3.5 h-3.5" />
-                        🗂️ 智能目录格式 (Structured TOC)
+                        {language === "en" ? "🗂️ Structured TOC" : "🗂️ 智能目录格式 (Structured TOC)"}
                       </button>
                       <button
                         type="button"
@@ -2445,7 +2483,7 @@ ${script.conclusion}
                         }`}
                       >
                         <FileText className="w-3.5 h-3.5" />
-                        ✏️ 提取排版源码 (Raw Text)
+                        {language === "en" ? "✏️ Raw Text" : "✏️ 提取排版源码 (Raw Text)"}
                       </button>
                     </div>
                   )}
@@ -2453,12 +2491,12 @@ ${script.conclusion}
 
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-4 shadow-md">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-400 mb-1">书籍/课件自定义标题 (Book Title)</label>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1">{t("bookTitleLabel")}</label>
                     <input 
                       type="text"
                       value={bookTitle}
                       onChange={(e) => setBookTitle(e.target.value)}
-                      placeholder="例如：《高等有机化学概要第一篇》"
+                      placeholder={t("bookTitlePlaceholder")}
                       className="w-full bg-[#0a0a0f] focus:bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg px-3.5 py-1.5 text-sm text-slate-100 transition"
                     />
                   </div>
@@ -2468,7 +2506,7 @@ ${script.conclusion}
                       <div className="flex items-center justify-between border-b border-white/10 pb-2">
                         <span className="text-xs text-slate-450 text-slate-400 font-bold flex items-center gap-1.5">
                           <Compass className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-                          已识别层级架构 (共 {directoryItems.length} 个章节节点 / 拖拽或手动微调)
+                          {language === "en" ? `Identified Hierarchy (${directoryItems.length} nodes / drag or fine-tune)` : `已识别层级架构 (共 ${directoryItems.length} 个章节节点 / 拖拽或手动微调)`}
                         </span>
                         
                         <div className="flex items-center gap-2">
@@ -2478,7 +2516,7 @@ ${script.conclusion}
                             className="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-500/20 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer"
                           >
                             <Plus className="w-3 h-3" />
-                            添加大章 (Chapter)
+                            {language === "en" ? "Add Chapter" : "添加大章 (Chapter)"}
                           </button>
                           <button
                             type="button"
@@ -2486,7 +2524,7 @@ ${script.conclusion}
                             className="text-[10px] font-bold text-teal-400 bg-teal-500/10 hover:bg-teal-500/25 border border-teal-500/20 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer"
                           >
                             <Plus className="w-3 h-3" />
-                            添加小节 (Section)
+                            {language === "en" ? "Add Section" : "添加小节 (Section)"}
                           </button>
                         </div>
                       </div>
@@ -2494,8 +2532,8 @@ ${script.conclusion}
                       {directoryItems.length === 0 ? (
                         <div className="py-12 text-center text-slate-500 border border-dashed border-white/10 rounded-2xl bg-[#0a0a0f]/40">
                           <BookOpen className="w-8 h-8 mx-auto text-slate-600 mb-2 stroke-1" />
-                          <p className="text-xs font-medium">暂无核心目录框架</p>
-                          <p className="text-[11px] text-slate-500 mt-1">请载入上方经典模版或者拖拽挂载 PDF 文档，我将为您全盘智能解析！</p>
+                          <p className="text-xs font-medium">{t("noDirectoryFrame")}</p>
+                          <p className="text-[11px] text-slate-500 mt-1">{t("noDirectoryHint")}</p>
                         </div>
                       ) : (
                         <div className="space-y-2.5 select-text">
@@ -2534,7 +2572,7 @@ ${script.conclusion}
                                     type="text"
                                     value={item.title}
                                     onChange={(e) => updateDirectoryItemTitle(item.id, e.target.value)}
-                                    placeholder={isCh ? "例如：第一章 万有引力与多体物理机制" : isSec ? "例如：1.1 核心公式及恒星聚变反应条件" : "例如：1.1.1 反应条件详解"}
+                                    placeholder={isCh ? t("chapterTitlePlaceholder") : isSec ? t("sectionTitlePlaceholder") : t("subSectionTitlePlaceholder")}
                                     className={`w-full bg-transparent outline-none text-xs text-slate-200 border-b border-transparent focus:border-cyan-500/40 py-0.5 transition ${
                                       isCh ? 'font-bold text-slate-105 text-sm' : isSec ? 'text-slate-300' : 'text-slate-400'
                                     }`}
@@ -2549,7 +2587,7 @@ ${script.conclusion}
                                       type="text"
                                       value={item.page || ""}
                                       onChange={(e) => updateDirectoryItemPage(item.id, e.target.value)}
-                                      placeholder="P"
+                                      placeholder={t("pagePlaceholder")}
                                       className="w-12 bg-transparent text-center font-mono text-[11px] font-bold text-cyan-400 outline-none border-none"
                                     />
                                   </div>
@@ -2558,7 +2596,7 @@ ${script.conclusion}
                                     type="button"
                                     onClick={() => deleteDirectoryItem(item.id)}
                                     className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition"
-                                    title="移除该层级"
+                                    title={t("removeLevel")}
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -2572,8 +2610,8 @@ ${script.conclusion}
                   ) : (
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="block text-[11px] font-bold text-slate-400">核心文本片段预览（AI 大纲生成的主要引流资料）</label>
-                        <span className="text-[10px] text-slate-500">直接修改可实时和智能目录互相绑定</span>
+                        <label className="block text-[11px] font-bold text-slate-400">{t("textPreviewLabel")}</label>
+                        <span className="text-[10px] text-slate-500">{t("textPreviewHint")}</span>
                       </div>
                       <textarea 
                         value={bookContentText}
@@ -2581,7 +2619,7 @@ ${script.conclusion}
                           setBookContentText(e.target.value);
                           setDirectoryItems(parseTextToDirectory(e.target.value));
                         }}
-                        placeholder="您可以直接手动在这里粘贴任意教材的目录或文本段落进行一键解析......"
+                        placeholder={t("textPreviewPlaceholder")}
                         className="w-full h-48 bg-[#0a0a0f] focus:bg-[#050508] border border-white/10 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 rounded-lg p-3 text-xs font-mono text-slate-300 transition resize-y"
                       />
                     </div>
@@ -2595,7 +2633,7 @@ ${script.conclusion}
           {/* Core CTA Sticky Footer */}
           <div className="shrink-0 p-4 bg-[#0a0a0f] border-t border-white/10 flex items-center justify-between gap-4 shadow-[0_-5px_15px_rgba(0,0,0,0.5)] z-20">
             <div className="text-xs text-slate-400">
-              {bookContentText ? `当前载入教材文本: ${bookContentText.length} 字符` : "教材尚未载入"}
+              {bookContentText ? `${language === "en" ? `Loaded text` : `当前载入教材文本`}: ${bookContentText.length} ${language === "en" ? "chars" : "字符"}` : (language === "en" ? "Textbook not yet loaded" : "教材尚未载入")}
             </div>
 
             <div className="flex items-center gap-3">
@@ -2642,12 +2680,12 @@ ${script.conclusion}
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div>
                   <h3 className="text-lg font-bold font-display text-white flex items-center gap-2">
-                    🗺️ 课程切片策划大纲
+                    {language === "en" ? "🗺️ Course Slice Blueprint" : "🗺️ 课程切片策划大纲"}
                   </h3>
                   {aiMeta && (
                     <div className="flex items-center gap-3 mt-1">
                       <span className="text-xs text-slate-400">
-                        最后调用：{aiMeta.callTime || "未知"}
+                        {language === "en" ? "Last call" : "最后调用"}：{aiMeta.callTime || (language === "en" ? "Unknown" : "未知")}
                       </span>
                       <span className="flex items-center gap-1 text-xs">
                         <span className={`inline-block w-2 h-2 rounded-full ${
@@ -2679,7 +2717,7 @@ ${script.conclusion}
                           : 'text-slate-400 hover:text-white'
                       }`}
                     >
-                      <span>📊 表格视图</span>
+                      <span>📊 {language === "en" ? "Table View" : "表格视图"}</span>
                     </button>
                     <button
                       type="button"
@@ -2690,7 +2728,7 @@ ${script.conclusion}
                           : 'text-slate-400 hover:text-white'
                       }`}
                     >
-                      <span>🎴 精美卡片</span>
+                      <span>🎴 {language === "en" ? "Card View" : "精美卡片"}</span>
                     </button>
                     <button
                       type="button"
@@ -2701,7 +2739,7 @@ ${script.conclusion}
                           : 'text-slate-400 hover:text-white'
                       }`}
                     >
-                      <span>🔧 原始数据</span>
+                      <span>🔧 {language === "en" ? "Raw Data" : "原始数据"}</span>
                     </button>
                   </div>
 
@@ -2711,7 +2749,7 @@ ${script.conclusion}
                     className="bg-cyan-500 hover:bg-cyan-600 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 transition shadow-[0_0_15px_rgba(6,182,212,0.3)] border border-cyan-400/20 cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
-                    手动增设新关卡
+                    {language === "en" ? "Manually Add New Level" : "手动增设新关卡"}
                   </button>
 
                   <button
@@ -2725,7 +2763,7 @@ ${script.conclusion}
                     }`}
                   >
                     <Sparkles className={`w-4 h-4 ${isParsing ? 'animate-spin' : ''}`} />
-                    {isParsing ? 'AI 解析中...' : '✨ AI 重新切片'}
+                    {isParsing ? (language === "en" ? 'AI Parsing...' : 'AI 解析中...') : (language === "en" ? '✨ AI Re-slice' : '✨ AI 重新切片')}
                   </button>
                 </div>
               </div>
@@ -2736,15 +2774,15 @@ ${script.conclusion}
                   <table className="w-full text-left border-collapse min-w-[1300px]">
                     <thead>
                       <tr className="border-b border-white/10 bg-white/5 text-[11px] font-bold text-slate-300 font-display">
-                        <th className="p-3 w-[70px] text-center">学时编号</th>
-                        <th className="p-3 w-[120px]">覆盖教材章节</th>
-                        <th className="p-3 w-[160px]">知识切片主题</th>
-                        <th className="p-3 w-[180px]">涵盖核心考点 / 概念</th>
-                        <th className="p-3 w-[95px] text-center">预计自学时间</th>
-                        <th className="p-3 w-[280px]">⚡ 信息负荷合理性评估</th>
-                        <th className="p-3 w-[280px]">🎯 主干考点内聚性与关联机制</th>
-                        <th className="p-3 w-[240px]">📋 整体设计概要</th>
-                        <th className="p-3 w-[55px] text-center">移除</th>
+                        <th className="p-3 w-[70px] text-center">{language === "en" ? "Lesson ID" : "学时编号"}</th>
+                        <th className="p-3 w-[120px]">{language === "en" ? "Covered Chapters" : "覆盖教材章节"}</th>
+                        <th className="p-3 w-[160px]">{language === "en" ? "Knowledge Slice Topic" : "知识切片主题"}</th>
+                        <th className="p-3 w-[180px]">{language === "en" ? "Core Concepts / Points" : "涵盖核心考点 / 概念"}</th>
+                        <th className="p-3 w-[95px] text-center">{language === "en" ? "Est. Study Time" : "预计自学时间"}</th>
+                        <th className="p-3 w-[280px]">{language === "en" ? "⚡ Info Load Assessment" : "⚡ 信息负荷合理性评估"}</th>
+                        <th className="p-3 w-[280px]">{language === "en" ? "🎯 Core Cohesion & Relations" : "🎯 主干考点内聚性与关联机制"}</th>
+                        <th className="p-3 w-[240px]">{language === "en" ? "📋 Design Overview" : "📋 整体设计概要"}</th>
+                        <th className="p-3 w-[55px] text-center">{language === "en" ? "Remove" : "移除"}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5 text-[12px]">
@@ -2767,7 +2805,7 @@ ${script.conclusion}
                               type="text"
                               value={mod.coveredChapters || ""}
                               onChange={(e) => handleUpdateModule(mod.id, { coveredChapters: e.target.value })}
-                              placeholder="如 Topic 1.1-1.3"
+                              placeholder={language === "en" ? "e.g. Topic 1.1-1.3" : "如 Topic 1.1-1.3"}
                               className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none font-semibold text-slate-200 focus:bg-black/40 rounded p-1"
                             />
                             <span className="text-[10px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/15 py-0.5 px-1.5 rounded block mt-1.5 shrink-0 font-mono text-center">
@@ -2791,7 +2829,7 @@ ${script.conclusion}
                               value={getSummaryText(mod.summary)}
                               onChange={(e) => handleUpdateModule(mod.id, { summary: e.target.value })}
                               rows={3}
-                              placeholder="完整列出该切片包含的所有知识点和核心概念"
+                              placeholder={language === "en" ? "List all knowledge points and core concepts in this slice" : "完整列出该切片包含的所有知识点和核心概念"}
                               className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-300 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
                             />
                           </td>
@@ -2800,7 +2838,7 @@ ${script.conclusion}
                           <td className="p-2 py-3 text-center">
                             <input 
                               type="text"
-                              value={mod.duration || "10分钟"}
+                              value={mod.duration || (language === "en" ? "10-15 min" : "10分钟")}
                               onChange={(e) => handleUpdateModule(mod.id, { duration: e.target.value })}
                               className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-center text-slate-300 focus:bg-black/40 rounded p-1"
                             />
@@ -2812,7 +2850,7 @@ ${script.conclusion}
                               value={getInfoDensityText(mod.infoDensity)}
                               onChange={(e) => handleUpdateModule(mod.id, { infoDensity: e.target.value })}
                               rows={3}
-                              placeholder="明确说明为什么这个切片的信息负荷是合理的，分析认知负载、概念深度和时间分配"
+                              placeholder={language === "en" ? "Explain why this slice's info load is reasonable, analyze cognitive load, concept depth and time allocation" : "明确说明为什么这个切片的信息负荷是合理的，分析认知负载、概念深度和时间分配"}
                               className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-200 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
                             />
                           </td>
@@ -2823,7 +2861,7 @@ ${script.conclusion}
                               value={getCohesionText(mod.cohesionDetail)}
                               onChange={(e) => handleUpdateModule(mod.id, { cohesionDetail: e.target.value })}
                               rows={3}
-                              placeholder="说明教学核心是什么，各知识点之间的关联性和为什么可以聚合为一个章节"
+                              placeholder={language === "en" ? "Explain the teaching core, relationships between knowledge points, and why they can be aggregated into one chapter" : "说明教学核心是什么，各知识点之间的关联性和为什么可以聚合为一个章节"}
                               className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-300 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
                             />
                           </td>
@@ -2833,26 +2871,26 @@ ${script.conclusion}
                             {typeof mod.designRationale === 'object' && mod.designRationale !== null ? (
                               <div className="space-y-2">
                                 <div>
-                                  <p className="text-[10px] font-semibold text-cyan-400 mb-1">学了什么：</p>
+                                  <p className="text-[10px] font-semibold text-cyan-400 mb-1">{language === "en" ? "Learned:" : "学了什么："}</p>
                                   <textarea
                                     value={(mod.designRationale as any).learnedPoints || ""}
                                     onChange={(e) => handleUpdateModule(mod.id, {
                                       designRationale: { learnedPoints: e.target.value, practicalProblems: (mod.designRationale as any).practicalProblems || "" }
                                     })}
                                     rows={2}
-                                    placeholder="列出 3-5 条可陈述的知识点"
+                                    placeholder={language === "en" ? "List 3-5 declarable knowledge points" : "列出 3-5 条可陈述的知识点"}
                                     className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-400 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
                                   />
                                 </div>
                                 <div>
-                                  <p className="text-[10px] font-semibold text-amber-400 mb-1">解决的实际问题：</p>
+                                  <p className="text-[10px] font-semibold text-amber-400 mb-1">{language === "en" ? "Practical Problems Solved:" : "解决的实际问题："}</p>
                                   <textarea
                                     value={(mod.designRationale as any).practicalProblems || ""}
                                     onChange={(e) => handleUpdateModule(mod.id, {
                                       designRationale: { learnedPoints: (mod.designRationale as any).learnedPoints || "", practicalProblems: e.target.value }
                                     })}
                                     rows={2}
-                                    placeholder="列出 2-3 个场景，描述能用这些知识解决什么问题"
+                                    placeholder={language === "en" ? "List 2-3 scenarios describing what problems this knowledge can solve" : "列出 2-3 个场景，描述能用这些知识解决什么问题"}
                                     className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-400 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
                                   />
                                 </div>
@@ -2862,7 +2900,7 @@ ${script.conclusion}
                                 value={(mod.designRationale as string) || ""}
                                 onChange={(e) => handleUpdateModule(mod.id, { designRationale: e.target.value })}
                                 rows={3}
-                                placeholder="整体设计概要：学生如何通过此切片学习、学到什么内容、能解决什么实际问题"
+                                placeholder={language === "en" ? "Overall design summary: how students learn through this slice, what they learn, and what practical problems they can solve" : "整体设计概要：学生如何通过此切片学习、学到什么内容、能解决什么实际问题"}
                                 className="w-full bg-transparent border-0 border-b border-transparent focus:border-cyan-500 outline-none text-slate-400 focus:bg-black/40 rounded p-1 resize-y leading-relaxed text-[11px]"
                               />
                             )}
@@ -2874,7 +2912,7 @@ ${script.conclusion}
                               type="button"
                               onClick={() => handleDeleteModule(mod.id)}
                               className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition mt-1 cursor-pointer"
-                              title="移除此模块"
+                              title={language === "en" ? "Remove this module" : "移除此模块"}
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -2903,7 +2941,7 @@ ${script.conclusion}
                               {mod.chapterIndex}
                             </span>
                             <span className="text-xs text-slate-400 font-medium">
-                              覆盖章节: {mod.coveredChapters || "暂未填写"}
+                              {language === "en" ? "Covered Chapter" : "覆盖章节"}: {mod.coveredChapters || (language === "en" ? "Not filled" : "暂未填写")}
                             </span>
                             <span className="text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 px-2 py-0.5 rounded flex items-center gap-1">
                               📖 {getExtractedTextForModule(mod, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).mappedPages}
@@ -2917,7 +2955,7 @@ ${script.conclusion}
                               className="p-1 px-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                              移除该章
+                              {language === "en" ? "Remove" : "移除该章"}
                             </button>
                           </div>
                         </div>
@@ -2929,7 +2967,7 @@ ${script.conclusion}
                           <div className="col-span-1 md:col-span-4 space-y-3">
                             <div>
                               <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                知识切片主题
+                                {language === "en" ? "Knowledge Slice Topic" : "知识切片主题"}
                               </label>
                               <input 
                                 type="text"
@@ -2942,7 +2980,7 @@ ${script.conclusion}
                             <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                  覆盖教材章节
+                                  {language === "en" ? "Covered Chapters" : "覆盖教材章节"}
                                 </label>
                                 <input 
                                   type="text"
@@ -2954,11 +2992,11 @@ ${script.conclusion}
                               </div>
                               <div>
                                 <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                  预计自学时间
+                                  {language === "en" ? "Est. Study Time" : "预计自学时间"}
                                 </label>
                                 <input 
                                   type="text"
-                                  value={mod.duration || "10分钟"}
+                                  value={mod.duration || (language === "en" ? "10-15 min" : "10分钟")}
                                   onChange={(e) => handleUpdateModule(mod.id, { duration: e.target.value })}
                                   className="w-full bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-2 text-xs font-semibold text-slate-200 transition"
                                 />
@@ -2967,7 +3005,7 @@ ${script.conclusion}
 
                             <div>
                               <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                涵盖核心考点 / 概念
+                                {language === "en" ? "Core Concepts / Points" : "涵盖核心考点 / 概念"}
                               </label>
                               <textarea 
                                 value={getSummaryText(mod.summary)}
@@ -2982,37 +3020,37 @@ ${script.conclusion}
                             <div className="col-span-1">
                               <div>
                                 <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                  ⚡ 信息负荷合理性评估 (密度控制)
+                                  {language === "en" ? "⚡ Info Load Assessment (Density Control)" : "⚡ 信息负荷合理性评估 (密度控制)"}
                                 </label>
                                 <textarea 
                                   value={getInfoDensityText(mod.infoDensity)}
                                   onChange={(e) => handleUpdateModule(mod.id, { infoDensity: e.target.value })}
                                   className="w-full h-32 bg-[#050508] hover:bg-white/5 focus:bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-2 text-xs text-slate-250 text-slate-200 transition resize-none leading-relaxed"
-                                  placeholder="衡量信息吞吐量，评估单学时，防范负荷过载阻碍。"
+                                  placeholder={language === "en" ? "Measure information throughput, evaluate per-session load, prevent cognitive overload." : "衡量信息吞吐量，评估单学时，防范负荷过载阻碍。"}
                                 />
                               </div>
                             </div>
 
                             <div className="col-span-1">
                               <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                🎯 主干考点内聚性与关联机制
+                                {language === "en" ? "🎯 Core Cohesion & Association Mechanism" : "🎯 主干考点内聚性与关联机制"}
                               </label>
                               <textarea 
                                 value={getCohesionText(mod.cohesionDetail)}
                                 onChange={(e) => handleUpdateModule(mod.id, { cohesionDetail: e.target.value })}
                                 className="w-full h-32 bg-[#050508] hover:bg-white/5 focus:bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-lg p-2 text-xs text-slate-300 transition resize-none leading-relaxed"
-                                placeholder="说明此组核心考点的内在强耦合原理或逻辑链条。"
+                                placeholder={language === "en" ? "Explain the intrinsic strong coupling principle or logical chain of this group of core concepts." : "说明此组核心考点的内在强耦合原理或逻辑链条。"}
                               />
                             </div>
 
                             <div className="col-span-1 md:col-span-2">
                               <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                🎓 深度研习目标与学术应用级价值
+                                {language === "en" ? "🎓 Deep Learning Goals & Academic Value" : "🎓 深度研习目标与学术应用级价值"}
                               </label>
                               {typeof mod.designRationale === 'object' && mod.designRationale !== null ? (
                                 <div className="space-y-2">
                                   <div>
-                                    <p className="text-[10px] font-semibold text-cyan-400 mb-1">学了什么：</p>
+                                    <p className="text-[10px] font-semibold text-cyan-400 mb-1">{language === "en" ? "Learned:" : "学了什么："}</p>
                                     <textarea
                                       value={(mod.designRationale as any).learnedPoints || ""}
                                       onChange={(e) => handleUpdateModule(mod.id, {
@@ -3022,7 +3060,7 @@ ${script.conclusion}
                                     />
                                   </div>
                                   <div>
-                                    <p className="text-[10px] font-semibold text-amber-400 mb-1">解决的实际问题：</p>
+                                    <p className="text-[10px] font-semibold text-amber-400 mb-1">{language === "en" ? "Practical Problems Solved:" : "解决的实际问题："}</p>
                                     <textarea
                                       value={(mod.designRationale as any).practicalProblems || ""}
                                       onChange={(e) => handleUpdateModule(mod.id, {
@@ -3055,38 +3093,40 @@ ${script.conclusion}
                 <div className="space-y-3">
                   {aiMeta ? (
                     <>
-                      <CollapsibleSection title="🤖 调用的AI模型信息" defaultOpen={true}>
+                      <CollapsibleSection title={language === "en" ? "🤖 AI Model Info" : "🤖 调用的AI模型信息"} defaultOpen={true}>
                         <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-all leading-relaxed">
-{`模型名称：${aiMeta.model}
+{language === "en" ? `Model: ${aiMeta.model}
+Provider: ${aiMeta.provider}
+API: https://api.deepseek.com/chat/completions` : `模型名称：${aiMeta.model}
 服务商：${aiMeta.provider}
 API地址：https://api.deepseek.com/chat/completions`}
                         </pre>
                       </CollapsibleSection>
 
-                      <CollapsibleSection title="📋 系统指令（System Instruction）" defaultOpen={false}>
+                      <CollapsibleSection title={language === "en" ? "📋 System Instruction" : "📋 系统指令（System Instruction）"} defaultOpen={false}>
                         <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-all leading-relaxed">
 {aiMeta.systemInstruction}
                         </pre>
                       </CollapsibleSection>
 
-                      <CollapsibleSection title="📝 用户指令（User Prompt）" defaultOpen={true}>
+                      <CollapsibleSection title={language === "en" ? "📝 User Prompt" : "📝 用户指令（User Prompt）"} defaultOpen={true}>
                         <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-all leading-relaxed">
                           {aiMeta.userPrompt}
                         </pre>
                       </CollapsibleSection>
 
-                      <CollapsibleSection title="📤 AI返回的原始数据" defaultOpen={true}>
+                      <CollapsibleSection title={language === "en" ? "📤 Raw AI Response" : "📤 AI返回的原始数据"} defaultOpen={true}>
                         <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-all leading-relaxed max-h-[50vh] overflow-y-auto">
-                          {rawBlueprintData || "数据为空"}
+                          {rawBlueprintData || (language === "en" ? "Empty" : "数据为空")}
                         </pre>
                       </CollapsibleSection>
                     </>
                   ) : (
                     <div className="border border-white/10 rounded-2xl bg-[#09090e] p-6 text-center text-slate-400">
-                      <p>暂无AI调用数据，请先执行 AI 切片</p>
+                      <p>{language === "en" ? "No AI call data yet. Please run AI slicing first." : "暂无AI调用数据，请先执行 AI 切片"}</p>
                       {modules.length > 0 && (
                         <div className="mt-4">
-                          <CollapsibleSection title="📤 当前加载的切片数据" defaultOpen={true}>
+                          <CollapsibleSection title={language === "en" ? "📤 Currently Loaded Slice Data" : "📤 当前加载的切片数据"} defaultOpen={true}>
                             <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap break-all leading-relaxed max-h-[50vh] overflow-y-auto">
                               {JSON.stringify({ bookTitle, totalSlices: modules.length, slices: modules }, null, 2)}
                             </pre>
@@ -3108,13 +3148,13 @@ API地址：https://api.deepseek.com/chat/completions`}
                   onClick={() => setActiveStep(1)}
                   className="px-5 py-2 border border-white/10 text-slate-300 bg-white/5 hover:bg-white/10 font-semibold rounded-xl text-sm transition flex items-center gap-1.5 cursor-pointer"
                 >
-                  返回导入课本
+                  {language === "en" ? "Back to Import" : "返回导入课本"}
                 </button>
                 <button 
                   onClick={handleGenerateAllScripts}
                   className="px-6 py-2.5 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-xl text-sm flex items-center gap-1.5 transition shadow-[0_0_20px_rgba(6,182,212,0.4)] border border-cyan-400/25 cursor-pointer"
                 >
-                  一键确认，精确审查教材对齐原文并仿真 <ArrowRight className="w-4 h-4" />
+                  {language === "en" ? "Confirm All & Review Textbook Alignment" : "一键确认，精确审查教材对齐原文并仿真"} <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -3132,7 +3172,7 @@ API地址：https://api.deepseek.com/chat/completions`}
               {/* Left sidebar: Modules list */}
               <div className="w-full md:w-64 border border-white/10 rounded-2xl bg-[#0a0a0f] p-3 space-y-2 shrink-0 flex flex-col overflow-y-auto">
                 <div className="text-[11px] font-bold text-slate-500 px-2 tracking-wider uppercase mb-1 shrink-0">
-                  教材学习关卡 (Chapter List)
+                  {language === "en" ? "Chapter List" : "教材学习关卡 (Chapter List)"}
                 </div>
 
                 {modules.map((mod) => {
@@ -3161,11 +3201,11 @@ API地址：https://api.deepseek.com/chat/completions`}
                         <div className="flex items-center gap-1">
                           {isExtracting ? (
                             <span className="text-[9px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-cyan-500/20">
-                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> 提取中...
+                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> {language === "en" ? "Extracting..." : "提取中..."}
                             </span>
                           ) : isExtracted ? (
                             <span className="text-[9px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 border border-blue-500/20">
-                              <BookOpen className="w-2.5 h-2.5" /> 已提取
+                              <BookOpen className="w-2.5 h-2.5" /> {language === "en" ? "Extracted" : "已提取"}
                             </span>
                           ) : null}
                         </div>
@@ -3187,13 +3227,13 @@ API地址：https://api.deepseek.com/chat/completions`}
                 <div className="bg-[#0a0a0f] px-5 py-3 border-b border-white/10 shrink-0 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <span className="text-xs bg-cyan-500 text-white font-extrabold px-2 py-0.5 rounded shadow-[0_0_10px_rgba(6,182,212,0.4)]">ORIGINAL TEXT</span>
-                    <h4 className="font-semibold text-sm text-white font-display">{activeModule ? `《${activeModule.chapterIndex} · ${activeModule.title}》` : "等待载入章节"}</h4>
+                    <h4 className="font-semibold text-sm text-white font-display">{activeModule ? `《${activeModule.chapterIndex} · ${activeModule.title}》` : (language === "en" ? "Waiting for chapter" : "等待载入章节")}</h4>
                     {/* Preview button */}
                     {activeModuleId && extractedModules[activeModuleId] && (
                       <button
                         onClick={() => setShowPreviewModal(true)}
                         className="text-cyan-400 hover:text-cyan-300 transition cursor-pointer"
-                        title="查看渲染样式示例"
+                          title={language === "en" ? "Preview rendered example" : "查看渲染样式示例"}
                       >
                         <Eye className="w-4 h-4" />
                       </button>
@@ -3204,9 +3244,9 @@ API地址：https://api.deepseek.com/chat/completions`}
                       <div className="flex items-center gap-2 bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/15 p-1 px-2 rounded-lg transition">
                         <span className="text-[9px] text-cyan-300 font-semibold select-none">Offset</span>
                         <div className="flex items-center gap-1">
-                          <button type="button" onClick={() => setPdfPageOffset(prev => prev - 1)} className="w-4 h-4 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-white/5 font-bold cursor-pointer" title="向前偏移一页">-</button>
+                          <button type="button" onClick={() => setPdfPageOffset(prev => prev - 1)} className="w-4 h-4 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-white/5 font-bold cursor-pointer" title={language === "en" ? "Offset back one page" : "向前偏移一页"}>-</button>
                           <input type="number" value={pdfPageOffset} onChange={(e) => setPdfPageOffset(parseInt(e.target.value, 10) || 0)} className="w-7 bg-black/80 border border-white/10 text-center font-mono text-[9px] font-bold text-cyan-200 py-0 rounded outline-none focus:border-cyan-400" />
-                          <button type="button" onClick={() => setPdfPageOffset(prev => prev + 1)} className="w-4 h-4 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-white/5 font-bold cursor-pointer" title="向后偏移一页">+</button>
+                          <button type="button" onClick={() => setPdfPageOffset(prev => prev + 1)} className="w-4 h-4 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-white/5 font-bold cursor-pointer" title={language === "en" ? "Offset forward one page" : "向后偏移一页"}>+</button>
                         </div>
                         <button 
                           type="button" 
@@ -3215,14 +3255,14 @@ API地址：https://api.deepseek.com/chat/completions`}
                             setPdfPageOffset(autoOffset);
                           }} 
                           className="w-4 h-4 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-cyan-500/30 cursor-pointer" 
-                          title="重新计算偏移量"
+                          title={language === "en" ? "Recalculate offset" : "重新计算偏移量"}
                         >
                           <RefreshCw className="w-2.5 h-2.5" />
                         </button>
                       </div>
                     )}
                     <div className="flex items-center gap-1.5 bg-cyan-500/10 border border-cyan-500/30 px-2 py-0.5 rounded-full">
-                      <span className="text-[9px] text-cyan-300 font-semibold select-none">页码</span>
+                      <span className="text-[9px] text-cyan-300 font-semibold select-none">{language === "en" ? "Page" : "页码"}</span>
                       <input 
                         type="text" 
                         value={activeModule?.pageRange || getExtractedTextForModule(activeModule, directoryItems, bookContentText, pdfPagesText, pdfPageOffset).mappedPages}
@@ -3268,7 +3308,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({ moduleId: modId, content: result.extractedOriginalText })
-                              }).catch(err => console.error("保存提取内容失败:", err));
+                              }).catch(err => console.error(language === "en" ? "Failed to save extracted content:" : "保存提取内容失败:", err));
                             }
                           } catch (err) {
                             setExtractedContent(`⚠️ 提取失败: ${(err as Error).message}`);
@@ -3276,10 +3316,10 @@ API地址：https://api.deepseek.com/chat/completions`}
                           }
                         }}
                         className="flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 px-2 py-0.5 rounded-full transition text-[9px] font-semibold cursor-pointer"
-                        title="重新提取本切片原文"
+                        title={language === "en" ? "Re-extract this slice's original text" : "重新提取本切片原文"}
                       >
                         <RefreshCw className="w-3 h-3" />
-                        重新提取
+                        {language === "en" ? "Re-extract" : "重新提取"}
                       </button>
                     )}
                   </div>
@@ -3288,7 +3328,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                   {!activeModule ? (
                     <div className="h-full flex flex-col items-center justify-center text-center p-8 text-slate-500 space-y-2">
                       <BookOpen className="w-12 h-12 text-slate-600" />
-                      <p className="text-sm">尚未选定任何章节，请点击左侧列表的章节查看教材原文。</p>
+                      <p className="text-sm">{language === "en" ? "No chapter selected. Click a chapter from the left sidebar to view the original text." : "尚未选定任何章节，请点击左侧列表的章节查看教材原文。"}</p>
                     </div>
                   ) : (
                     <div className="animate-fadeIn p-5">
@@ -3319,7 +3359,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                       <div className="p-3.5 bg-cyan-500/5 rounded-xl border border-cyan-500/10 flex items-start gap-2.5 mt-4">
                         <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
                         <div className="text-[11px] text-slate-400 leading-relaxed">
-                          <span className="font-semibold text-slate-300">智能对齐提示：</span> 系统通过在教材大纲中模糊匹配该知识切片的 <strong>"覆盖章节"</strong> 属性（此处为 <code>{activeModule.coveredChapters}</code>），从而锚定了原始教材中的对应章节主题及其前后的课本段落原文。
+                          <span className="font-semibold text-slate-300">{language === "en" ? "Smart Alignment Tip:" : "智能对齐提示："}</span> {language === "en" ? `The system anchors the corresponding chapter theme and surrounding textbook paragraphs from the original textbook by fuzzy matching the knowledge slice's "Covered Chapters" attribute (here` : `系统通过在教材大纲中模糊匹配该知识切片的 `}<code>{activeModule.coveredChapters}</code>{language === "en" ? `), thereby anchoring the corresponding chapter theme and surrounding textbook paragraphs from the original textbook.` : `），从而锚定了原始教材中的对应章节主题及其前后的课本段落原文。`}
                         </div>
                       </div>
                       )}
@@ -3339,13 +3379,13 @@ API地址：https://api.deepseek.com/chat/completions`}
                     onClick={() => setActiveStep(2)}
                     className="px-5 py-2 border border-white/10 text-slate-300 bg-white/5 hover:bg-white/10 font-semibold rounded-xl text-sm transition flex items-center gap-1.5 cursor-pointer"
                   >
-                    ⚙️ 返工修改大纲设定
+                    {language === "en" ? "⚙️ Back to Outline Editing" : "⚙️ 返工修改大纲设定"}
                   </button>
                   <button 
                     onClick={() => { setActiveStep(4); addAgentMessage("✅ **已进入第四阶段：互动脚本生成！**\n\n现在您可以为每个章节生成仿真剧本、编辑参数、查看代码。"); }}
                     className="px-6 py-2.5 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-xl text-sm flex items-center gap-1.5 transition shadow-[0_0_20px_rgba(6,182,212,0.4)] border border-cyan-400/25 cursor-pointer"
                   >
-                    ✨ 进入互动脚本生成 <ArrowRight className="w-4 h-4" />
+                    {language === "en" ? "✨ Enter Interactive Script Generation" : "✨ 进入互动脚本生成"} <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -3359,7 +3399,7 @@ API地址：https://api.deepseek.com/chat/completions`}
               {/* Sub Column left sidebar: Modules Menu list */}
               <div className="w-full md:w-64 border border-white/10 rounded-2xl bg-[#0a0a0f] p-3 space-y-2 shrink-0 flex flex-col overflow-y-auto max-h-[220px] md:max-h-none">
                 <div className="text-[11px] font-bold text-slate-500 px-2 tracking-wider uppercase mb-1 shrink-0">
-                  教材学习关卡 (Chapter List)
+                  {language === "en" ? "Chapter List" : "教材学习关卡 (Chapter List)"}
                 </div>
 
                 {modules.map((mod) => {
@@ -3388,16 +3428,16 @@ API地址：https://api.deepseek.com/chat/completions`}
                         <div className="flex items-center gap-1">
                           {isExtracting ? (
                             <span className="text-[9px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-cyan-500/20">
-                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> 提取中...
+                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> {language === "en" ? "Extracting..." : "提取中..."}
                             </span>
                           ) : null}
                           {isDone ? (
                             <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
-                              <Check className="w-2.5 h-2.5" /> 已生成
+                              <Check className="w-2.5 h-2.5" /> {language === "en" ? "Generated" : "已生成"}
                             </span>
                           ) : isGen ? (
                             <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono flex items-center gap-0.5 animate-pulse border border-amber-500/20">
-                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> 生成中...
+                              <RefreshCw className="w-2.5 h-2.5 animate-spin" /> {language === "en" ? "Generating..." : "生成中..."}
                             </span>
                           ) : (
                             <span className="text-[9px] bg-white/5 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-white/5 italic">
@@ -3412,7 +3452,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                       </h5>
 
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-[10px] text-slate-450 text-slate-400 line-clamp-1"> {mod.simulationScript ? "模拟器脚本已就绪" : (mod.coveredChapters || "等待生成")}</span>
+                        <span className="text-[10px] text-slate-450 text-slate-400 line-clamp-1"> {mod.simulationScript ? (language === "en" ? "Simulator script ready" : "模拟器脚本已就绪") : (mod.coveredChapters || (language === "en" ? "Waiting to generate" : "等待生成"))}</span>
                       </div>
                     </button>
                   );
@@ -3423,7 +3463,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                     onClick={() => setActiveStep(2)}
                     className="w-full text-center text-xs font-semibold py-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl block border border-white/10 transition cursor-pointer"
                   >
-                    ⚙️ 返工修改大纲设定
+                    {language === "en" ? "⚙️ Back to Outline Editing" : "⚙️ 返工修改大纲设定"}
                   </button>
                 </div>
               </div>
@@ -3438,7 +3478,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                       BLUEPRINT
                     </span>
                     <h4 className="font-semibold text-sm text-white font-display">
-                      {activeModule ? `《${activeModule.chapterIndex} · ${activeModule.title}》` : "等待载入章节"}
+                      {activeModule ? `《${activeModule.chapterIndex} · ${activeModule.title}》` : (language === "en" ? "Waiting for chapter..." : "等待载入章节")}
                     </h4>
                   </div>
 
@@ -3447,7 +3487,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                     <button 
                       onClick={() => setShowApiDrawer(true)}
                       className="p-2 rounded-lg transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
-                      title="API 调试"
+                      title={language === "en" ? "API Debug" : "API 调试"}
                     >
                       <Settings className="w-4 h-4" />
                     </button>
@@ -3460,12 +3500,12 @@ API地址：https://api.deepseek.com/chat/completions`}
                       {activeModule.scriptStatus === 'generating' ? (
                         <>
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          生成中...
+                          {language === "en" ? "Generating..." : "生成中..."}
                         </>
                       ) : (
                         <>
                           <Sparkles className="w-3.5 h-3.5" />
-                          生成互动脚本
+                          {language === "en" ? "Generate Interactive Script" : "生成互动脚本"}
                         </>
                       )}
                     </button>
@@ -3479,7 +3519,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                   {!activeModule ? (
                     <div className="h-full flex flex-col items-center justify-center text-center p-8 text-slate-500 space-y-2">
                       <Gamepad className="w-12 h-12 text-slate-650 text-slate-600" />
-                      <p className="text-sm">尚未选定任何章节，请点击左侧列表的章节进行挂画。</p>
+                      <p className="text-sm">{language === "en" ? "No chapter selected. Click a chapter from the left sidebar to start generating." : "尚未选定任何章节，请点击左侧列表的章节进行挂画。"}</p>
                     </div>
                   ) : activeModule.scriptStatus === 'generating' ? (
                     <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3">
@@ -3487,10 +3527,10 @@ API地址：https://api.deepseek.com/chat/completions`}
                         <Sparkles className="w-8 h-8 text-cyan-405 text-cyan-400" />
                       </div>
                       <div className="font-semibold text-sm text-white">
-                        正在通过【ND-3.5-学术大模型引擎】智能合成《{activeModule.title}》的互动挑战试炼...
+                        {language === "en" ? `Smart synthesis of interactive challenges for "${activeModule.title}" via [ND-3.5 Academic LLM Engine]...` : `正在通过【ND-3.5-学术大模型引擎】智能合成《${activeModule.title}》的互动挑战试炼...`}
                       </div>
                       <p className="text-xs text-slate-400 max-w-sm leading-relaxed">
-                        AI 顾问正在发掘原子融合、众神职责、或是 If 条件抉誓的情景深度，并策划 3 个高水平挑战等级。
+                        {language === "en" ? "AI advisor is exploring the depth of atomic fusion, divine responsibilities, or If condition scenarios, and planning 3 high-level challenge tiers." : "AI 顾问正在发掘原子融合、众神职责、或是 If 条件抉誓的情景深度，并策划 3 个高水平挑战等级。"}
                       </p>
                       <div className="w-48 bg-white/10 h-1.5 rounded-full overflow-hidden">
                         <div className="bg-cyan-500 h-full w-2/3 animate-pulse rounded-full"></div>
@@ -3499,13 +3539,13 @@ API地址：https://api.deepseek.com/chat/completions`}
                   ) : activeModule.scriptStatus === 'failed' ? (
                     <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-2.5">
                       <XCircle className="w-10 h-10 text-red-400 animate-pulse" />
-                      <div className="font-semibold text-sm text-white">游戏互动剧本合成失败</div>
-                      <p className="text-xs text-slate-400">大模型通信遇到了一点延迟。请重试按钮拉取脚本。</p>
+                      <div className="font-semibold text-sm text-white">{language === "en" ? "Interactive script generation failed" : "游戏互动剧本合成失败"}</div>
+                      <p className="text-xs text-slate-400">{language === "en" ? "The LLM encountered a slight delay. Please click the retry button to fetch the script." : "大模型通信遇到了一点延迟。请重试按钮拉取脚本。"}</p>
                       <button 
                         onClick={() => handleGenerateScript(activeModule.id)}
                         className="text-xs bg-cyan-500 text-white px-4 py-2 hover:bg-[#050508] border border-cyan-500/30 hover:text-cyan-400 rounded-lg font-bold cursor-pointer transition"
                       >
-                        重新连通生成
+                        {language === "en" ? "Retry Generation" : "重新连通生成"}
                       </button>
                     </div>
                   ) : activeModule.scriptStatus === 'pending' ? (
@@ -3516,29 +3556,29 @@ API地址：https://api.deepseek.com/chat/completions`}
                             Simulation Blueprint
                           </span>
                           <h3 className="text-lg font-bold text-white font-display mt-1 flex items-center gap-1.5">
-                            生成沉浸式互动模拟器脚本
+                            {language === "en" ? "Generate Immersive Interactive Simulator Script" : "生成沉浸式互动模拟器脚本"}
                           </h3>
                           <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                            系统会直接根据教学切片、知识内聚分析和教材原文，生成一份可交给 AI coding 的结构化 Markdown 规格。
+                            {language === "en" ? "The system will directly generate a structured Markdown spec for AI coding based on the teaching slice, knowledge cohesion analysis, and textbook original text." : "系统会直接根据教学切片、知识内聚分析和教材原文，生成一份可交给 AI coding 的结构化 Markdown 规格。"}
                           </p>
                         </div>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs text-slate-300">
                         <div className="space-y-1 bg-[#050508]/60 p-4 rounded-xl border border-white/5">
-                          <span className="text-slate-400 font-semibold block text-[10px] uppercase">知识切片主题</span>
+                          <span className="text-slate-400 font-semibold block text-[10px] uppercase">{language === "en" ? "Knowledge Slice Topic" : "知识切片主题"}</span>
                           <p className="font-bold text-white mb-1">{activeModule.title}</p>
                           <p className="text-slate-400 leading-normal">{getSummaryText(activeModule.summary)}</p>
                         </div>
                         <div className="space-y-1 bg-[#050508]/60 p-4 rounded-xl border border-white/5">
-                          <span className="text-slate-400 font-semibold block text-[10px] uppercase">知识机制与内聚度</span>
-                          <p className="text-slate-300 leading-normal font-medium">{getCohesionText(activeModule.cohesionDetail) || getInfoDensityText(activeModule.infoDensity) || "暂无分析"}</p>
+                          <span className="text-slate-400 font-semibold block text-[10px] uppercase">{language === "en" ? "Knowledge Mechanism & Cohesion" : "知识机制与内聚度"}</span>
+                          <p className="text-slate-300 leading-normal font-medium">{getCohesionText(activeModule.cohesionDetail) || getInfoDensityText(activeModule.infoDensity) || (language === "en" ? "No analysis yet" : "暂无分析")}</p>
                         </div>
                       </div>
 
                       <div className="bg-[#030305]/60 border border-white/5 rounded-xl p-3.5 space-y-2">
                         <span className="text-cyan-400 font-bold block text-[10px] uppercase tracking-wider">
-                          教材原文依据
+                          {language === "en" ? "Textbook Original Reference" : "教材原文依据"}
                         </span>
                         <div className="text-[11px] text-slate-300 bg-black/50 border border-white/5 p-3 rounded-xl max-h-44 overflow-y-auto select-text leading-relaxed font-sans scrollbar-thin scrollbar-thumb-white/10">
                           <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
@@ -3549,9 +3589,9 @@ API地址：https://api.deepseek.com/chat/completions`}
 
                       <div className="bg-amber-500/10 border border-amber-500/25 rounded-2xl p-4 text-xs text-amber-100 leading-relaxed">
                         <div className="font-bold text-amber-300 mb-1 flex items-center gap-1.5">
-                          <Info className="w-4 h-4" /> 生成目标
+                          <Info className="w-4 h-4" /> {language === "en" ? "Generation Target" : "生成目标"}
                         </div>
-                        不是生成题库，也不是让学生做 A/B/C/D 选择题，而是生成一个“场景对象、状态变量、用户操作、反馈规则、完成条件”齐备的模拟器设计 brief。
+                        {language === "en" ? "Not generating a question bank or A/B/C/D multiple choice questions, but generating a simulator design brief complete with 'scene objects, state variables, user actions, feedback rules, and completion conditions'." : "不是生成题库，也不是让学生做 A/B/C/D 选择题，而是生成一个「场景对象、状态变量、用户操作、反馈规则、完成条件」齐备的模拟器设计 brief。"}
                       </div>
 
                       <button
@@ -3560,7 +3600,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                         className="w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-1.5 transition text-xs shadow-[0_0_20px_rgba(6,182,212,0.15)] cursor-pointer bg-cyan-500 hover:bg-cyan-600 text-white border border-cyan-400/20 active:scale-95"
                       >
                         <Sparkles className="w-3.5 h-3.5 text-white" />
-                        生成本切片的互动模拟器脚本
+                        {language === "en" ? "Generate Interactive Simulator Script for This Slice" : "生成本切片的互动模拟器脚本"}
                       </button>
                     </div>
                   ) : activeModule.scriptStatus === 'completed' && getSimulationMarkdown(activeModule) ? (
@@ -3583,25 +3623,25 @@ API地址：https://api.deepseek.com/chat/completions`}
                             }`}
                           >
                             <Edit3 className="w-3.5 h-3.5" />
-                            {activeTab === 'edit' ? '预览模式' : '编辑模式'}
+                            {activeTab === 'edit' ? (language === "en" ? "Preview Mode" : "预览模式") : (language === "en" ? "Edit Mode" : "编辑模式")}
                           </button>
                           <button
                             type="button"
                             onClick={() => handleCopySimulationMarkdown(getSimulationMarkdown(activeModule))}
                             className="bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
                           >
-                            {scriptCopySuccess ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> 已复制</> : <><Copy className="w-3.5 h-3.5" /> 复制 Markdown</>}
+                            {scriptCopySuccess ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> {language === "en" ? "Copied" : "已复制"}</> : <><Copy className="w-3.5 h-3.5" /> {language === "en" ? "Copy Markdown" : "复制 Markdown"}</>}
                           </button>
                           <button
                             type="button"
                             onClick={() => {
                               setActiveStep(4);
-                              addAgentMessage("✅ 模拟器脚本已确认。你现在可以把这份 Markdown brief 交给下一步 AI coding 生成完整互动网页。", 'script_ready');
+                              addAgentMessage(language === "en" ? "✅ Simulator script confirmed. You can now hand this Markdown brief to the next step AI coding to generate the full interactive webpage." : "✅ 模拟器脚本已确认。你现在可以把这份 Markdown brief 交给下一步 AI coding 生成完整互动网页。", 'script_ready');
                             }}
                             className="bg-cyan-500 hover:bg-cyan-600 text-white text-xs font-semibold px-4 py-1.5 rounded-lg flex items-center gap-1 transition shadow-[0_0_12px_rgba(6,182,212,0.3)] cursor-pointer"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            确认脚本
+                            {language === "en" ? "Confirm Script" : "确认脚本"}
                           </button>
                         </div>
                       </div>
@@ -3657,7 +3697,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                 <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
                   <div className="flex items-center gap-2">
                     <Settings className="w-4 h-4 text-purple-400" />
-                    <h3 className="font-bold text-sm text-white">API 调用调试面板</h3>
+                    <h3 className="font-bold text-sm text-white">{language === "en" ? "API Debug Panel" : "API 调用调试面板"}</h3>
                   </div>
                   <button onClick={() => setShowApiDrawer(false)} className="p-1.5 hover:bg-white/10 rounded-lg transition cursor-pointer">
                     <X className="w-4 h-4 text-slate-400" />
@@ -3665,11 +3705,11 @@ API地址：https://api.deepseek.com/chat/completions`}
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">调用模型</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Calling Model" : "调用模型"}</label>
                     <div className="bg-[#050508] border border-white/10 rounded-lg p-3 text-xs text-purple-400 font-mono font-bold">{apiDebugInfo.model}</div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">调用状态</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Call Status" : "调用状态"}</label>
                     <div className={`rounded-lg p-3 text-xs font-bold flex items-center gap-2 ${
                       apiDebugInfo.status === 'idle' ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20' :
                       apiDebugInfo.status === 'calling' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
@@ -3680,29 +3720,29 @@ API地址：https://api.deepseek.com/chat/completions`}
                       {apiDebugInfo.status === 'calling' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                       {apiDebugInfo.status === 'success' && <CheckCircle2 className="w-3.5 h-3.5" />}
                       {apiDebugInfo.status === 'error' && <XCircle className="w-3.5 h-3.5" />}
-                      {apiDebugInfo.status === 'idle' && '尚未调用'}
-                      {apiDebugInfo.status === 'calling' && '正在调用中...'}
-                      {apiDebugInfo.status === 'success' && '调用成功'}
-                      {apiDebugInfo.status === 'error' && '调用失败'}
+                      {apiDebugInfo.status === 'idle' && (language === "en" ? "Not called yet" : "尚未调用")}
+                      {apiDebugInfo.status === 'calling' && (language === "en" ? "Calling..." : "正在调用中...")}
+                      {apiDebugInfo.status === 'success' && (language === "en" ? "Call successful" : "调用成功")}
+                      {apiDebugInfo.status === 'error' && (language === "en" ? "Call failed" : "调用失败")}
                       {apiDebugInfo.timestamp && <span className="ml-auto text-[10px] opacity-60 font-mono">{apiDebugInfo.timestamp}</span>}
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">系统指令</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "System Prompt" : "系统指令"}</label>
                     <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-48 overflow-y-auto">
                       <pre className="text-[10px] text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">{apiDebugInfo.systemPrompt || simulationBlueprintSystemPrompt}</pre>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">用户指令</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "User Prompt" : "用户指令"}</label>
                     <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-48 overflow-y-auto">
-                      <pre className="text-[10px] text-cyan-300 whitespace-pre-wrap leading-relaxed font-mono">{apiDebugInfo.userPrompt || '（尚未生成）'}</pre>
+                      <pre className="text-[10px] text-cyan-300 whitespace-pre-wrap leading-relaxed font-mono">{apiDebugInfo.userPrompt || (language === "en" ? "(Not yet generated)" : "（尚未生成）")}</pre>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">API 原始返回</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "API Raw Response" : "API 原始返回"}</label>
                     <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-64 overflow-y-auto">
-                      <pre className="text-[10px] text-emerald-300 whitespace-pre-wrap leading-relaxed font-mono">{apiDebugInfo.rawResponse || '（无返回结果）'}</pre>
+                      <pre className="text-[10px] text-emerald-300 whitespace-pre-wrap leading-relaxed font-mono">{apiDebugInfo.rawResponse || (language === "en" ? "(No response)" : "（无返回结果）")}</pre>
                     </div>
                   </div>
                 </div>
@@ -3785,7 +3825,7 @@ API地址：https://api.deepseek.com/chat/completions`}
               {/* Left sidebar: Modules list */}
               <div className="w-full md:w-64 border border-white/10 rounded-2xl bg-[#0a0a0f] p-3 space-y-2 shrink-0 flex flex-col overflow-y-auto max-h-[220px] md:max-h-none">
                 <div className="text-[11px] font-bold text-slate-500 px-2 tracking-wider uppercase mb-1 shrink-0">
-                  待构建切片 (Chapter List)
+                  {language === "en" ? "Chapters to Build (Chapter List)" : "待构建切片 (Chapter List)"}
                 </div>
 
                 {modules.map((mod) => {
@@ -3812,11 +3852,11 @@ API地址：https://api.deepseek.com/chat/completions`}
                         <div className="flex items-center gap-1">
                           {isDone ? (
                             <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium flex items-center gap-0.5 border border-emerald-500/20">
-                              <Check className="w-2.5 h-2.5" /> 脚本就绪
+                              <Check className="w-2.5 h-2.5" /> {language === "en" ? "Script Ready" : "脚本就绪"}
                             </span>
                           ) : (
                             <span className="text-[9px] bg-white/5 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-white/5 italic">
-                              未就绪
+                              {language === "en" ? "Not Ready" : "未就绪"}
                             </span>
                           )}
                         </div>
@@ -3834,7 +3874,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                     onClick={() => setActiveStep(4)}
                     className="w-full text-center text-xs font-semibold py-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl block border border-white/10 transition cursor-pointer"
                   >
-                    ⚙️ 返回编辑模拟器脚本
+                    {language === "en" ? "⚙️ Back to Script Editing" : "⚙️ 返回编辑模拟器脚本"}
                   </button>
                 </div>
               </div>
@@ -3849,10 +3889,10 @@ API地址：https://api.deepseek.com/chat/completions`}
                   </div>
                   <div>
                     <h3 className="font-semibold text-base text-white">
-                      场景模拟游戏构建
+                      {language === "en" ? "Scene Simulation Game Build" : "场景模拟游戏构建"}
                     </h3>
                     <p className="text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                      选择左侧一个已生成脚本的切片，点击"开始构建"，AI 将基于互动脚本内容生成沉浸式 HTML 场景模拟游戏。
+                      {language === "en" ? "Select a slice with a generated script from the left sidebar, click \"Start Build\", and AI will generate an immersive HTML scene simulation game based on the interactive script." : "选择左侧一个已生成脚本的切片，点击\"开始构建\"，AI 将基于互动脚本内容生成沉浸式 HTML 场景模拟游戏。"}
                     </p>
                   </div>
                 </div>
@@ -3865,7 +3905,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                     {/* Selected slice info */}
                     {selectedStep5ModuleId && (
                       <div className="bg-[#0a0a0f] border border-white/10 rounded-xl p-4">
-                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">当前选中切片</div>
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">{language === "en" ? "Selected Slice" : "当前选中切片"}</div>
                         {(() => {
                           const mod = modules.find(m => m.id === selectedStep5ModuleId);
                           if (!mod) return null;
@@ -3873,7 +3913,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                             <div>
                               <div className="text-sm font-semibold text-cyan-400">{mod.chapterIndex} · {mod.title}</div>
                               <div className="text-xs text-slate-400 mt-1 line-clamp-3">
-                                {mod.coveredChapters && `覆盖章节: ${mod.coveredChapters}`}
+                                {mod.coveredChapters && `${language === "en" ? "Covered Chapters" : "覆盖章节"}: ${mod.coveredChapters}`}
                               </div>
                             </div>
                           );
@@ -3892,25 +3932,25 @@ API地址：https://api.deepseek.com/chat/completions`}
                           {isGeneratingApp ? (
                             <>
                               <RefreshCw className="w-5 h-5 animate-spin" />
-                              AI 正在生成场景模拟游戏...
+                              {language === "en" ? "AI is generating the scene simulation game..." : "AI 正在生成场景模拟游戏..."}
                             </>
                           ) : (
                             <>
                               <Download className="w-5 h-5" />
-                              {selectedStep5ModuleId ? '开始构建' : '请先选择一个切片'}
+                              {selectedStep5ModuleId ? (language === "en" ? 'Start Build' : '开始构建') : (language === "en" ? 'Please select a slice first' : '请先选择一个切片')}
                             </>
                           )}
                         </button>
                         <button
                           onClick={() => setShowAppApiDrawer(true)}
                           className="p-3 rounded-xl transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10 shrink-0"
-                          title="API 调试"
+                          title={language === "en" ? "API Debug" : "API 调试"}
                         >
                           <Settings className="w-5 h-5" />
                         </button>
                       </div>
                       <p className="text-center text-[10px] text-slate-500 mt-3 flex items-center justify-center gap-1">
-                        <Lock className="w-3 h-3" /> 使用 DeepSeek V4 Flash 模型生成
+                        <Lock className="w-3 h-3" /> {language === "en" ? "Generated using DeepSeek V4 Flash model" : "使用 DeepSeek V4 Flash 模型生成"}
                       </p>
                     </div>
 
@@ -3921,7 +3961,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                   <div className="bg-[#050508] border-b border-white/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
-                        <Settings className="w-4 h-4 text-cyan-400" /> 场景模拟游戏
+                        <Settings className="w-4 h-4 text-cyan-400" /> {language === "en" ? "Scene Simulation Game" : "场景模拟游戏"}
                       </div>
                       
                       {finalCode && (
@@ -3935,7 +3975,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                             }`}
                           >
                             <Play className="w-2.5 h-2.5" />
-                            效果预览 (Preview)
+                            {language === "en" ? "Preview" : "效果预览 (Preview)"}
                           </button>
                           <button
                             onClick={() => setOutputTab('code')}
@@ -3946,7 +3986,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                             }`}
                           >
                             <Code2 className="w-2.5 h-2.5" />
-                            查看代码 (Code)
+                            {language === "en" ? "Code" : "查看代码 (Code)"}
                           </button>
                         </div>
                       )}
@@ -3958,7 +3998,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                           onClick={() => setIsFullscreen(true)}
                           className="flex items-center gap-1 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 rounded text-[10px] font-bold transition cursor-pointer"
                         >
-                          <Maximize2 className="w-3.5 h-3.5" /> 全屏体验
+                          <Maximize2 className="w-3.5 h-3.5" /> {language === "en" ? "Full Experience" : "全屏体验"}
                         </button>
                       )}
 
@@ -3968,9 +4008,9 @@ API地址：https://api.deepseek.com/chat/completions`}
                            className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500 hover:text-white rounded text-[10px] font-bold transition cursor-pointer"
                          >
                            {codeCopySuccess ? (
-                             <><Check className="w-3.5 h-3.5" /> 已复制!</>
+                             <><Check className="w-3.5 h-3.5" /> {language === "en" ? "Copied!" : "已复制!"}</>
                            ) : (
-                             <><Copy className="w-3.5 h-3.5" /> 拷贝 HTML 文件</>
+                             <><Copy className="w-3.5 h-3.5" /> {language === "en" ? "Copy HTML File" : "拷贝 HTML 文件"}</>
                            )}
                          </button>
                       )}
@@ -3982,7 +4022,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                       <div className="flex flex-col items-center justify-center flex-1 gap-4 text-cyan-500 animate-pulse py-12">
                         <Terminal className="w-10 h-10 animate-spin" />
                         <div className="text-center font-sans font-semibold text-sm">
-                          {">"} AI 正在生成场景模拟游戏...
+                          {">"} {language === "en" ? "AI is generating the scene simulation game..." : "AI 正在生成场景模拟游戏..."}
                         </div>
                       </div>
                     ) : finalCode ? (
@@ -4001,7 +4041,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                     ) : (
                       <div className="flex flex-col items-center justify-center flex-1 gap-3 text-slate-650 py-12">
                         <Code2 className="w-12 h-12 stroke-1 text-slate-600" />
-                        <span className="font-sans text-xs text-slate-500">暂无生成代码，请在左侧设定后点击“打包生成”</span>
+                        <span className="font-sans text-xs text-slate-500">{language === "en" ? "No generated code yet. Please configure settings on the left and click \"Build\" to generate." : "暂无生成代码，请在左侧设定后点击\"打包生成\""}</span>
                       </div>
                     )}
                   </div>
@@ -4025,7 +4065,7 @@ API地址：https://api.deepseek.com/chat/completions`}
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
               <h3 className="text-sm font-bold text-cyan-400 flex items-center gap-2">
                 <Eye className="w-4 h-4" />
-                Markdown 渲染样式示例
+                {language === "en" ? "Markdown Rendering Style Example" : "Markdown 渲染样式示例"}
               </h3>
               <button
                 onClick={() => setShowPreviewModal(false)}
@@ -4080,7 +4120,7 @@ API地址：https://api.deepseek.com/chat/completions`}
           <div className="flex items-center justify-between bg-[#0a0a0f] border-b border-white/10 px-6 py-4 rounded-t-2xl max-w-4xl w-full mx-auto shrink-0 mt-2 shadow-2xl">
             <div className="text-sm font-bold text-cyan-400 flex items-center gap-2">
               <Sparkles className="w-4 h-4 animate-pulse text-cyan-400" />
-              <span>智能全屏沉浸试炼模式 (Immersive Sandbox Game Mode)</span>
+              <span>{language === "en" ? "Immersive Sandbox Game Mode" : "智能全屏沉浸试炼模式 (Immersive Sandbox Game Mode)"}</span>
             </div>
             
             <button
@@ -4088,7 +4128,7 @@ API地址：https://api.deepseek.com/chat/completions`}
               className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white rounded-lg transition border border-rose-500/20 shadow-md cursor-pointer"
             >
               <Minimize2 className="w-4 h-4" />
-              退出全屏 (Exit Fullscreen)
+              {language === "en" ? "Exit Fullscreen" : "退出全屏 (Exit Fullscreen)"}
             </button>
           </div>
 

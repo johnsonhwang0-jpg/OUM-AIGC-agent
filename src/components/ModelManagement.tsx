@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Plus, Save, Trash2, Copy, GitBranch, Star } from "lucide-react";
+import { ArrowLeft, Plus, Save, Trash2, GitBranch, Star } from "lucide-react";
+import { useLanguage } from "../i18n/LanguageContext";
 
 interface PromptTemplate {
   id: string;
@@ -40,25 +41,26 @@ interface ModelConfig {
 
 const PROVIDERS = [
   { value: "deepseek", label: "DeepSeek" },
-  { value: "dashscope", label: "DashScope (通义千问)" },
+  { value: "dashscope", label: "DashScope (Qwen)" },
   { value: "openai", label: "OpenAI" },
   { value: "gemini", label: "Google Gemini" },
   { value: "ollama", label: "Ollama" },
   { value: "huggingface", label: "Hugging Face" },
 ];
 
-const AVAILABLE_VARS = [
-  { var: "{{bookTitle}}", desc: "教材名称" },
-  { var: "{{chapterTitle}}", desc: "切片标题" },
-  { var: "{{chapterIndex}}", desc: "切片索引" },
-  { var: "{{summary}}", desc: "切片学习目标" },
-  { var: "{{scriptMarkdown}}", desc: "互动脚本内容" },
-  { var: "{{extractedContent}}", desc: "教材原文" },
+const getAvailableVars = (language: "zh" | "en") => [
+  { var: "{{bookTitle}}", desc: language === "en" ? "Book title" : "教材名称" },
+  { var: "{{chapterTitle}}", desc: language === "en" ? "Slice title" : "切片标题" },
+  { var: "{{chapterIndex}}", desc: language === "en" ? "Slice index" : "切片索引" },
+  { var: "{{summary}}", desc: language === "en" ? "Slice learning objective" : "切片学习目标" },
+  { var: "{{scriptMarkdown}}", desc: language === "en" ? "Interactive script content" : "互动脚本内容" },
+  { var: "{{extractedContent}}", desc: language === "en" ? "Textbook original text" : "教材原文" },
 ];
 
 type TabKey = "models" | "prompts";
 
 export default function ModelManagement({ onBack }: { onBack: () => void }) {
+  const { language } = useLanguage();
   const [activeTab, setActiveTab] = useState<TabKey>("prompts");
 
   return (
@@ -69,7 +71,7 @@ export default function ModelManagement({ onBack }: { onBack: () => void }) {
           <button onClick={onBack} className="p-2 rounded-lg hover:bg-white/10 transition cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h1 className="text-lg font-bold">模型与提示词管理</h1>
+          <h1 className="text-lg font-bold">{language === "en" ? "Model & Prompt Management" : "模型与提示词管理"}</h1>
         </div>
         <div className="flex gap-1 bg-white/5 rounded-lg p-1">
           <button
@@ -78,7 +80,7 @@ export default function ModelManagement({ onBack }: { onBack: () => void }) {
               activeTab === "prompts" ? "bg-purple-500/30 text-white" : "text-slate-400 hover:text-white"
             }`}
           >
-            提示词管理
+            {language === "en" ? "Prompt Management" : "提示词管理"}
           </button>
           <button
             onClick={() => setActiveTab("models")}
@@ -86,21 +88,21 @@ export default function ModelManagement({ onBack }: { onBack: () => void }) {
               activeTab === "models" ? "bg-cyan-500/30 text-white" : "text-slate-400 hover:text-white"
             }`}
           >
-            模型管理
+            {language === "en" ? "Model Management" : "模型管理"}
           </button>
         </div>
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === "prompts" ? <PromptTab /> : <ModelTab />}
+        {activeTab === "prompts" ? <PromptTab language={language} /> : <ModelTab language={language} />}
       </div>
     </div>
   );
 }
 
 // ==================== Prompt Tab ====================
-function PromptTab() {
+function PromptTab({ language }: { language: "zh" | "en" }) {
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<Partial<PromptTemplate> | null>(null);
@@ -140,7 +142,7 @@ function PromptTab() {
 
   const handleCreate = async () => {
     setEditingTemplate({
-      name: "新提示词模板",
+      name: language === "en" ? "New Prompt Template" : "新提示词模板",
       systemPrompt: "",
       userPromptTemplate: "",
       isActive: false,
@@ -183,7 +185,7 @@ function PromptTab() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("确定删除此提示词模板？")) return;
+    if (!confirm(language === "en" ? "Are you sure you want to delete this prompt template?" : "确定删除此提示词模板？")) return;
     try {
       await fetch(`/api/prompt-templates/${id}`, { method: "DELETE" });
       if (selectedTemplate?.id === id) setSelectedTemplate(null);
@@ -233,7 +235,7 @@ function PromptTab() {
   };
 
   const handleDeleteVersion = async (versionId: string) => {
-    if (!confirm("确定删除此版本？")) return;
+    if (!confirm(language === "en" ? "Are you sure you want to delete this version?" : "确定删除此版本？")) return;
     try {
       await fetch(`/api/prompt-versions/${versionId}`, { method: "DELETE" });
       if (selectedTemplate) await fetchVersions(selectedTemplate.id);
@@ -263,7 +265,7 @@ function PromptTab() {
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r from-purple-500 to-cyan-500 hover:from-purple-600 hover:to-cyan-600 text-white text-sm font-semibold transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            新建提示词模板
+            {language === "en" ? "New Prompt Template" : "新建提示词模板"}
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -281,17 +283,17 @@ function PromptTab() {
                 <span className="text-sm font-semibold truncate">{t.name}</span>
                 {t.isActive && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold shrink-0 ml-2">
-                    使用中
+                    {language === "en" ? "Active" : "使用中"}
                   </span>
                 )}
               </div>
               <div className="text-xs text-slate-500 mt-1 truncate">
-                {t.systemPrompt?.slice(0, 40) || "无系统指令"}
+                {t.systemPrompt?.slice(0, 40) || (language === "en" ? "No system prompt" : "无系统指令")}
               </div>
             </div>
           ))}
           {templates.length === 0 && (
-            <div className="text-center text-slate-500 text-sm py-8">暂无提示词模板</div>
+            <div className="text-center text-slate-500 text-sm py-8">{language === "en" ? "No prompt templates" : "暂无提示词模板"}</div>
           )}
         </div>
       </div>
@@ -302,11 +304,11 @@ function PromptTab() {
           <div className="max-w-3xl mx-auto space-y-6">
             <h2 className="text-lg font-bold flex items-center gap-2">
               <Save className="w-5 h-5 text-purple-400" />
-              {editingTemplate.id ? "编辑提示词模板" : "新建提示词模板"}
+              {editingTemplate.id ? (language === "en" ? "Edit Prompt Template" : "编辑提示词模板") : (language === "en" ? "New Prompt Template" : "新建提示词模板")}
             </h2>
 
             <div>
-              <label className="text-xs text-slate-400 mb-1 block">模板名称</label>
+              <label className="text-xs text-slate-400 mb-1 block">{language === "en" ? "Template Name" : "模板名称"}</label>
               <input
                 type="text"
                 value={editingTemplate.name || ""}
@@ -323,12 +325,12 @@ function PromptTab() {
                   onChange={e => setEditingTemplate({ ...editingTemplate, isActive: e.target.checked })}
                   className="w-4 h-4 accent-purple-500"
                 />
-                <span className="text-sm">设为使用中</span>
+                <span className="text-sm">{language === "en" ? "Set as active" : "设为使用中"}</span>
               </label>
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 mb-1 block">系统指令</label>
+              <label className="text-xs text-slate-400 mb-1 block">{language === "en" ? "System Prompt" : "系统指令"}</label>
               <textarea
                 value={editingTemplate.systemPrompt || ""}
                 onChange={e => setEditingTemplate({ ...editingTemplate, systemPrompt: e.target.value })}
@@ -339,11 +341,11 @@ function PromptTab() {
 
             <div>
               <label className="text-xs text-slate-400 mb-1 block">
-                用户指令模板
-                <span className="ml-2 text-[10px] text-slate-500">支持变量：点击插入</span>
+                {language === "en" ? "User Prompt Template" : "用户指令模板"}
+                <span className="ml-2 text-[10px] text-slate-500">{language === "en" ? "Variables: click to insert" : "支持变量：点击插入"}</span>
               </label>
               <div className="flex flex-wrap gap-1.5 mb-2">
-                {AVAILABLE_VARS.map(v => (
+                {getAvailableVars(language).map(v => (
                   <button
                     key={v.var}
                     onClick={() => insertVariable(v.var)}
@@ -368,13 +370,13 @@ function PromptTab() {
                 disabled={loading}
                 className="px-6 py-2.5 rounded-lg bg-gradient-to-r from-purple-500 to-cyan-500 hover:from-purple-600 hover:to-cyan-600 text-white text-sm font-semibold transition cursor-pointer disabled:opacity-50"
               >
-                {loading ? "保存中..." : "保存"}
+                {loading ? (language === "en" ? "Saving..." : "保存中...") : (language === "en" ? "Save" : "保存")}
               </button>
               <button
                 onClick={() => setEditingTemplate(null)}
                 className="px-6 py-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-sm transition cursor-pointer"
               >
-                取消
+                {language === "en" ? "Cancel" : "取消"}
               </button>
             </div>
           </div>
@@ -387,7 +389,7 @@ function PromptTab() {
                   onClick={() => handleEdit(selectedTemplate)}
                   className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-sm transition cursor-pointer"
                 >
-                  编辑
+                  {language === "en" ? "Edit" : "编辑"}
                 </button>
                 <button
                   onClick={handleSaveVersion}
@@ -395,7 +397,7 @@ function PromptTab() {
                   className="px-4 py-2 rounded-lg bg-purple-500/20 border border-purple-500/30 hover:bg-purple-500/30 text-purple-300 text-sm transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
                 >
                   <GitBranch className="w-3.5 h-3.5" />
-                  保存版本
+                  {language === "en" ? "Save Version" : "保存版本"}
                 </button>
                 <button
                   onClick={() => setShowVersions(!showVersions)}
@@ -404,7 +406,7 @@ function PromptTab() {
                   }`}
                 >
                   <GitBranch className="w-3.5 h-3.5" />
-                  历史版本 ({versions.length})
+                  {language === "en" ? "History" : "历史版本"} ({versions.length})
                 </button>
                 <button
                   onClick={() => handleDelete(selectedTemplate.id)}
@@ -418,15 +420,15 @@ function PromptTab() {
             {/* Detail */}
             <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
               <div>
-                <span className="text-xs text-slate-400">系统指令</span>
+                <span className="text-xs text-slate-400">{language === "en" ? "System Prompt" : "系统指令"}</span>
                 <pre className="mt-1 text-sm font-mono text-slate-200 whitespace-pre-wrap bg-black/20 rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {selectedTemplate.systemPrompt || "（未设置）"}
+                  {selectedTemplate.systemPrompt || (language === "en" ? "(Not set)" : "（未设置）")}
                 </pre>
               </div>
               <div>
-                <span className="text-xs text-slate-400">用户指令模板</span>
+                <span className="text-xs text-slate-400">{language === "en" ? "User Prompt Template" : "用户指令模板"}</span>
                 <pre className="mt-1 text-sm font-mono text-slate-200 whitespace-pre-wrap bg-black/20 rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {selectedTemplate.userPromptTemplate || "（未设置）"}
+                  {selectedTemplate.userPromptTemplate || (language === "en" ? "(Not set)" : "（未设置）")}
                 </pre>
               </div>
             </div>
@@ -434,7 +436,7 @@ function PromptTab() {
             {/* Versions */}
             {showVersions && (
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-slate-300">历史版本</h3>
+                <h3 className="text-sm font-semibold text-slate-300">{language === "en" ? "History Versions" : "历史版本"}</h3>
                 {versions.map(v => (
                   <div key={v.id} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
                     <div className="flex items-center justify-between">
@@ -449,13 +451,13 @@ function PromptTab() {
                           onClick={() => handleRestoreVersion(v)}
                           className="text-[10px] px-2 py-1 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition cursor-pointer"
                         >
-                          恢复到当前
+                          {language === "en" ? "Restore" : "恢复到当前"}
                         </button>
                         <button
                           onClick={() => { setEditingNote(v.id); setNoteValue(v.note || ""); }}
                           className="text-[10px] px-2 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition cursor-pointer"
                         >
-                          {v.note ? "编辑备注" : "添加备注"}
+                          {v.note ? (language === "en" ? "Edit Note" : "编辑备注") : (language === "en" ? "Add Note" : "添加备注")}
                         </button>
                         <button
                           onClick={() => handleDeleteVersion(v.id)}
@@ -490,51 +492,51 @@ function PromptTab() {
                             }}
                             defaultValue={v.effectRating || ""}
                           >
-                            <option value="">效果评级</option>
-                            <option value="优秀">优秀</option>
-                            <option value="良好">良好</option>
-                            <option value="一般">一般</option>
-                            <option value="较差">较差</option>
+                            <option value="">{language === "en" ? "Effect Rating" : "效果评级"}</option>
+                            <option value="优秀">{language === "en" ? "Excellent" : "优秀"}</option>
+                            <option value="良好">{language === "en" ? "Good" : "良好"}</option>
+                            <option value="一般">{language === "en" ? "Average" : "一般"}</option>
+                            <option value="较差">{language === "en" ? "Poor" : "较差"}</option>
                           </select>
                           <input
                             type="text"
                             value={noteValue}
                             onChange={e => setNoteValue(e.target.value)}
                             className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1 text-xs"
-                            placeholder="备注说明..."
+                            placeholder={language === "en" ? "Note..." : "备注说明..."}
                           />
                           <button
                             onClick={() => handleUpdateNote(v.id)}
                             className="px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 text-xs cursor-pointer"
                           >
-                            保存
+                            {language === "en" ? "Save" : "保存"}
                           </button>
                           <button
                             onClick={() => setEditingNote(null)}
                             className="px-2 py-1 rounded bg-white/5 text-slate-400 text-xs cursor-pointer"
                           >
-                            取消
+                            {language === "en" ? "Cancel" : "取消"}
                           </button>
                         </div>
                       </div>
                     ) : (
                       v.note && (
                         <div className="text-xs text-slate-400 bg-white/5 rounded p-2 border border-white/5">
-                          备注：{v.note}
+                          {language === "en" ? "Note" : "备注"}：{v.note}
                         </div>
                       )
                     )}
                   </div>
                 ))}
                 {versions.length === 0 && (
-                  <div className="text-center text-slate-500 text-sm py-4">暂无历史版本</div>
+                  <div className="text-center text-slate-500 text-sm py-4">{language === "en" ? "No history versions" : "暂无历史版本"}</div>
                 )}
               </div>
             )}
           </div>
         ) : (
           <div className="flex items-center justify-center h-full text-slate-500">
-            选择或创建一个提示词模板
+            {language === "en" ? "Select or create a prompt template" : "选择或创建一个提示词模板"}
           </div>
         )}
       </div>
@@ -543,7 +545,7 @@ function PromptTab() {
 }
 
 // ==================== Model Tab ====================
-function ModelTab() {
+function ModelTab({ language }: { language: "zh" | "en" }) {
   const [configs, setConfigs] = useState<ModelConfig[]>([]);
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<ModelConfig | null>(null);
@@ -575,7 +577,7 @@ function ModelTab() {
 
   const handleCreate = async () => {
     setEditingConfig({
-      name: "新模型配置",
+      name: language === "en" ? "New Model Config" : "新模型配置",
       provider: "deepseek",
       modelId: "deepseek-v4-flash",
       apiKey: "",
@@ -624,7 +626,7 @@ function ModelTab() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("确定删除此模型配置？")) return;
+    if (!confirm(language === "en" ? "Are you sure you want to delete this model config?" : "确定删除此模型配置？")) return;
     try {
       await fetch(`/api/model-configs/${id}`, { method: "DELETE" });
       if (selectedConfig?.id === id) setSelectedConfig(null);
@@ -646,7 +648,7 @@ function ModelTab() {
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white text-sm font-semibold transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            新建模型配置
+            {language === "en" ? "New Model Config" : "新建模型配置"}
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -664,7 +666,7 @@ function ModelTab() {
                 <span className="text-sm font-semibold">{c.name}</span>
                 {c.isActive && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">
-                    使用中
+                    {language === "en" ? "Active" : "使用中"}
                   </span>
                 )}
               </div>
@@ -674,7 +676,7 @@ function ModelTab() {
             </div>
           ))}
           {configs.length === 0 && (
-            <div className="text-center text-slate-500 text-sm py-8">暂无模型配置</div>
+            <div className="text-center text-slate-500 text-sm py-8">{language === "en" ? "No model configs" : "暂无模型配置"}</div>
           )}
         </div>
       </div>
@@ -685,14 +687,14 @@ function ModelTab() {
           <div className="max-w-3xl mx-auto space-y-6">
             <h2 className="text-lg font-bold flex items-center gap-2">
               <Save className="w-5 h-5 text-cyan-400" />
-              {editingConfig.id ? "编辑模型配置" : "新建模型配置"}
+              {editingConfig.id ? (language === "en" ? "Edit Model Config" : "编辑模型配置") : (language === "en" ? "New Model Config" : "新建模型配置")}
             </h2>
 
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">基本信息</h3>
+              <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">{language === "en" ? "Basic Info" : "基本信息"}</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">配置名称</label>
+                  <label className="text-xs text-slate-400 mb-1 block">{language === "en" ? "Config Name" : "配置名称"}</label>
                   <input
                     type="text"
                     value={editingConfig.name || ""}
@@ -701,7 +703,7 @@ function ModelTab() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">模型提供商</label>
+                  <label className="text-xs text-slate-400 mb-1 block">{language === "en" ? "Model Provider" : "模型提供商"}</label>
                   <select
                     value={editingConfig.provider || "deepseek"}
                     onChange={e => setEditingConfig({ ...editingConfig, provider: e.target.value })}
@@ -713,7 +715,7 @@ function ModelTab() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 mb-1 block">模型 ID</label>
+                  <label className="text-xs text-slate-400 mb-1 block">{language === "en" ? "Model ID" : "模型 ID"}</label>
                   <input
                     type="text"
                     value={editingConfig.modelId || ""}
@@ -749,14 +751,14 @@ function ModelTab() {
                       onChange={e => setEditingConfig({ ...editingConfig, isActive: e.target.checked })}
                       className="w-4 h-4 accent-cyan-500"
                     />
-                    <span className="text-sm">设为使用中</span>
+                    <span className="text-sm">{language === "en" ? "Set as active" : "设为使用中"}</span>
                   </label>
                 </div>
               </div>
             </div>
 
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">生成参数</h3>
+              <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">{language === "en" ? "Generation Params" : "生成参数"}</h3>
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="text-xs text-slate-400 mb-1 block">Max Tokens</label>
@@ -795,21 +797,21 @@ function ModelTab() {
             </div>
 
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">引用提示词模板</h3>
+              <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">{language === "en" ? "Linked Prompt Template" : "引用提示词模板"}</h3>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">选择提示词模板（可选）</label>
+                <label className="text-xs text-slate-400 mb-1 block">{language === "en" ? "Select Prompt Template (Optional)" : "选择提示词模板（可选）"}</label>
                 <select
                   value={editingConfig.promptTemplateId || ""}
                   onChange={e => setEditingConfig({ ...editingConfig, promptTemplateId: e.target.value || null })}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-cyan-500/50"
                 >
-                  <option value="">不引用（使用自定义指令）</option>
+                  <option value="">{language === "en" ? "None (Use custom prompts)" : "不引用（使用自定义指令）"}</option>
                   {templates.map(t => (
-                    <option key={t.id} value={t.id}>{t.name}{t.isActive ? " (使用中)" : ""}</option>
+                    <option key={t.id} value={t.id}>{t.name}{t.isActive ? (language === "en" ? " (Active)" : " (使用中)") : ""}</option>
                   ))}
                 </select>
                 <p className="text-[10px] text-slate-500 mt-1">
-                  引用后，模型将使用所选提示词模板的系统指令和用户指令
+                  {language === "en" ? "When linked, the model will use the selected prompt template's system and user prompts" : "引用后，模型将使用所选提示词模板的系统指令和用户指令"}
                 </p>
               </div>
             </div>
@@ -820,13 +822,13 @@ function ModelTab() {
                 disabled={loading}
                 className="px-6 py-2.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white text-sm font-semibold transition cursor-pointer disabled:opacity-50"
               >
-                {loading ? "保存中..." : "保存"}
+                {loading ? (language === "en" ? "Saving..." : "保存中...") : (language === "en" ? "Save" : "保存")}
               </button>
               <button
                 onClick={() => setEditingConfig(null)}
                 className="px-6 py-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-sm transition cursor-pointer"
               >
-                取消
+                {language === "en" ? "Cancel" : "取消"}
               </button>
             </div>
           </div>
@@ -839,7 +841,7 @@ function ModelTab() {
                   onClick={() => handleEdit(selectedConfig)}
                   className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-sm transition cursor-pointer"
                 >
-                  编辑
+                  {language === "en" ? "Edit" : "编辑"}
                 </button>
                 <button
                   onClick={() => handleDelete(selectedConfig.id)}
@@ -853,20 +855,20 @@ function ModelTab() {
             <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
-                  <span className="text-slate-400 text-xs">提供商</span>
+                  <span className="text-slate-400 text-xs">{language === "en" ? "Provider" : "提供商"}</span>
                   <p className="text-white mt-0.5">{PROVIDERS.find(p => p.value === selectedConfig.provider)?.label || selectedConfig.provider}</p>
                 </div>
                 <div>
-                  <span className="text-slate-400 text-xs">模型 ID</span>
+                  <span className="text-slate-400 text-xs">{language === "en" ? "Model ID" : "模型 ID"}</span>
                   <p className="text-white mt-0.5 font-mono">{selectedConfig.modelId}</p>
                 </div>
                 <div>
-                  <span className="text-slate-400 text-xs">状态</span>
+                  <span className="text-slate-400 text-xs">{language === "en" ? "Status" : "状态"}</span>
                   <p className="mt-0.5">
                     {selectedConfig.isActive ? (
-                      <span className="text-emerald-400 font-bold">使用中</span>
+                      <span className="text-emerald-400 font-bold">{language === "en" ? "Active" : "使用中"}</span>
                     ) : (
-                      <span className="text-slate-500">未启用</span>
+                      <span className="text-slate-500">{language === "en" ? "Not enabled" : "未启用"}</span>
                     )}
                   </p>
                 </div>
@@ -888,12 +890,12 @@ function ModelTab() {
               </div>
 
               <div className="pt-2 border-t border-white/5">
-                <span className="text-slate-400 text-xs">引用提示词模板</span>
+                <span className="text-slate-400 text-xs">{language === "en" ? "Linked Prompt Template" : "引用提示词模板"}</span>
                 <p className="text-white mt-0.5">
                   {selectedTemplateName ? (
                     <span className="text-purple-400 font-semibold">{selectedTemplateName}</span>
                   ) : (
-                    <span className="text-slate-500">未引用</span>
+                    <span className="text-slate-500">{language === "en" ? "Not linked" : "未引用"}</span>
                   )}
                 </p>
               </div>
@@ -901,7 +903,7 @@ function ModelTab() {
           </div>
         ) : (
           <div className="flex items-center justify-center h-full text-slate-500">
-            选择或创建一个模型配置
+            {language === "en" ? "Select or create a model config" : "选择或创建一个模型配置"}
           </div>
         )}
       </div>
