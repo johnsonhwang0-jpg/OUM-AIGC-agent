@@ -474,6 +474,23 @@ export function PromptTab({ language }: { language: "zh" | "en" }) {
     setEditingPrompt({ ...editingPrompt, userPromptTemplate: current + variable });
   };
 
+  const renderPromptWithVars = (text: string) => {
+    const parts = text.split(/(\{\{[^}]+\}\})/g);
+    return parts.map((part, i) => {
+      if (/^\{\{[^}]+\}\}$/.test(part)) {
+        return (
+          <span
+            key={i}
+            className="px-1 py-0 rounded text-[11px] font-mono font-semibold bg-purple-500/25 text-purple-300 border border-purple-500/30 whitespace-nowrap"
+          >
+            {part}
+          </span>
+        );
+      }
+      return <span key={i} className="text-slate-300">{part}</span>;
+    });
+  };
+
   const c = colorMap[currentEntry.color];
 
   return (
@@ -664,13 +681,25 @@ export function PromptTab({ language }: { language: "zh" | "en" }) {
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
                   {t("用户指令模板", "User Prompt Template")}
                 </label>
-                <textarea
-                  value={editingPrompt.userPromptTemplate || ""}
-                  onChange={e => setEditingPrompt({ ...editingPrompt, userPromptTemplate: e.target.value })}
-                  rows={6}
-                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white font-mono placeholder-slate-500 focus:outline-none focus:border-purple-500/50 resize-y"
-                  placeholder={t("用户指令模板内容，使用 {{variable}} 插入变量...", "User prompt template, use {{variable}} to insert variables...")}
-                />
+                <div className="relative rounded-lg border border-white/10 overflow-hidden">
+                  {/* Highlighted background layer */}
+                  <div
+                    className="absolute inset-0 px-3 py-2 text-sm font-mono leading-relaxed whitespace-pre-wrap break-words pointer-events-none"
+                    aria-hidden="true"
+                  >
+                    {renderPromptWithVars(editingPrompt.userPromptTemplate || "")}
+                  </div>
+                  {/* Editable textarea on top - text transparent, caret visible */}
+                  <textarea
+                    value={editingPrompt.userPromptTemplate || ""}
+                    onChange={e => setEditingPrompt({ ...editingPrompt, userPromptTemplate: e.target.value })}
+                    rows={6}
+                    className="relative w-full px-3 py-2 text-sm font-mono leading-relaxed whitespace-pre-wrap break-words bg-white/5 focus:outline-none focus:border-purple-500/50 resize-y caret-white"
+                    style={{ color: "transparent", WebkitTextFillColor: "transparent" }}
+                    placeholder={t("用户指令模板内容，使用 {{variable}} 插入变量...", "User prompt template, use {{variable}} to insert variables...")}
+                    spellCheck={false}
+                  />
+                </div>
                 {/* Variable insertion buttons */}
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {getAvailableVars(language).map(v => (
