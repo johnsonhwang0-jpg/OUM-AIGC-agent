@@ -2483,7 +2483,8 @@ async function startServer() {
   // Prompt Template API routes
   app.get("/api/prompt-templates", async (req, res) => {
     try {
-      const templates = await getAllPromptTemplates();
+      const aiEntry = req.query.aiEntry as string | undefined;
+      const templates = await getAllPromptTemplates(aiEntry);
       res.json(templates);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -2561,6 +2562,31 @@ async function startServer() {
     try {
       await deletePromptVersion(req.params.id);
       res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Prompt seed: create default prompts for each AI entry if none exist
+  app.post("/api/prompt-templates/seed", async (req, res) => {
+    try {
+      const { aiEntry, name, systemPrompt, userPromptTemplate } = req.body;
+      if (!aiEntry || !name) {
+        return res.status(400).json({ error: "aiEntry and name are required" });
+      }
+      // Check if any prompts already exist for this entry
+      const existing = await getAllPromptTemplates(aiEntry);
+      if (existing.length > 0) {
+        return res.json({ success: true, seeded: false, existing });
+      }
+      const template = await createPromptTemplate({
+        aiEntry,
+        name,
+        systemPrompt: systemPrompt || null,
+        userPromptTemplate: userPromptTemplate || null,
+        isActive: true,
+      });
+      res.json({ success: true, seeded: true, template });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
