@@ -4,6 +4,74 @@ import path from "path";
 
 let db: Database | null = null;
 const DB_PATH = path.join(process.cwd(), "booktogame.db");
+const DB_BACKUP_DIR = path.join(process.cwd(), ".db-backups");
+
+// 数据库 schema 版本号，每次修改 schema 时递增
+const CURRENT_SCHEMA_VERSION = 2;
+
+/**
+ * 在修改数据库 schema 前创建备份
+ * 防止 schema 迁移失败导致数据丢失
+ */
+function backupDatabaseBeforeMigration(database: Database): void {
+  if (!fs.existsSync(DB_BACKUP_DIR)) {
+    fs.mkdirSync(DB_BACKUP_DIR, { recursive: true });
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = path.join(DB_BACKUP_DIR, `booktogame-backup-${timestamp}.db`);
+
+  try {
+    const data = database.export();
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(backupPath, buffer);
+    console.log(`💾 数据库迁移前已备份到: ${backupPath}`);
+  } catch (e) {
+    console.error("⚠️ 数据库备份失败:", e);
+  }
+}
+
+/**
+ * 获取当前数据库 schema 版本
+ */
+function getSchemaVersion(database: Database): number {
+  try {
+    const result = database.exec(`SELECT value FROM schema_version WHERE key = 'version'`);
+    if (result.length > 0 && result[0].values.length > 0) {
+      return result[0].values[0][0] as number;
+    }
+  } catch (e) {
+    // schema_version 表不存在
+  }
+  return 0;
+}
+
+/**
+ * 设置数据库 schema 版本
+ */
+function setSchemaVersion(database: Database, version: number): void {
+  database.run(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      key TEXT PRIMARY KEY,
+      value INTEGER NOT NULL
+    )
+  `);
+  database.run(`INSERT OR REPLACE INTO schema_version (key, value) VALUES ('version', ?)`, [version]);
+  saveDatabase(database);
+}
+
+/**
+ * 安全地执行 ALTER TABLE 迁移
+ */
+function safeAlter(database: Database, sql: string, description: string): void {
+  try {
+    database.run(sql);
+    console.log(`✅ 迁移成功: ${description}`);
+  } catch (e: any) {
+    // 列已存在或其他错误，静默忽略
+    console.log(`⏭️  跳过迁移: ${description} (${e.message})`);
+  }
+}
 
 export interface Project {
   id: string;
@@ -97,6 +165,7 @@ async function initDatabase(): Promise<Database> {
     console.log("🆕 创建新数据库:", DB_PATH);
   }
 
+  // 创建基础表
   database.run(`
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
@@ -113,18 +182,6 @@ async function initDatabase(): Promise<Database> {
       updatedAt TEXT NOT NULL
     )
   `);
-
-  // 迁移：为旧数据库添加缺失的列
-  try {
-    database.run(`ALTER TABLE projects ADD COLUMN aiMeta TEXT`);
-  } catch (e) {
-    // 列已存在，忽略
-  }
-  try {
-    database.run(`ALTER TABLE projects ADD COLUMN rawBlueprintData TEXT`);
-  } catch (e) {
-    // 列已存在，忽略
-  }
 
   database.run(`
     CREATE TABLE IF NOT EXISTS module_scripts (
@@ -165,12 +222,11 @@ async function initDatabase(): Promise<Database> {
 
   database.run(`CREATE INDEX IF NOT EXISTS idx_app_code_project ON generated_app_code(projectId)`);
 
-  // Prompt templates table
   database.run(`
     CREATE TABLE IF NOT EXISTS prompt_templates (
       id TEXT PRIMARY KEY,
       aiEntry TEXT NOT NULL DEFAULT '',
-      name TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT 'Untitled',
       systemPrompt TEXT,
       userPromptTemplate TEXT,
       isActive INTEGER DEFAULT 0,
@@ -180,30 +236,8 @@ async function initDatabase(): Promise<Database> {
     )
   `);
 
-  // Migration: add aiEntry column to existing databases
-  try {
-    database.run(`ALTER TABLE prompt_templates ADD COLUMN aiEntry TEXT NOT NULL DEFAULT ''`);
-  } catch (e) {
-    // Column already exists, ignore
-  }
-
-  // Migration: add name column to existing databases
-  try {
-    database.run(`ALTER TABLE prompt_templates ADD COLUMN name TEXT NOT NULL DEFAULT 'Untitled'`);
-  } catch (e) {
-    // Column already exists, ignore
-  }
-
-  // Migration: add note column to existing databases
-  try {
-    database.run(`ALTER TABLE prompt_templates ADD COLUMN note TEXT`);
-  } catch (e) {
-    // Column already exists, ignore
-  }
-
   database.run(`CREATE INDEX IF NOT EXISTS idx_prompt_templates_entry ON prompt_templates(aiEntry)`);
 
-  // Prompt version history table
   database.run(`
     CREATE TABLE IF NOT EXISTS prompt_versions (
       id TEXT PRIMARY KEY,
@@ -220,7 +254,6 @@ async function initDatabase(): Promise<Database> {
 
   database.run(`CREATE INDEX IF NOT EXISTS idx_prompt_versions_template ON prompt_versions(promptTemplateId)`);
 
-  // Model configurations table
   database.run(`
     CREATE TABLE IF NOT EXISTS model_configs (
       id TEXT PRIMARY KEY,
@@ -242,8 +275,34 @@ async function initDatabase(): Promise<Database> {
 
   database.run(`CREATE INDEX IF NOT EXISTS idx_model_configs_prompt ON model_configs(promptTemplateId)`);
 
-  saveDatabase(database);
+  // ==================== Schema 迁移系统 ====================
+  // 检查当前 schema 版本
+  const currentVersion = getSchemaVersion(database);
 
+  if (currentVersion < CURRENT_SCHEMA_VERSION) {
+    console.log(`🔄 Schema 迁移: v${currentVersion} → v${CURRENT_SCHEMA_VERSION}`);
+    // 迁移前先备份
+    backupDatabaseBeforeMigration(database);
+  }
+
+  // v0 → v1: 添加 projects 表缺失的列
+  if (currentVersion < 1) {
+    safeAlter(database, `ALTER TABLE projects ADD COLUMN aiMeta TEXT`, "projects.aiMeta");
+    safeAlter(database, `ALTER TABLE projects ADD COLUMN rawBlueprintData TEXT`, "projects.rawBlueprintData");
+    safeAlter(database, `ALTER TABLE prompt_templates ADD COLUMN aiEntry TEXT NOT NULL DEFAULT ''`, "prompt_templates.aiEntry");
+    safeAlter(database, `ALTER TABLE prompt_templates ADD COLUMN name TEXT NOT NULL DEFAULT 'Untitled'`, "prompt_templates.name");
+    safeAlter(database, `ALTER TABLE prompt_templates ADD COLUMN note TEXT`, "prompt_templates.note");
+    setSchemaVersion(database, 1);
+  }
+
+  // v1 → v2: 当前版本，无需额外迁移（schema 已包含所有列）
+  if (currentVersion < 2) {
+    // v2 的 schema 已经通过 CREATE TABLE IF NOT EXISTS 创建
+    // 这里不需要额外迁移
+    setSchemaVersion(database, 2);
+  }
+
+  saveDatabase(database);
   return database;
 }
 
