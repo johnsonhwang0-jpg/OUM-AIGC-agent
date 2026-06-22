@@ -4,7 +4,7 @@ import {
   MessageSquare, Send, RefreshCw, FileText, Settings, ArrowRight, Gamepad2, 
   CheckCircle2, XCircle, Compass, HelpCircle, Info, Download, Copy, AlertCircle, 
   Award, Trophy, ChevronRight, CornerDownRight, Volume2, Gamepad, Lock, Code2, Terminal,
-  Maximize2, Minimize2, X, Eye
+  Maximize2, Minimize2, X, Eye, Scissors, FileCode, Rocket
 } from "lucide-react";
 import { useLanguage, type TranslationKey } from "./i18n/LanguageContext";
 
@@ -2403,31 +2403,41 @@ ${script.conclusion}
                 <div className="max-w-4xl mx-auto space-y-6">
                   
                   {/* Introduction Call-out Section */}
-                  <div className="bg-gradient-to-br from-cyan-950/40 to-blue-950/40 border border-cyan-500/30 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 shadow-lg">
-                    <div className="flex gap-5 items-start md:items-center">
-                      <div className="p-3.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-xl shrink-0">
-                        <BookOpen className="w-7 h-7" />
+                  <div className="bg-gradient-to-br from-cyan-950/40 to-blue-950/40 border border-cyan-500/30 rounded-2xl p-6 shadow-lg">
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="p-2.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-xl shrink-0">
+                        <BookOpen className="w-5 h-5" />
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-base font-display text-white">
-                          {language === "en" ? "Turn Books into Games: One-Stop AI Teaching Solution Generator" : "一书变多关：一站式 AI 教学方案生成器"}
-                        </h3>
-                        <p className="text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                          {language === "en" 
-                            ? "Upload your elementary, middle school, or adult professional training PDF textbook below. The system will intelligently identify content, instantly extract sub-units, and provide highly playable matching games, story choices, code puzzles and more for you to customize and download!"
-                            : "在下方挂载您已准备的小学、初高中或者成人专业培训 PDF 教料。系统将智能识别内容，秒级提炼子单元并配套高可玩性的连连看、剧情抉择、代码拼图等闯关，供您定制和下载！"}
-                        </p>
-                      </div>
+                      <h3 className="font-semibold text-base font-display text-white">
+                        {language === "en" ? "5 Steps: Textbook → Interactive Games" : "5步：教材变互动游戏"}
+                      </h3>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleSelectTemplate("astro-phys")}
-                      className="px-4 py-2.5 text-xs font-bold bg-cyan-500 hover:bg-cyan-400 active:scale-95 text-white shadow-[0_0_12px_rgba(6,182,212,0.4)] hover:shadow-[0_0_16px_rgba(6,182,212,0.6)] rounded-xl transition flex items-center justify-center gap-1.5 shrink-0 self-stretch md:self-center cursor-pointer"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      {language === "en" ? "Use Demo Data" : "使用样例数据"}
-                    </button>
+                    <div className="flex items-center justify-between gap-1">
+                      {[
+                        { icon: Upload, label: language === "en" ? "Import" : "导入教材", desc: language === "en" ? "Upload PDF" : "上传PDF" },
+                        { icon: Scissors, label: language === "en" ? "Slice" : "智能切片", desc: language === "en" ? "AI split" : "AI拆分" },
+                        { icon: FileText, label: language === "en" ? "Extract" : "提炼内容", desc: language === "en" ? "Key points" : "知识点" },
+                        { icon: FileCode, label: language === "en" ? "Script" : "互动脚本", desc: language === "en" ? "Scenario" : "场景设计" },
+                        { icon: Rocket, label: language === "en" ? "Build App" : "生成游戏", desc: language === "en" ? "HTML game" : "HTML游戏" },
+                      ].map((step, i) => (
+                        <div key={i} className="flex items-center flex-1">
+                          <div className="flex flex-col items-center gap-1.5 flex-1">
+                            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                              <step.icon className="w-5 h-5" />
+                            </div>
+                            <span className="text-xs font-semibold text-white text-center">{step.label}</span>
+                            <span className="text-[10px] text-slate-500 text-center">{step.desc}</span>
+                          </div>
+                          {i < 4 && (
+                            <div className="flex items-center text-cyan-500/30 shrink-0 px-1">
+                              <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
+                                <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Project List Panel */}
