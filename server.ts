@@ -1176,7 +1176,9 @@ app.post("/api/generate-script", async (req, res) => {
       infoDensity,
       cohesionDetail,
       designRationale,
-      extractedContent 
+      extractedContent,
+      systemPrompt,
+      userPromptTemplate
     } = req.body;
 
     if (!chapterTitle) {
@@ -1265,21 +1267,39 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
 
 请确保它不是题库，而是一个学生可以通过观察、干预、验证、修正来完成的互动模拟器。`;
 
+    // Use custom prompts if provided, otherwise use hardcoded defaults
+    const finalSystemInstruction = systemPrompt || systemInstruction;
+
+    let finalPromptText: string;
+    if (userPromptTemplate) {
+      finalPromptText = userPromptTemplate
+        .replace(/\{bookTitle\}/g, bookTitle || "Textbook")
+        .replace(/\{chapterTitle\}/g, chapterTitle || "")
+        .replace(/\{chapterIndex\}/g, String(chapterIndex || ""))
+        .replace(/\{summary\}/g, typeof summary === "string" ? summary : JSON.stringify(summary || {}, null, 2))
+        .replace(/\{infoDensity\}/g, typeof infoDensity === "string" ? infoDensity : JSON.stringify(infoDensity || {}, null, 2))
+        .replace(/\{cohesionDetail\}/g, typeof cohesionDetail === "string" ? cohesionDetail : JSON.stringify(cohesionDetail || {}, null, 2))
+        .replace(/\{designRationale\}/g, designRationale || "未提供")
+        .replace(/\{extractedContent\}/g, (extractedContent || "General academic curriculum rules relative to " + chapterTitle).substring(0, 8000));
+    } else {
+      finalPromptText = promptText;
+    }
+
     let outputText: string;
     
     if (AI_PROVIDER === "deepseek") {
       console.log(`🔄 Using DeepSeek (deepseek-v4-flash) for scenario script generation...`);
-      outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 6144, false);
+      outputText = await callDeepSeek(finalPromptText, finalSystemInstruction, "deepseek-v4-flash", 6144, false);
     } else if (AI_PROVIDER === "dashscope") {
       console.log("🔄 Using DashScope (通义千问) for scenario script generation...");
-      outputText = await callDashScope(promptText, systemInstruction, "", false);
+      outputText = await callDashScope(finalPromptText, finalSystemInstruction, "", false);
     } else if (AI_PROVIDER === "ollama") {
       console.log("🔄 Using Ollama for scenario script generation...");
-      outputText = await callOllama(promptText, systemInstruction, "", false);
+      outputText = await callOllama(finalPromptText, finalSystemInstruction, "", false);
     } else if (AI_PROVIDER === "huggingface") {
       console.log("🔄 Using Hugging Face for scenario script generation...");
-      outputText = await callHuggingFace(promptText, systemInstruction);
-    } else {
+      outputText = await callHuggingFace(finalPromptText, finalSystemInstruction);
+    } else if (AI_PROVIDER === "gemini") {
       const key = process.env.GEMINI_API_KEY;
       if (!key || key.trim() === "" || key.trim() === "your-actual-gemini-api-key-here") {
         return res.status(401).json({ 
@@ -1294,9 +1314,9 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
       
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: promptText,
+        contents: finalPromptText,
         config: {
-          systemInstruction
+          systemInstruction: finalSystemInstruction
         }
       });
       
@@ -1311,8 +1331,8 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
       _meta: {
         model: AI_PROVIDER === "deepseek" ? (process.env.DEEPSEEK_SCRIPT_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-chat") : AI_PROVIDER,
         provider: AI_PROVIDER,
-        systemInstruction,
-        userPrompt: promptText
+        systemInstruction: finalSystemInstruction,
+        userPrompt: finalPromptText
       }
     });
 
@@ -1324,18 +1344,23 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
 
 app.post("/api/generate-app-code", async (req, res) => {
   try {
-    const { bookTitle, chapterTitle, coveredChapters, scriptMarkdown, model } = req.body;
+    const { bookTitle, chapterTitle, coveredChapters, scriptMarkdown, model, systemPrompt, userPromptTemplate } = req.body;
     if (!scriptMarkdown || typeof scriptMarkdown !== "string") {
       return res.status(400).json({ error: "Missing scriptMarkdown." });
     }
 
-    const systemInstruction = `你是一个顶级的全栈工程师，必须输出可直接运行的完整代码，注重UI美感和交互细节，如果代码被截断要主动重试。只需要输出代码，不需要解释文字。`;
+    const defaultSystemInstruction = `你是一个顶级的全栈工程师，必须输出可直接运行的完整代码，注重UI美感和交互细节，如果代码被截断要主动重试。只需要输出代码，不需要解释文字。`;
 
-    const promptText = `根据以下要求，帮我实现一个web端的html。这是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。
+    const defaultPromptText = `根据以下要求，帮我实现一个web端的html。这是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。
 
 以下是该章节的互动脚本内容，请根据脚本中的场景、角色、交互流程、反馈规则等来实现HTML场景模拟游戏：
 
 ${scriptMarkdown}`;
+
+    const systemInstruction = systemPrompt || defaultSystemInstruction;
+    const promptText = userPromptTemplate
+      ? userPromptTemplate.replace(/\{scriptMarkdown\}/g, scriptMarkdown).replace(/\{bookTitle\}/g, bookTitle || "").replace(/\{chapterTitle\}/g, chapterTitle || "")
+      : defaultPromptText;
 
     let outputText: string;
     const selectedModel = model || "deepseek-v4-flash";

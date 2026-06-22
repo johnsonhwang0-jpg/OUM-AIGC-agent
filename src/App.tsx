@@ -54,6 +54,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import ModelManagement from "./components/ModelManagement";
 import SystemSettings from "./components/SystemSettings";
+import ApiDebugDrawer from "./components/ApiDebugDrawer";
 
 // Extract valid HTML from AI response, stripping markdown fences and explanatory text
 function extractValidHtml(raw: string): string {
@@ -188,6 +189,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'simulator' | 'code' | 'original' | 'edit'>('simulator');
   const [showModelManagement, setShowModelManagement] = useState<boolean>(false);
   const [showApiDrawer, setShowApiDrawer] = useState<boolean>(false);
+  const [showSliceSettings, setShowSliceSettings] = useState<boolean>(false);
   const [apiDebugInfo, setApiDebugInfo] = useState<{
     model: string;
     systemPrompt: string;
@@ -329,6 +331,83 @@ function greet(name) {
     }
     return '';
   };
+
+  const sliceSystemPrompt = `你是一名为教师/课程设计者提供服务的教学切片专家。我将给你一本书的目录，请你帮我将其切分成多个教学切片，每个切片用于后续设计互动内容。
+ 
+一、核心切片原则
+信息负荷控制：每个切片包含 3-6 个核心概念（或 5-10 条具体策略/事实），对应 8-18 分钟的学习时长
+知识内聚性：每个切片内的知识点必须能共同回答一个完整的子问题或完成一个闭环的子任务
+章节覆盖格式：使用 a-b 格式表示连续章节（如 2.1-2.3），单个章节写成 a（如 5.2）
+二、输出格式要求
+请输出纯 JSON 格式，结构如下：
+{
+  "bookTitle": "从目录中提取的书名",
+  "totalSlices": 22,
+  "slices": [
+    {
+      "sliceId": "S1",
+      "title": "切片主题名称（一句话，让学生知道这个切片在讲什么）",
+      "coveredChapters": "1.1-1.2/1.1/1.1.1-1.1.5",
+      "summary": {
+        "learnedPoints": [
+          "能说出/理解/区分XXX（具体可陈述的知识点）",
+          "能描述XXX的X个阶段/类型",
+          "能解释XXX与XXX的关系"
+        ],
+        "practicalProblems": [
+          "当...时，你能...（具体场景化描述）",
+          "当...时，你能..."
+        ]
+      },
+      "infoDensity": {
+        "conceptCount": 4,
+        "factCount": 2,
+        "abstractLevel": "低/中/高",
+        "nestingLevel": "无/两层/三层",
+        "suggestedMinutes": "8-12",
+        "rationale": "用2-3句话说明：为什么这个负荷是合理的？"
+      },
+      "cohesionDetail": {
+        "cohesionType": "因果链/时序递进/对比争鸣/问题-解决链/分类并列/工具性内聚/解释性递进",
+        "mechanism": "用3-4句话说明知识点之间的具体连接方式（如：A导致B，B决定C；前3个概念共同支撑第4个；两个考点并列但共同服务于一个目的）",
+        "coreQuestion": "用一句话概括：这个切片，几个知识点共同指向的同一个核心问题是什么？"
+      },
+      "designRationale": "结合本切片所有知识点，描述 2-3 个综合应用场景：当学习者在什么具体情境下，需要同时运用这些知识点来解决什么实际问题。要描述完整的问题场景，而非孤立地对应单个知识点。"
+    }
+  ]
+}
+三、字段详细填写规范
+sliceId: S1, S2, S3… 按顺序编号
+title: 一句话主题，建议用"动词+名词"或"核心问题"形式
+coveredChapters: 使用 a-b 格式，如 2.1-2.3；单节写 3.5。极其重要：coveredChapters 中的章节编号必须严格来自上方目录中实际存在的章节！层级编号规则：目录采用多级编号，如果你想覆盖的是子章节，必须写完整编号如 "1.1.1-1.1.4"，不能写成 "1.1-1.4"。
+summary.learnedPoints: 3-5条，每条以"能…"开头，可验证
+summary.practicalProblems: 2-3条，格式为"当【具体场景】时，你能【具体行动】"
+infoDensity.conceptCount: 纯理论概念的数量
+infoDensity.factCount: 具体事实/策略/步骤的数量
+infoDensity.abstractLevel: 低=可立即操作；中=需简单推理；高=需理论理解
+infoDensity.nestingLevel: 无=并列；两层=概念下有子概念；三层=需多步推理
+infoDensity.suggestedMinutes: 基于conceptCount×2~3分钟 + factCount×0.5~1分钟估算
+infoDensity.rationale: 必须包含判断结论+依据，如超限则给出拆分建议
+cohesionDetail.cohesionType: 从括号中选择最匹配的一项
+cohesionDetail.mechanism: 明确写出"X连接Y""A支撑B""C和D共同指向E"
+cohesionDetail.coreQuestion: 一个完整的问句，聚焦多个知识点的共同指向
+designRationale: 描述2-3个综合应用场景，说明完整的问题场景
+四、重要提醒
+如果某一章/节的信息负荷过高（conceptCount > 7 或 abstractLevel=高 且 conceptCount > 5），请在 infoDensity.rationale 中明确建议"拆分为2个切片"
+如果某一章/节的信息负荷过低（conceptCount < 2 且 factCount < 3），请合并到相邻切片
+每个切片必须能让一个普通教师/学生在 20 分钟内完成理解（不含练习）
+输出必须是有效的纯 JSON，不要包含注释或额外文字`;
+
+  const sliceUserPromptTemplate = `请为以下书籍进行教学切片，书籍名称："{{bookTitle}}"。
+
+{{directoryText}}
+
+请严格按照上述目录结构进行切片，只使用我提供的书名和目录信息，不要使用你训练数据中的任何其他课本内容。
+
+⚠️ 关于 coveredChapters 字段的特别提醒：
+1. 目录采用手风琴层级结构，例如 Topic 3 下面可能有 3.1、3.2、3.3...3.7，但可能没有 3.8 或 3.9。你在填写 coveredChapters 时，必须先确认目录中实际存在哪些章节编号，只能使用目录中真实存在的章节！
+2. 注意多层级编号的区别：如果 3.1 下面有子章节 3.1.1、3.1.2...3.1.5，你想覆盖这些子章节时，coveredChapters 必须写成 "3.1.1-3.1.5"，绝对不能写成 "3.1-3.5"（这表示的是 3.1、3.2、3.3、3.4、3.5 五个同级章节）！
+3. 填写前请先确认你要覆盖的章节在目录中的完整编号，然后把完整编号写进 coveredChapters。`;
 
   const simulationBlueprintSystemPrompt = `你是一名“教学模拟产品设计师 + 互动学习脚本架构师”。
 
@@ -1273,6 +1352,20 @@ function greet(name) {
       timestamp: new Date().toLocaleTimeString()
     }));
 
+    // Fetch saved prompts from DB
+    let savedSystemPrompt: string | undefined;
+    let savedUserPromptTemplate: string | undefined;
+    try {
+      const res = await fetch('/api/prompt-templates?aiEntry=script-gen');
+      const data = await res.json();
+      if (data && data.length > 0) {
+        savedSystemPrompt = data[0].systemPrompt || undefined;
+        savedUserPromptTemplate = data[0].userPromptTemplate || undefined;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch saved prompts, using defaults');
+    }
+
     try {
       const { extractedOriginalText } = await getExtractedTextForModuleAsync(
         mod, directoryItems, bookContentText,
@@ -1302,7 +1395,9 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
         infoDensity: mod.infoDensity,
         cohesionDetail: mod.cohesionDetail,
         designRationale: mod.designRationale,
-        extractedContent: extractedOriginalText.substring(0, 8000)
+        extractedContent: extractedOriginalText.substring(0, 8000),
+        systemPrompt: savedSystemPrompt,
+        userPromptTemplate: savedUserPromptTemplate
       };
 
       const response = await fetch("/api/generate-script", {
@@ -1883,6 +1978,20 @@ ${script.conclusion}
       ? `🚀 Generating scenario simulation game based on slice **${mod.chapterIndex} · ${mod.title}** interactive script...`
       : `🚀 正在基于切片 **${mod.chapterIndex} · ${mod.title}** 的互动脚本生成场景模拟游戏...`);
 
+    // Fetch saved prompts from DB
+    let appSavedSystemPrompt: string | undefined;
+    let appSavedUserPromptTemplate: string | undefined;
+    try {
+      const res = await fetch('/api/prompt-templates?aiEntry=app-code');
+      const data = await res.json();
+      if (data && data.length > 0) {
+        appSavedSystemPrompt = data[0].systemPrompt || undefined;
+        appSavedUserPromptTemplate = data[0].userPromptTemplate || undefined;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch saved app prompts, using defaults');
+    }
+
     try {
       const response = await fetch('/api/generate-app-code', {
         method: 'POST',
@@ -1892,7 +2001,9 @@ ${script.conclusion}
           chapterTitle: `${mod.chapterIndex} · ${mod.title}`,
           coveredChapters: mod.coveredChapters,
           scriptMarkdown: markdown,
-          model: appModel
+          model: appModel,
+          systemPrompt: appSavedSystemPrompt,
+          userPromptTemplate: appSavedUserPromptTemplate
         })
       });
 
@@ -2645,6 +2756,14 @@ ${script.conclusion}
               )}
 
               <button 
+                onClick={() => setShowSliceSettings(true)}
+                className="p-2.5 rounded-xl transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
+                title={language === "en" ? "Slice Settings" : "切片设置"}
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+
+              <button 
                 type="button"
                 onClick={() => handleSplitBook(false)}
                 disabled={isParsing || !bookContentText.trim() || !bookTitle.trim()}
@@ -2750,6 +2869,14 @@ ${script.conclusion}
                   >
                     <Plus className="w-4 h-4" />
                     {language === "en" ? "Manually Add New Level" : "手动增设新关卡"}
+                  </button>
+
+                  <button
+                    onClick={() => setShowSliceSettings(true)}
+                    className="p-2.5 rounded-xl transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
+                    title={language === "en" ? "Slice Settings" : "切片设置"}
+                  >
+                    <Settings className="w-4 h-4" />
                   </button>
 
                   <button
@@ -3689,134 +3816,43 @@ API地址：https://api.deepseek.com/chat/completions`}
             </div>
           )}
 
-          {/* API Debug Drawer */}
-          {showApiDrawer && (
-            <>
-              <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setShowApiDrawer(false)} />
-              <div className="fixed top-0 right-0 h-full w-[520px] bg-[#0a0a0f] border-l border-white/10 z-50 flex flex-col shadow-2xl">
-                <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
-                  <div className="flex items-center gap-2">
-                    <Settings className="w-4 h-4 text-purple-400" />
-                    <h3 className="font-bold text-sm text-white">{language === "en" ? "API Debug Panel" : "API 调用调试面板"}</h3>
-                  </div>
-                  <button onClick={() => setShowApiDrawer(false)} className="p-1.5 hover:bg-white/10 rounded-lg transition cursor-pointer">
-                    <X className="w-4 h-4 text-slate-400" />
-                  </button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Calling Model" : "调用模型"}</label>
-                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 text-xs text-purple-400 font-mono font-bold">{apiDebugInfo.model}</div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Call Status" : "调用状态"}</label>
-                    <div className={`rounded-lg p-3 text-xs font-bold flex items-center gap-2 ${
-                      apiDebugInfo.status === 'idle' ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20' :
-                      apiDebugInfo.status === 'calling' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                      apiDebugInfo.status === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                      'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                    }`}>
-                      {apiDebugInfo.status === 'idle' && <Info className="w-3.5 h-3.5" />}
-                      {apiDebugInfo.status === 'calling' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                      {apiDebugInfo.status === 'success' && <CheckCircle2 className="w-3.5 h-3.5" />}
-                      {apiDebugInfo.status === 'error' && <XCircle className="w-3.5 h-3.5" />}
-                      {apiDebugInfo.status === 'idle' && (language === "en" ? "Not called yet" : "尚未调用")}
-                      {apiDebugInfo.status === 'calling' && (language === "en" ? "Calling..." : "正在调用中...")}
-                      {apiDebugInfo.status === 'success' && (language === "en" ? "Call successful" : "调用成功")}
-                      {apiDebugInfo.status === 'error' && (language === "en" ? "Call failed" : "调用失败")}
-                      {apiDebugInfo.timestamp && <span className="ml-auto text-[10px] opacity-60 font-mono">{apiDebugInfo.timestamp}</span>}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "System Prompt" : "系统指令"}</label>
-                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-48 overflow-y-auto">
-                      <pre className="text-[10px] text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">{apiDebugInfo.systemPrompt || simulationBlueprintSystemPrompt}</pre>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "User Prompt" : "用户指令"}</label>
-                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-48 overflow-y-auto">
-                      <pre className="text-[10px] text-cyan-300 whitespace-pre-wrap leading-relaxed font-mono">{apiDebugInfo.userPrompt || (language === "en" ? "(Not yet generated)" : "（尚未生成）")}</pre>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "API Raw Response" : "API 原始返回"}</label>
-                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-64 overflow-y-auto">
-                      <pre className="text-[10px] text-emerald-300 whitespace-pre-wrap leading-relaxed font-mono">{apiDebugInfo.rawResponse || (language === "en" ? "(No response)" : "（无返回结果）")}</pre>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
+          {/* Slice AI Config Drawer */}
+          <ApiDebugDrawer
+            show={showSliceSettings}
+            onClose={() => setShowSliceSettings(false)}
+            aiEntry="smart-split"
+            title={language === "en" ? "Slice - AI Config" : "切片-AI配置"}
+            iconColor="text-cyan-400"
+            model="deepseek-v4-flash"
+            defaultSystemPrompt={sliceSystemPrompt}
+            defaultUserPrompt={sliceUserPromptTemplate}
+          />
 
-          {/* Step 5 API Debug Drawer */}
-          {showAppApiDrawer && (
-            <>
-              <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setShowAppApiDrawer(false)} />
-              <div className="fixed top-0 right-0 h-full w-[520px] bg-[#0a0a0f] border-l border-white/10 z-50 flex flex-col shadow-2xl">
-                <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
-                  <div className="flex items-center gap-2">
-                    <Settings className="w-4 h-4 text-cyan-400" />
-                    <h3 className="font-bold text-sm text-white">App 构建 API 调试面板</h3>
-                  </div>
-                  <button onClick={() => setShowAppApiDrawer(false)} className="p-1.5 hover:bg-white/10 rounded-lg transition cursor-pointer">
-                    <X className="w-4 h-4 text-slate-400" />
-                  </button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">调用模型</label>
-                    <select
-                      value={appModel}
-                      onChange={(e) => setAppModel(e.target.value)}
-                      className="w-full bg-[#050508] border border-white/10 rounded-lg p-3 text-xs text-cyan-400 font-mono font-bold cursor-pointer appearance-none focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
-                    >
-                      <option value="deepseek-v4-flash">deepseek-v4-flash</option>
-                      <option value="qwen3.7-plus">qwen3.7-plus</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">调用状态</label>
-                    <div className={`rounded-lg p-3 text-xs font-bold flex items-center gap-2 ${
-                      appApiDebugInfo.status === 'idle' ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20' :
-                      appApiDebugInfo.status === 'calling' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                      appApiDebugInfo.status === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                      'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                    }`}>
-                      {appApiDebugInfo.status === 'idle' && <Info className="w-3.5 h-3.5" />}
-                      {appApiDebugInfo.status === 'calling' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                      {appApiDebugInfo.status === 'success' && <CheckCircle2 className="w-3.5 h-3.5" />}
-                      {appApiDebugInfo.status === 'error' && <XCircle className="w-3.5 h-3.5" />}
-                      {appApiDebugInfo.status === 'idle' && '尚未调用'}
-                      {appApiDebugInfo.status === 'calling' && '正在调用中...'}
-                      {appApiDebugInfo.status === 'success' && '调用成功'}
-                      {appApiDebugInfo.status === 'error' && '调用失败'}
-                      {appApiDebugInfo.timestamp && <span className="ml-auto text-[10px] opacity-60 font-mono">{appApiDebugInfo.timestamp}</span>}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">系统指令</label>
-                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-48 overflow-y-auto">
-                      <pre className="text-[10px] text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">{appApiDebugInfo.systemPrompt}</pre>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">用户指令</label>
-                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-48 overflow-y-auto">
-                      <pre className="text-[10px] text-cyan-300 whitespace-pre-wrap leading-relaxed font-mono">{appApiDebugInfo.userPrompt || '（尚未生成）'}</pre>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">API 原始返回</label>
-                    <div className="bg-[#050508] border border-white/10 rounded-lg p-3 max-h-64 overflow-y-auto">
-                      <pre className="text-[10px] text-emerald-300 whitespace-pre-wrap leading-relaxed font-mono">{appApiDebugInfo.rawResponse || '（无返回结果）'}</pre>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
+          {/* Script Generation AI Config Drawer */}
+          <ApiDebugDrawer
+            show={showApiDrawer}
+            onClose={() => setShowApiDrawer(false)}
+            aiEntry="script-gen"
+            title={language === "en" ? "Script - AI Config" : "脚本-AI配置"}
+            iconColor="text-purple-400"
+            model="deepseek-chat"
+            defaultSystemPrompt={simulationBlueprintSystemPrompt}
+            defaultUserPrompt=""
+            apiDebugInfo={apiDebugInfo}
+          />
+
+          {/* App Generation AI Config Drawer */}
+          <ApiDebugDrawer
+            show={showAppApiDrawer}
+            onClose={() => setShowAppApiDrawer(false)}
+            aiEntry="app-code"
+            title={language === "en" ? "App - AI Config" : "App-AI配置"}
+            iconColor="text-cyan-400"
+            model={appModel}
+            defaultSystemPrompt={appApiDebugInfo.systemPrompt}
+            defaultUserPrompt={appApiDebugInfo.userPrompt}
+            apiDebugInfo={appApiDebugInfo}
+          />
 
           {/* Step 5 View: App Building from selected slice */}
           {activeStep === 5 && (
