@@ -67,40 +67,52 @@ const ApiDebugDrawer: React.FC<ApiDebugDrawerProps> = ({
   const handleSave = async () => {
     setSaving(true);
     try {
-      // Find existing prompt for this aiEntry
+      // Find existing prompts for this aiEntry
       const res = await fetch(`/api/prompt-templates?aiEntry=${aiEntry}`);
       const data = await res.json();
       
+      const nameMap = {
+        "smart-split": language === "en" ? "Smart Split Prompt" : "智能切片提示词",
+        "script-gen": language === "en" ? "Script Generation Prompt" : "互动脚本生成提示词",
+        "app-code": language === "en" ? "App Code Generation Prompt" : "场景游戏生成提示词",
+      };
+      
+      // Deactivate all existing templates
       if (data && data.length > 0) {
-        // Update existing
-        await fetch(`/api/prompt-templates/${data[0].id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: data[0].name,
-            systemPrompt: editSystemPrompt,
-            userPromptTemplate: editUserPrompt,
-            note: data[0].note,
-          }),
-        });
-      } else {
-        // Create new
-        const nameMap = {
-          "smart-split": language === "en" ? "Smart Split Prompt" : "智能切片提示词",
-          "script-gen": language === "en" ? "Script Generation Prompt" : "互动脚本生成提示词",
-          "app-code": language === "en" ? "App Code Generation Prompt" : "场景游戏生成提示词",
-        };
-        await fetch("/api/prompt-templates", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            aiEntry,
-            name: nameMap[aiEntry],
-            systemPrompt: editSystemPrompt,
-            userPromptTemplate: editUserPrompt,
-          }),
-        });
+        for (const template of data) {
+          if (template.isActive) {
+            await fetch(`/api/prompt-templates/${template.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name: template.name,
+                systemPrompt: template.systemPrompt,
+                userPromptTemplate: template.userPromptTemplate,
+                note: template.note,
+                isActive: false,
+              }),
+            });
+          }
+        }
       }
+      
+      // Create a NEW active template (archive approach)
+      const versionNum = data ? data.length + 1 : 1;
+      const newName = `${nameMap[aiEntry]} v${versionNum}`;
+      const createRes = await fetch("/api/prompt-templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          aiEntry,
+          name: newName,
+          systemPrompt: editSystemPrompt,
+          userPromptTemplate: editUserPrompt,
+          isActive: true,
+        }),
+      });
+      const newTemplate = await createRes.json();
+      
+      // Update state with the newly created template
       setSavedPrompt({ systemPrompt: editSystemPrompt, userPrompt: editUserPrompt, note: "" });
       setEditing(false);
     } catch (e) {

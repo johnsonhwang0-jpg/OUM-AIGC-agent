@@ -607,8 +607,8 @@ export async function getGeneratedAppCode(projectId: string, moduleId: string): 
 export async function getAllPromptTemplates(aiEntry?: string): Promise<PromptTemplate[]> {
   const database = await getDatabase();
   const query = aiEntry
-    ? `SELECT * FROM prompt_templates WHERE aiEntry = ? ORDER BY createdAt DESC`
-    : `SELECT * FROM prompt_templates ORDER BY createdAt DESC`;
+    ? `SELECT * FROM prompt_templates WHERE aiEntry = ? ORDER BY isActive DESC, createdAt DESC`
+    : `SELECT * FROM prompt_templates ORDER BY isActive DESC, createdAt DESC`;
   const result = database.exec(query, aiEntry ? [aiEntry] : []);
 
   if (result.length === 0) return [];
@@ -652,6 +652,7 @@ export async function createPromptTemplate(data: {
   systemPrompt?: string;
   userPromptTemplate?: string;
   note?: string;
+  isActive?: boolean;
 }): Promise<PromptTemplate> {
   const database = await getDatabase();
   const id = `pt-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -659,13 +660,14 @@ export async function createPromptTemplate(data: {
 
   database.run(
     `INSERT INTO prompt_templates (id, aiEntry, name, systemPrompt, userPromptTemplate, isActive, note, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       data.aiEntry,
       data.name,
       data.systemPrompt || null,
       data.userPromptTemplate || null,
+      data.isActive !== undefined ? (data.isActive ? 1 : 0) : 0,
       data.note || null,
       now,
       now,
@@ -679,7 +681,7 @@ export async function createPromptTemplate(data: {
     name: data.name,
     systemPrompt: data.systemPrompt || null,
     userPromptTemplate: data.userPromptTemplate || null,
-    isActive: false,
+    isActive: data.isActive !== undefined ? data.isActive : false,
     note: data.note || null,
     createdAt: now,
     updatedAt: now,
@@ -691,6 +693,7 @@ export async function updatePromptTemplate(id: string, data: {
   systemPrompt?: string;
   userPromptTemplate?: string;
   note?: string;
+  isActive?: boolean;
 }): Promise<PromptTemplate | null> {
   const database = await getDatabase();
   const existing = await getPromptTemplate(id);
@@ -702,15 +705,17 @@ export async function updatePromptTemplate(id: string, data: {
     systemPrompt: data.systemPrompt !== undefined ? data.systemPrompt : existing.systemPrompt,
     userPromptTemplate: data.userPromptTemplate !== undefined ? data.userPromptTemplate : existing.userPromptTemplate,
     note: data.note !== undefined ? data.note : existing.note,
+    isActive: data.isActive !== undefined ? data.isActive : existing.isActive,
   };
 
   database.run(
-    `UPDATE prompt_templates SET name=?, systemPrompt=?, userPromptTemplate=?, note=?, updatedAt=? WHERE id=?`,
+    `UPDATE prompt_templates SET name=?, systemPrompt=?, userPromptTemplate=?, note=?, isActive=?, updatedAt=? WHERE id=?`,
     [
       updated.name,
       updated.systemPrompt,
       updated.userPromptTemplate,
       updated.note,
+      updated.isActive ? 1 : 0,
       now,
       id,
     ]

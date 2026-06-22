@@ -1157,10 +1157,33 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
     );
 
     // 构造API请求数据 - 完全使用当前状态值
-    const requestPayload = {
+    const requestPayload: any = {
       title: bookTitle,
       directoryStructure: directoryItems
     };
+
+    // Fetch latest prompt from DB for smart-split
+    try {
+      const res = await fetch('/api/prompt-templates?aiEntry=smart-split');
+      const data = await res.json();
+      if (data && data.length > 0) {
+        const activePrompt = data.find((p: any) => p.isActive) || data[0];
+        requestPayload.systemPrompt = activePrompt.systemPrompt || undefined;
+        requestPayload.userPromptTemplate = activePrompt.userPromptTemplate || undefined;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch slice prompts, using defaults');
+    }
+
+    // Set API debug calling status
+    setApiDebugInfo({
+      model: 'deepseek-v4-flash',
+      systemPrompt: requestPayload.systemPrompt || sliceSystemPrompt,
+      userPrompt: '',
+      status: 'calling',
+      rawResponse: '',
+      timestamp: new Date().toLocaleTimeString()
+    });
 
     // 详细日志：记录发送给AI的精确数据
     console.log("\n📤 ========== SENDING TO API ==========");
@@ -1201,6 +1224,18 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       if (currentAiMeta) {
         setAiMeta(currentAiMeta);
       }
+      
+      // Update API debug info with actual call results
+      setApiDebugInfo(prev => ({
+        ...prev,
+        model: _meta?.model || prev.model,
+        systemPrompt: _meta?.systemInstruction || prev.systemPrompt,
+        userPrompt: _meta?.userPrompt || prev.userPrompt,
+        status: 'success',
+        rawResponse: JSON.stringify(data, null, 2).substring(0, 2000),
+        timestamp: new Date().toLocaleTimeString()
+      }));
+      
       setRawBlueprintData(currentRawBlueprint);
       console.log("\n📥 ========== RECEIVED FROM API ==========");
       console.log("📕 bookTitle from AI:", data.bookTitle);
@@ -1317,6 +1352,15 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       console.error("❌ handleSplitBook error:", err);
       setIsParsing(false);
       setParseError(err.message || (language === "en" ? "Network request timed out, please try again." : "网络请求超时，请重试。"));
+      
+      // Update API debug info with error
+      setApiDebugInfo(prev => ({
+        ...prev,
+        status: 'error',
+        rawResponse: `Error: ${err.message || "Unknown error"}`,
+        timestamp: new Date().toLocaleTimeString()
+      }));
+      
       setAiMeta({
         model: aiMeta?.model || "unknown",
         provider: aiMeta?.provider || "unknown",

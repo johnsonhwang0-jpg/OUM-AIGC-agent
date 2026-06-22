@@ -690,7 +690,7 @@ app.get("/api/projects/:id/images", async (req, res) => {
  */
 app.post("/api/parse-book", async (req, res) => {
   try {
-    const { title, fullText, directoryStructure } = req.body;
+    const { title, fullText, directoryStructure, systemPrompt, userPromptTemplate } = req.body;
 
     // Log the dynamic data being received from frontend
     console.log("\n📚 ========== PARSE BOOK API CALL ==========");
@@ -808,13 +808,26 @@ designRationale 	 描述2-3个综合应用场景，说明完整的问题场景
 
     const promptMessage = `请为以下书籍进行教学切片，书籍名称："${title}"。\n\n${directoryText}\n\n请严格按照上述目录结构进行切片，只使用我提供的书名和目录信息，不要使用你训练数据中的任何其他课本内容。\n\n⚠️ 关于 coveredChapters 字段的特别提醒：\n1. 目录采用手风琴层级结构，例如 Topic 3 下面可能有 3.1、3.2、3.3...3.7，但可能没有 3.8 或 3.9。你在填写 coveredChapters 时，必须先确认目录中实际存在哪些章节编号，只能使用目录中真实存在的章节！\n2. 注意多层级编号的区别：如果 3.1 下面有子章节 3.1.1、3.1.2...3.1.5，你想覆盖这些子章节时，coveredChapters 必须写成 "3.1.1-3.1.5"，绝对不能写成 "3.1-3.5"（这表示的是 3.1、3.2、3.3、3.4、3.5 五个同级章节）！\n3. 填写前请先确认你要覆盖的章节在目录中的完整编号，然后把完整编号写进 coveredChapters。`;
 
+    // Use custom prompts if provided, otherwise use hardcoded defaults
+    const finalSystemInstruction = systemPrompt || systemInstruction;
+    
+    let finalPromptMessage: string;
+    if (userPromptTemplate) {
+      // Replace variables in the template
+      finalPromptMessage = userPromptTemplate
+        .replace(/\{title\}/g, title)
+        .replace(/\{directoryText\}/g, directoryText);
+    } else {
+      finalPromptMessage = promptMessage;
+    }
+
     // DEBUG: Print the actual prompt message being sent to AI
     console.log("\n📝 ========== PROMPT MESSAGE SENT TO AI ==========");
     console.log("Title used:", title);
     console.log("Directory text length:", directoryText.length);
     console.log("Directory text first 500 chars:", directoryText.substring(0, 500));
     console.log("Directory text last 300 chars:", directoryText.substring(directoryText.length - 300));
-    console.log("Full prompt message first 1500 chars:", promptMessage.substring(0, 1500));
+    console.log("Full prompt message first 1500 chars:", finalPromptMessage.substring(0, 1500));
     console.log("==========================================\n");
 
     let outputText: string;
@@ -822,7 +835,7 @@ designRationale 	 描述2-3个综合应用场景，说明完整的问题场景
     // Force use DeepSeek V4 Flash for this specific endpoint (textbook slicing)
     const sliceModel = "deepseek-v4-flash";
     console.log(`🔄 [parse-book] Forcing DeepSeek model: ${sliceModel}`);
-    outputText = await callDeepSeek(promptMessage, systemInstruction, sliceModel, 16384);
+    outputText = await callDeepSeek(finalPromptMessage, finalSystemInstruction, sliceModel, 16384);
 
     try {
       const resultObj = parseJsonResponse(outputText);
@@ -859,8 +872,8 @@ designRationale 	 描述2-3个综合应用场景，说明完整的问题场景
         _meta: {
           model: sliceModel,
           provider: "deepseek",
-          systemInstruction,
-          userPrompt: promptMessage
+          systemInstruction: finalSystemInstruction,
+          userPrompt: finalPromptMessage
         }
       });
     } catch (parseErr) {
@@ -2566,7 +2579,17 @@ async function startServer() {
 
   app.post("/api/prompt-templates/:templateId/versions", async (req, res) => {
     try {
-      const version = await createPromptVersion({ ...req.body, promptTemplateId: req.params.templateId });
+      // Auto-calculate next version number
+      const existingVersions = await getPromptVersions(req.params.templateId);
+      const nextVersion = existingVersions.length > 0 
+        ? Math.max(...existingVersions.map(v => v.version)) + 1 
+        : 1;
+      
+      const version = await createPromptVersion({ 
+        ...req.body, 
+        promptTemplateId: req.params.templateId,
+        version: nextVersion
+      });
       res.json(version);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
