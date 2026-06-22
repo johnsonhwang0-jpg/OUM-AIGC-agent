@@ -3880,6 +3880,7 @@ API地址：https://api.deepseek.com/chat/completions`}
             model="deepseek-v4-flash"
             defaultSystemPrompt={sliceSystemPrompt}
             defaultUserPrompt={sliceUserPromptTemplate}
+            apiDebugInfo={apiDebugInfo}
           />
 
           {/* Script Generation AI Config Drawer */}
