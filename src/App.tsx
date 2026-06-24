@@ -294,7 +294,6 @@ function greet(name) {
   const [isGeneratingApp, setIsGeneratingApp] = useState(false);
   const [finalCode, setFinalCode] = useState<string>('');
   const [appModel, setAppModel] = useState<string>('deepseek-v4-flash');
-  const [codeCopySuccess, setCodeCopySuccess] = useState<boolean>(false);
   const [outputTab, setOutputTab] = useState<'code' | 'preview'>('preview');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
@@ -2107,11 +2106,16 @@ ${script.conclusion}
         : `❌ **场景模拟游戏生成失败**\n\n错误信息：${message}`);
     }
   };
-  const handleCopyFinalCode = () => {
-    navigator.clipboard.writeText(finalCode).then(() => {
-      setCodeCopySuccess(true);
-      setTimeout(() => setCodeCopySuccess(false), 2000);
-    });
+  const handleDownloadFinalCode = () => {
+    const blob = new Blob([finalCode], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${bookTitle || 'game'}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const handleSelectStep5Module = (moduleId: string) => {
@@ -4095,14 +4099,10 @@ API地址：https://api.deepseek.com/chat/completions`}
 
                       {finalCode && (
                          <button
-                           onClick={handleCopyFinalCode}
+                           onClick={handleDownloadFinalCode}
                            className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500 hover:text-white rounded text-[10px] font-bold transition cursor-pointer"
                          >
-                           {codeCopySuccess ? (
-                             <><Check className="w-3.5 h-3.5" /> {language === "en" ? "Copied!" : "已复制!"}</>
-                           ) : (
-                             <><Copy className="w-3.5 h-3.5" /> {language === "en" ? "Copy HTML File" : "拷贝 HTML 文件"}</>
-                           )}
+                           <Download className="w-3.5 h-3.5" /> {language === "en" ? "Download HTML File" : "下载 HTML 文件"}
                          </button>
                       )}
                     </div>
