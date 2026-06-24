@@ -2107,11 +2107,16 @@ ${script.conclusion}
     }
   };
   const handleDownloadFinalCode = () => {
+    const mod = modules.find(m => m.id === selectedStep5ModuleId);
+    const chapterName = mod ? mod.title : '';
+    const fileName = chapterName && bookTitle
+      ? `${chapterName}-${bookTitle}.html`
+      : `${bookTitle || 'game'}.html`;
     const blob = new Blob([finalCode], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${bookTitle || 'game'}.html`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
