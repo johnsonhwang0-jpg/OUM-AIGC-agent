@@ -4210,10 +4210,10 @@ API地址：https://api.deepseek.com/chat/completions`}
 
       {/* Fullscreen Game Preview Portal overlay */}
       {isFullscreen && finalCode && (
-        <div className="fixed inset-0 bg-[#050508]/95 z-[999] flex flex-col p-4 md:p-6 animate-in fade-in duration-250 overflow-y-auto">
+        <div className="fixed inset-0 bg-[#050508] z-[999] flex flex-col animate-in fade-in duration-250 overflow-hidden">
           
           {/* Header Controls */}
-          <div className="flex items-center justify-between bg-[#0a0a0f] border-b border-white/10 px-6 py-4 rounded-t-2xl max-w-4xl w-full mx-auto shrink-0 mt-2 shadow-2xl">
+          <div className="flex items-center justify-between bg-[#0a0a0f]/80 backdrop-blur-sm border-b border-white/10 px-4 md:px-6 py-3 shrink-0">
             <div className="text-sm font-bold text-cyan-400 flex items-center gap-2">
               <Sparkles className="w-4 h-4 animate-pulse text-cyan-400" />
               <span>{language === "en" ? "Immersive Sandbox Game Mode" : "智能全屏沉浸试炼模式 (Immersive Sandbox Game Mode)"}</span>
@@ -4228,11 +4228,11 @@ API地址：https://api.deepseek.com/chat/completions`}
             </button>
           </div>
 
-          {/* Sandbox Body wrapper */}
-          <div className="flex-1 max-w-4xl w-full mx-auto overflow-hidden rounded-b-2xl shadow-2xl border-x border-b border-white/10 flex flex-col min-h-[500px] mb-6">
+          {/* Sandbox Body wrapper - full screen width */}
+          <div className="flex-1 w-full overflow-hidden flex flex-col">
             <iframe
               srcDoc={finalCode}
-              className="w-full h-full border-0 flex-1"
+              className="w-full h-full border-0"
               sandbox="allow-scripts allow-same-origin"
               title="Scene Simulation Fullscreen Preview"
             />
