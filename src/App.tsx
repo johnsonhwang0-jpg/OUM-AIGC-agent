@@ -54,6 +54,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import ModelManagement from "./components/ModelManagement";
 import SystemSettings from "./components/SystemSettings";
+import { APP_VERSION } from "./version";
 import ApiDebugDrawer from "./components/ApiDebugDrawer";
 import { AutomationPanel } from "./components/Automation";
 
@@ -2206,7 +2207,7 @@ ${script.conclusion}
                 </div>
                 <div className="text-[11px] text-cyan-400 flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-cyan-455 text-cyan-400" />
-                  version 1.0.23
+                  version {APP_VERSION}
                 </div>
               </div>
             </div>

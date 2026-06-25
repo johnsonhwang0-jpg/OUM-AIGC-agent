@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { ArrowLeft, Settings, Globe, FileText, Brain } from "lucide-react";
+import { ArrowLeft, Settings, Globe, FileText, Brain, History } from "lucide-react";
 import { useLanguage } from "../i18n/LanguageContext";
 import { PromptTab } from "./ModelManagement";
+import { APP_VERSION, VERSION_UPDATED_AT, VERSION_HISTORY } from "../version";
 
-type SettingsTab = "models" | "prompts" | "language";
+type SettingsTab = "models" | "prompts" | "language" | "version";
 
 interface SystemSettingsProps {
   onBack: () => void;
@@ -54,6 +55,15 @@ export default function SystemSettings({ onBack }: SystemSettingsProps) {
             <Globe className="w-3.5 h-3.5" />
             {t("languageSettings")}
           </button>
+          <button
+            onClick={() => setActiveTab("version")}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition cursor-pointer ${
+              activeTab === "version" ? "bg-amber-500/30 text-white" : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            {language === "en" ? "Version" : "版本说明"}
+          </button>
         </div>
       </div>
 
@@ -62,6 +72,7 @@ export default function SystemSettings({ onBack }: SystemSettingsProps) {
         {activeTab === "models" && <ModelsTab />}
         {activeTab === "prompts" && <PromptTab language={language} />}
         {activeTab === "language" && <LanguageTab />}
+        {activeTab === "version" && <VersionTab />}
       </div>
     </div>
   );
@@ -128,6 +139,53 @@ function LanguageTab() {
           ))}
         </div>
         <p className="text-xs text-slate-500 mt-4 text-center">{t("languageTip")}</p>
+      </div>
+    </div>
+  );
+}
+
+// Version Tab
+function VersionTab() {
+  const { language } = useLanguage();
+  return (
+    <div className="h-full overflow-y-auto p-6">
+      <div className="max-w-4xl mx-auto">
+        <h2 className="text-lg font-semibold mb-1 flex items-center gap-2">
+          <History className="w-5 h-5 text-amber-400" />
+          {language === "en" ? "Version History" : "版本说明"}
+        </h2>
+        <p className="text-sm text-slate-400 mb-6">
+          {language === "en" ? "Current version" : "当前版本"}{" "}
+          <span className="text-amber-300 font-mono font-bold">v{APP_VERSION}</span>
+          {" · "}
+          <span className="text-slate-500">{VERSION_UPDATED_AT}</span>
+        </p>
+
+        <div className="space-y-4">
+          {VERSION_HISTORY.map((entry) => (
+            <div
+              key={entry.version}
+              className="bg-white/5 border border-white/10 rounded-xl p-5"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/25 text-xs font-mono font-bold">
+                    v{entry.version}
+                  </span>
+                  <span className="text-xs text-slate-500">{entry.updatedAt}</span>
+                </div>
+              </div>
+              <ul className="space-y-1.5">
+                {entry.changes.map((change, idx) => (
+                  <li key={idx} className="text-sm text-slate-300 flex items-start gap-2">
+                    <span className="text-amber-400/60 mt-0.5">•</span>
+                    <span>{change}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
