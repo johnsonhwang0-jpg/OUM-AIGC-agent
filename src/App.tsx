@@ -456,6 +456,19 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   const [projectList, setProjectList] = useState<any[]>([]);
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
   const [savedScripts, setSavedScripts] = useState<Record<string, any>>({});
+
+  // 统一的 pdfPageOffset 修改入口：同时更新 React state 和 DB
+  // 此前手动 +/- 调整只更新 state，后端 orchestrator 读取 DB 旧值 → 自动模式 extract 页码偏移错误
+  const changePdfPageOffset = useCallback((newOffset: number) => {
+    setPdfPageOffset(newOffset);
+    if (currentProjectId) {
+      fetch(`/api/projects/${currentProjectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdfPageOffset: newOffset }),
+      }).catch(err => console.error("Failed to save pdfPageOffset:", err));
+    }
+  }, [currentProjectId]);
   const [showProjectList, setShowProjectList] = useState<boolean>(false);
   const [executionMode, setExecutionMode] = useState<"auto" | "manual">("manual");
   const [automationJobId, setAutomationJobId] = useState<string | null>(null);
@@ -472,9 +485,11 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   }, [messages, chatLoading]);
 
   // 进入第三步时，自动批量提取所有切片的原文内容（有缓存，不重复提取）
+  // 注意：自动模式下由 orchestrator 负责 extract，前端跳过，避免双重提取导致冲突与灰屏
   const batchExtractingRef = useRef(false);
 
   useEffect(() => {
+    if (executionMode === "auto") return; // 自动模式由后端 orchestrator 处理 extract
     if (activeStep !== 3 || !pdfData || modules.length === 0 || batchExtractingRef.current) return;
 
     const extractAll = async () => {
@@ -518,7 +533,7 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
     };
 
     extractAll();
-  }, [activeStep, pdfData, modules, currentProjectId]);
+  }, [activeStep, pdfData, modules, currentProjectId, executionMode]);
 
   // 当切换选中模块时，从缓存中读取原文内容和图片
   useEffect(() => {
@@ -3615,16 +3630,16 @@ API地址：https://api.deepseek.com/chat/completions`}
                       <div className="flex items-center gap-2 bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/15 p-1 px-2 rounded-lg transition">
                         <span className="text-[9px] text-cyan-300 font-semibold select-none">Offset</span>
                         <div className="flex items-center gap-1">
-                          <button type="button" onClick={() => setPdfPageOffset(prev => prev - 1)} className="w-4 h-4 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-white/5 font-bold cursor-pointer" title={language === "en" ? "Offset back one page" : "向前偏移一页"}>-</button>
-                          <input type="number" value={pdfPageOffset} onChange={(e) => setPdfPageOffset(parseInt(e.target.value, 10) || 0)} className="w-7 bg-black/80 border border-white/10 text-center font-mono text-[9px] font-bold text-cyan-200 py-0 rounded outline-none focus:border-cyan-400" />
-                          <button type="button" onClick={() => setPdfPageOffset(prev => prev + 1)} className="w-4 h-4 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-white/5 font-bold cursor-pointer" title={language === "en" ? "Offset forward one page" : "向后偏移一页"}>+</button>
+                          <button type="button" onClick={() => changePdfPageOffset(pdfPageOffset - 1)} className="w-4 h-4 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-white/5 font-bold cursor-pointer" title={language === "en" ? "Offset back one page" : "向前偏移一页"}>-</button>
+                          <input type="number" value={pdfPageOffset} onChange={(e) => changePdfPageOffset(parseInt(e.target.value, 10) || 0)} className="w-7 bg-black/80 border border-white/10 text-center font-mono text-[9px] font-bold text-cyan-200 py-0 rounded outline-none focus:border-cyan-400" />
+                          <button type="button" onClick={() => changePdfPageOffset(pdfPageOffset + 1)} className="w-4 h-4 bg-white/5 hover:bg-cyan-500/20 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-white/5 font-bold cursor-pointer" title={language === "en" ? "Offset forward one page" : "向后偏移一页"}>+</button>
                         </div>
                         <button 
                           type="button" 
                           onClick={() => {
                             const autoOffset = calculateAutoPageOffset(directoryItems, pdfPagesText);
-                            setPdfPageOffset(autoOffset);
-                          }} 
+                            changePdfPageOffset(autoOffset);
+                          }}
                           className="w-4 h-4 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 active:scale-95 rounded flex items-center justify-center text-[10px] border border-cyan-500/30 cursor-pointer" 
                           title={language === "en" ? "Recalculate offset" : "重新计算偏移量"}
                         >

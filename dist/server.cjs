@@ -45,6 +45,7 @@ __export(database_exports, {
   getAllModelConfigs: () => getAllModelConfigs,
   getAllProjects: () => getAllProjects,
   getAllPromptTemplates: () => getAllPromptTemplates,
+  getAllVersionNotes: () => getAllVersionNotes,
   getAutomationJob: () => getAutomationJob,
   getAutomationTask: () => getAutomationTask,
   getAutomationTasksByJob: () => getAutomationTasksByJob,
@@ -61,6 +62,7 @@ __export(database_exports, {
   saveExtractedContent: () => saveExtractedContent,
   saveGeneratedAppCode: () => saveGeneratedAppCode,
   saveModuleScript: () => saveModuleScript,
+  setVersionNote: () => setVersionNote,
   updateAutomationJob: () => updateAutomationJob,
   updateAutomationTask: () => updateAutomationTask,
   updateModelConfig: () => updateModelConfig,
@@ -278,6 +280,20 @@ async function initDatabase() {
     database.run(`CREATE INDEX IF NOT EXISTS idx_auto_tasks_job ON automation_tasks(jobId, status)`);
     setSchemaVersion(database, 3);
   }
+  if (currentVersion < 4) {
+    safeAlter(database, `ALTER TABLE projects ADD COLUMN pdfPageOffset INTEGER DEFAULT 0`, "projects.pdfPageOffset");
+    setSchemaVersion(database, 4);
+  }
+  if (currentVersion < 5) {
+    database.run(`
+      CREATE TABLE IF NOT EXISTS version_notes (
+        version TEXT PRIMARY KEY,
+        note TEXT NOT NULL DEFAULT '',
+        updatedAt TEXT NOT NULL
+      )
+    `);
+    setSchemaVersion(database, 5);
+  }
   saveDatabase(database);
   return database;
 }
@@ -375,6 +391,10 @@ async function updateProject(id, updates) {
     fields.push("executionMode = ?");
     values.push(updates.executionMode);
   }
+  if (updates.pdfPageOffset !== void 0) {
+    fields.push("pdfPageOffset = ?");
+    values.push(updates.pdfPageOffset);
+  }
   if (fields.length === 0) return;
   fields.push("updatedAt = ?");
   values.push(now);
@@ -419,6 +439,11 @@ async function getProject(id) {
       const val = idx >= 0 ? matchingRow[idx] : null;
       return val === "auto" ? "auto" : "manual";
     })(),
+    pdfPageOffset: (() => {
+      const idx = columns.indexOf("pdfPageOffset");
+      const val = idx >= 0 ? matchingRow[idx] : 0;
+      return typeof val === "number" ? val : 0;
+    })(),
     createdAt: matchingRow[columns.indexOf("createdAt")],
     updatedAt: matchingRow[columns.indexOf("updatedAt")]
   };
@@ -446,6 +471,11 @@ async function getAllProjects() {
       const idx = columns.indexOf("executionMode");
       const val = idx >= 0 ? row[idx] : null;
       return val === "auto" ? "auto" : "manual";
+    })(),
+    pdfPageOffset: (() => {
+      const idx = columns.indexOf("pdfPageOffset");
+      const val = idx >= 0 ? row[idx] : 0;
+      return typeof val === "number" ? val : 0;
     })(),
     createdAt: row[columns.indexOf("createdAt")],
     updatedAt: row[columns.indexOf("updatedAt")]
@@ -712,6 +742,27 @@ async function deletePromptVersion(id) {
   database.run(`DELETE FROM prompt_versions WHERE id = ?`, [id]);
   saveDatabase(database);
   return true;
+}
+async function getAllVersionNotes() {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT version, note, updatedAt FROM version_notes ORDER BY version DESC`);
+  if (result.length === 0) return [];
+  return result[0].values.map((row) => ({
+    version: row[0],
+    note: row[1],
+    updatedAt: row[2]
+  }));
+}
+async function setVersionNote(version, note) {
+  const database = await getDatabase();
+  const updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  database.run(
+    `INSERT INTO version_notes (version, note, updatedAt) VALUES (?, ?, ?)
+     ON CONFLICT(version) DO UPDATE SET note = excluded.note, updatedAt = excluded.updatedAt`,
+    [version, note, updatedAt]
+  );
+  saveDatabase(database);
+  return { version, note, updatedAt };
 }
 async function getAllModelConfigs() {
   const database = await getDatabase();
@@ -1002,13 +1053,14 @@ var init_database = __esm({
     db = null;
     DB_PATH = import_path.default.join(process.cwd(), "booktogame.db");
     DB_BACKUP_DIR = import_path.default.join(process.cwd(), ".db-backups");
-    CURRENT_SCHEMA_VERSION = 3;
+    CURRENT_SCHEMA_VERSION = 4;
   }
 });
 
 // server.ts
 var import_express = __toESM(require("express"), 1);
 var import_path2 = __toESM(require("path"), 1);
+var import_child_process = require("child_process");
 var import_dotenv = __toESM(require("dotenv"), 1);
 var import_genai = require("@google/genai");
 var import_vite = require("vite");
@@ -1120,6 +1172,230 @@ init_database();
 
 // orchestrator.ts
 init_database();
+
+// shared/textbookMatcher.ts
+function calculatePageRange(covered, directoryItems) {
+  const parseSectionNumbers = (str) => {
+    const match = str.trim().match(/(\d+(?:\.\d+)*)/);
+    if (!match) return null;
+    return match[1].split(".").map((x) => parseInt(x, 10));
+  };
+  const isDescendant = (target, item) => {
+    if (item.length < target.length) return false;
+    for (let i = 0; i < target.length; i++) {
+      if (item[i] !== target[i]) return false;
+    }
+    return true;
+  };
+  const findIndex = (nums) => {
+    for (let i = 0; i < directoryItems.length; i++) {
+      const itemNums = parseSectionNumbers(directoryItems[i].title);
+      if (!itemNums) continue;
+      if (itemNums.length === nums.length && itemNums.every((n, j) => n === nums[j])) {
+        return i;
+      }
+    }
+    return -1;
+  };
+  const coveredTrimmed = covered.trim();
+  const rangeMatch = coveredTrimmed.match(/(\d+(?:\.\d+)*)\s*[-~—至]\s*(\d+(?:\.\d+)*)/);
+  let startNums;
+  let endNums;
+  if (rangeMatch) {
+    startNums = parseSectionNumbers(rangeMatch[1]);
+    endNums = parseSectionNumbers(rangeMatch[2]);
+  } else {
+    startNums = parseSectionNumbers(coveredTrimmed);
+    endNums = startNums;
+  }
+  if (!startNums || !endNums) {
+    return { startPage: "", endPage: "", found: false };
+  }
+  const startIndex = findIndex(startNums);
+  if (startIndex === -1) {
+    return { startPage: "", endPage: "", found: false };
+  }
+  const endIndex = findIndex(endNums);
+  if (endIndex === -1) {
+    return { startPage: "", endPage: "", found: false };
+  }
+  const startPage = directoryItems[startIndex].page || "";
+  let endPage = "";
+  for (let k = endIndex + 1; k < directoryItems.length; k++) {
+    const nextNums = parseSectionNumbers(directoryItems[k].title);
+    if (!nextNums) continue;
+    if (isDescendant(endNums, nextNums)) continue;
+    endPage = directoryItems[k].page || "";
+    break;
+  }
+  if (!endPage && directoryItems[endIndex].page) {
+    endPage = directoryItems[endIndex].page;
+  }
+  return { startPage, endPage, found: true };
+}
+function buildHeadingPattern(chapterNum) {
+  const escaped = chapterNum.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^#{1,6}\\s+${escaped}(?:\\s|$)`, "i");
+}
+function findNextSibling(chapterNum, directoryItems) {
+  const parseSection = (str) => {
+    const match = str.trim().match(/^(\d+(?:\.\d+)*)/);
+    if (!match) return null;
+    return match[1].split(".").map((x) => parseInt(x, 10));
+  };
+  const targetNums = parseSection(chapterNum);
+  if (!targetNums) return null;
+  const level = targetNums.length;
+  let targetIndex = -1;
+  for (let i = 0; i < directoryItems.length; i++) {
+    const nums = parseSection(directoryItems[i].title);
+    if (!nums) continue;
+    if (nums.length === level && nums.every((n, j) => n === targetNums[j])) {
+      targetIndex = i;
+      break;
+    }
+  }
+  if (targetIndex === -1) return null;
+  for (let i = targetIndex + 1; i < directoryItems.length; i++) {
+    const nums = parseSection(directoryItems[i].title);
+    if (!nums) continue;
+    if (nums.length === level) {
+      const isNext = nums.slice(0, -1).every((n, j) => n === targetNums[j]) && nums[nums.length - 1] === targetNums[targetNums.length - 1] + 1;
+      if (isNext) {
+        return nums.join(".");
+      }
+    }
+    if (nums.length === level && nums[0] > targetNums[0]) {
+    }
+  }
+  const nextTopicNum = targetNums[0] + 1;
+  for (let i = 0; i < directoryItems.length; i++) {
+    const nums = parseSection(directoryItems[i].title);
+    if (!nums) continue;
+    if (nums.length === level && nums[0] === nextTopicNum) {
+      return nums.join(".");
+    }
+  }
+  return null;
+}
+function trimExtractedContent(mdContent, coveredChapters, directoryItems) {
+  const covered = coveredChapters.trim();
+  if (!covered) return mdContent;
+  const rangeMatch = covered.match(/(\d+(?:\.\d+)*)\s*[-~—至]\s*(\d+(?:\.\d+)*)/);
+  let startChapter;
+  let endChapter;
+  if (rangeMatch) {
+    startChapter = rangeMatch[1];
+    endChapter = rangeMatch[2];
+  } else {
+    startChapter = covered;
+    endChapter = covered;
+  }
+  const lines = mdContent.split("\n");
+  let startIndex = 0;
+  const startPattern = buildHeadingPattern(startChapter);
+  for (let i = 0; i < lines.length; i++) {
+    if (startPattern.test(lines[i].trim())) {
+      startIndex = i;
+      break;
+    }
+  }
+  const nextSibling = findNextSibling(endChapter, directoryItems);
+  let endIndex = lines.length;
+  if (nextSibling) {
+    const endPattern = buildHeadingPattern(nextSibling);
+    for (let i = startIndex; i < lines.length; i++) {
+      if (endPattern.test(lines[i].trim())) {
+        endIndex = i;
+        break;
+      }
+    }
+  }
+  const trimmedLines = lines.slice(startIndex, endIndex);
+  return trimmedLines.join("\n").trim();
+}
+function filterAndFormatLines(lines, directoryItems) {
+  const hasMarkdownHeadings = lines.some((line) => /^#{1,6}\s/.test(line.trim()));
+  if (hasMarkdownHeadings) {
+    const filteredLines2 = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        filteredLines2.push("");
+        continue;
+      }
+      if (/^#{1,6}\s/.test(trimmed)) {
+        filteredLines2.push(line);
+        continue;
+      }
+      if (/^[-*]\s/.test(trimmed) || /^\d+\.\s/.test(trimmed)) {
+        filteredLines2.push(line);
+        continue;
+      }
+      if (/^\|/.test(trimmed)) {
+        filteredLines2.push(line);
+        continue;
+      }
+      if (/^[•\-]?\s*\d+\s*[•\-]?$/.test(trimmed)) continue;
+      if (/^(?:第\s*\d+\s*页|page\s*\d+|\b\d+\s*[-—]\s*页\b)/i.test(trimmed)) continue;
+      if (/(?:出版社|Publishing|Copyright|All\s+rights\s+reserved|版权所有|©)/i.test(trimmed) && trimmed.length < 80) continue;
+      if (/(?:www\.|http:\/\/|https:\/\/)/i.test(trimmed) && trimmed.length < 80) continue;
+      if (/(?:ISBN|ISSN)\s*[\d\-]+/i.test(trimmed) && trimmed.length < 80) continue;
+      if (/^(?:Topic|Chapter|Unit|Section)\s+\d+\s+[A-Z\s]+\d{1,3}$/i.test(trimmed)) continue;
+      if (/^\d{1,3}$/.test(trimmed) && trimmed.length <= 3) continue;
+      filteredLines2.push(line);
+    }
+    return filteredLines2.join("\n").trim() || "*(\u7ECF\u8FC7\u667A\u80FD\u964D\u566A\u8FC7\u6EE4\uFF0C\u672A\u5305\u542B\u975E\u8003\u70B9\u6838\u5FC3\u6587\u672C)*";
+  }
+  const topicNames = [];
+  if (Array.isArray(directoryItems)) {
+    for (const item of directoryItems) {
+      const title = item.title || "";
+      const topicMatch = title.match(/^(Topic\s+\d+.*)$/i);
+      if (topicMatch) {
+        topicNames.push(topicMatch[1].toUpperCase());
+      }
+    }
+  }
+  const headerPatterns = [];
+  if (topicNames.length > 0) {
+    for (const topicName of topicNames) {
+      const escapedName = topicName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      headerPatterns.push(new RegExp(`^\\d{1,3}\\s+${escapedName}$`));
+      headerPatterns.push(new RegExp(`^${escapedName}\\s+\\d{1,3}$`));
+    }
+  }
+  headerPatterns.push(/^(?:Topic|Chapter|Unit|Section)\s+\d+\s+[A-Z\s]+\d{1,3}$/i);
+  const footerPatterns = [
+    /(?:出版社|Publishing|Copyright|All\s+rights\s+reserved|版权所有|©)/i,
+    /(?:www\.|http:\/\/|https:\/\/)/i,
+    /(?:ISBN|ISSN)\s*[\d\-]+/i
+  ];
+  const isHeaderOrFooter = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    if (/^[•\-]?\s*\d+\s*[•\-]?$/.test(trimmed)) return true;
+    if (/^(?:第\s*\d+\s*页|page\s*\d+)/i.test(trimmed)) return true;
+    if (footerPatterns.some((pat) => pat.test(trimmed)) && trimmed.length < 80) return true;
+    const cleaned = trimmed.replace(/[^A-Za-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+    if (/^[A-Za-z0-9\s]+$/.test(cleaned)) {
+      if (headerPatterns.some((pat) => pat.test(cleaned))) return true;
+    }
+    return false;
+  };
+  const filteredLines = [];
+  for (const line of lines) {
+    if (!line.trim()) {
+      filteredLines.push("");
+      continue;
+    }
+    if (isHeaderOrFooter(line)) continue;
+    filteredLines.push(line);
+  }
+  return filteredLines.join("\n").trim() || "*(\u7ECF\u8FC7\u667A\u80FD\u964D\u566A\u8FC7\u6EE4\uFF0C\u672A\u5305\u542B\u975E\u8003\u70B9\u6838\u5FC3\u6587\u672C)*";
+}
+
+// orchestrator.ts
 var sseClients = /* @__PURE__ */ new Map();
 function registerSseClient(jobId, res) {
   if (!sseClients.has(jobId)) sseClients.set(jobId, /* @__PURE__ */ new Set());
@@ -1165,44 +1441,36 @@ async function internalPost(path3, body) {
   }
   return json;
 }
-function computePageRange(coveredChapters, directoryItems) {
-  if (!coveredChapters || directoryItems.length === 0) {
-    return { startPage: 1, endPage: 10 };
+async function internalGet(path3) {
+  const port = process.env.PORT ? parseInt(process.env.PORT) : 8080;
+  const url = `http://localhost:${port}${path3}`;
+  const res = await fetch(url);
+  const text = await res.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = { error: text };
   }
-  const parts = coveredChapters.split(/[-–—/]/).map((s) => s.trim()).filter(Boolean);
-  if (parts.length === 0) return { startPage: 1, endPage: 10 };
-  const startToken = parts[0];
-  const endToken = parts[parts.length - 1];
-  const findPage = (token) => {
-    for (const item of directoryItems) {
-      const title = item.title || "";
-      if (title.startsWith(token + " ") || title.startsWith(token + "\uFF1A") || title.startsWith(token + ":") || title === token) {
-        const p = parseInt(item.page || "", 10);
-        if (!isNaN(p) && p > 0) return p;
-      }
-    }
-    return null;
-  };
-  const startPage = findPage(startToken);
-  if (startPage == null) return { startPage: 1, endPage: 10 };
-  const endPageFound = findPage(endToken);
-  let endPage;
-  if (endPageFound != null && endToken !== startToken) {
-    const endIdx = directoryItems.findIndex((i) => {
-      const t = i.title || "";
-      return t.startsWith(endToken + " ") || t.startsWith(endToken + "\uFF1A") || t.startsWith(endToken + ":") || t === endToken;
-    });
-    if (endIdx >= 0 && endIdx + 1 < directoryItems.length) {
-      const nextItem = directoryItems[endIdx + 1];
-      const nextP = parseInt(nextItem.page || "", 10);
-      endPage = !isNaN(nextP) && nextP > endPageFound ? nextP - 1 : endPageFound + 14;
-    } else {
-      endPage = endPageFound + 14;
-    }
-  } else {
-    endPage = startPage + 14;
+  if (!res.ok) {
+    throw new Error(json.error || `Internal GET ${path3} failed: ${res.status}`);
   }
-  return { startPage: Math.max(1, startPage), endPage: Math.max(startPage, endPage) };
+  return json;
+}
+async function getSavedPrompt(aiEntry) {
+  try {
+    const data = await internalGet(`/api/prompt-templates?aiEntry=${aiEntry}`);
+    if (Array.isArray(data) && data.length > 0) {
+      const active = data.find((p) => p.isActive) || data[0];
+      return {
+        systemPrompt: active.systemPrompt || void 0,
+        userPromptTemplate: active.userPromptTemplate || void 0
+      };
+    }
+  } catch (e) {
+    console.warn(`[orchestrator] getSavedPrompt(${aiEntry}) failed, using defaults:`, e);
+  }
+  return {};
 }
 function parseModules(modulesJson) {
   try {
@@ -1294,27 +1562,60 @@ async function runSliceExtract(jobId, projectId, bookTitle, slice, directoryItem
       const existingExtractTasks = await getPendingTasksForSlice(jobId, slice.id);
       const extractTask = existingExtractTasks.find((t) => t.stage === "extract") || null;
       await runTaskWithRetry(jobId, projectId, slice, "extract", extractTask, async () => {
-        let startPage = 1;
-        let endPage = 10;
+        let startPrinted = 1;
+        let endPrinted = 10;
         if (slice.pageRange) {
-          const m = slice.pageRange.match(/(\d+)\s*[-–—]\s*(\d+)/);
+          const m = slice.pageRange.match(/P\.?(\d+)(?:\s*[-–—]\s*P?\.?(\d+))?/i) || slice.pageRange.match(/(\d+)\s*[-–—]\s*(\d+)/);
           if (m) {
-            startPage = parseInt(m[1], 10);
-            endPage = parseInt(m[2], 10);
+            startPrinted = parseInt(m[1], 10);
+            endPrinted = m[2] ? parseInt(m[2], 10) : startPrinted;
+          } else {
+            const range = calculatePageRange(slice.coveredChapters || "", directoryItems);
+            if (range.found && range.startPage) {
+              startPrinted = parseInt(range.startPage, 10) || 1;
+              endPrinted = range.endPage ? parseInt(range.endPage, 10) || startPrinted : startPrinted;
+            }
           }
         } else if (slice.coveredChapters) {
-          const range = computePageRange(slice.coveredChapters, directoryItems);
-          startPage = range.startPage;
-          endPage = range.endPage;
+          const range = calculatePageRange(slice.coveredChapters, directoryItems);
+          if (range.found && range.startPage) {
+            startPrinted = parseInt(range.startPage, 10) || 1;
+            endPrinted = range.endPage ? parseInt(range.endPage, 10) || startPrinted : startPrinted;
+          }
         }
+        const pdfPageOffset = project?.pdfPageOffset ?? 0;
+        const activeStartPhysical = Math.max(1, startPrinted + pdfPageOffset);
+        const activeEndPhysical = Math.max(activeStartPhysical, endPrinted + pdfPageOffset);
+        console.log(`[orchestrator] extract slice="${slice.title}" pageRange="${slice.pageRange}" coveredChapters="${slice.coveredChapters}" \u2192 printed=${startPrinted}-${endPrinted} offset=${pdfPageOffset} \u2192 physical=${activeStartPhysical}-${activeEndPhysical}`);
         const result = await internalPost(`/api/projects/${projectId}/extract-pages`, {
-          startPage,
-          endPage
+          startPage: activeStartPhysical,
+          endPage: activeEndPhysical
         });
         const pages = result.pages || [];
-        extractedContent = pages.map((p) => p.content || "").filter(Boolean).join("\n\n");
-        if (!extractedContent) {
+        if (!pages || pages.length === 0) {
           throw new Error("PDF \u63D0\u53D6\u5185\u5BB9\u4E3A\u7A7A");
+        }
+        let mdOutput = "";
+        for (const page of pages) {
+          const lines = (page.content || "").split("\n");
+          const formatted = filterAndFormatLines(lines, directoryItems);
+          mdOutput += formatted + "\n\n";
+          if (page.images && page.images.length > 0) {
+            mdOutput += "\n\n";
+            for (const img of page.images) {
+              mdOutput += `![${img.filename || ""}](${img.url || ""})
+
+`;
+            }
+          }
+          mdOutput += "\n\n";
+        }
+        if (slice.coveredChapters) {
+          mdOutput = trimExtractedContent(mdOutput, slice.coveredChapters, directoryItems);
+        }
+        extractedContent = mdOutput.trim();
+        if (!extractedContent) {
+          throw new Error("PDF \u63D0\u53D6\u5185\u5BB9\u4E3A\u7A7A\uFF08\u8FC7\u6EE4/\u88C1\u526A\u540E\uFF09");
         }
         await saveExtractedContent(projectId, slice.id, extractedContent);
       });
@@ -1346,6 +1647,7 @@ async function runSliceScript(jobId, projectId, bookTitle, slice, extractedConte
   const existingScriptTasks = await getPendingTasksForSlice(jobId, slice.id);
   const scriptTask = existingScriptTasks.find((t) => t.stage === "script") || null;
   await runTaskWithRetry(jobId, projectId, slice, "script", scriptTask, async () => {
+    const scriptPrompt = await getSavedPrompt("script-gen");
     const result = await internalPost("/api/generate-script", {
       bookTitle,
       chapterTitle: slice.title,
@@ -1355,7 +1657,9 @@ async function runSliceScript(jobId, projectId, bookTitle, slice, extractedConte
       infoDensity: slice.infoDensity,
       cohesionDetail: slice.cohesionDetail,
       designRationale: slice.designRationale,
-      extractedContent: contentForScript.substring(0, 8e3)
+      extractedContent: contentForScript.substring(0, 8e3),
+      systemPrompt: scriptPrompt.systemPrompt,
+      userPromptTemplate: scriptPrompt.userPromptTemplate
     });
     scriptMarkdown = result.markdown || "";
     if (!scriptMarkdown) throw new Error("AI \u672A\u8FD4\u56DE\u811A\u672C\u5185\u5BB9");
@@ -1405,12 +1709,15 @@ async function runSliceAppCode(jobId, projectId, bookTitle, slice, scriptMarkdow
   const existingAppTasks = await getPendingTasksForSlice(jobId, slice.id);
   const appTask = existingAppTasks.find((t) => t.stage === "app-code") || null;
   await runTaskWithRetry(jobId, projectId, slice, "app-code", appTask, async () => {
+    const appPrompt = await getSavedPrompt("app-code");
     const result = await internalPost("/api/generate-app-code", {
       bookTitle,
       chapterTitle: slice.title,
       coveredChapters: slice.coveredChapters || "",
       scriptMarkdown: finalMarkdown,
-      model
+      model,
+      systemPrompt: appPrompt.systemPrompt,
+      userPromptTemplate: appPrompt.userPromptTemplate
     });
     const code = result.code || "";
     if (!code) throw new Error("AI \u672A\u8FD4\u56DE HTML \u4EE3\u7801");
@@ -1448,10 +1755,13 @@ async function ensureModulesGenerated(projectId, jobId) {
     throw new Error("\u9879\u76EE\u65E0\u76EE\u5F55\u6570\u636E\uFF0C\u65E0\u6CD5\u81EA\u52A8\u5207\u7247");
   }
   emit(jobId, { event: "parse_book_start", data: { projectId, status: "running" } });
+  const smartSplitPrompt = await getSavedPrompt("smart-split");
   const result = await internalPost("/api/parse-book", {
     title: project.bookTitle || project.name || "\u672A\u547D\u540D\u6559\u6750",
     fullText: project.bookContentText || "",
-    directoryStructure: directoryItems
+    directoryStructure: directoryItems,
+    systemPrompt: smartSplitPrompt.systemPrompt,
+    userPromptTemplate: smartSplitPrompt.userPromptTemplate
   });
   if (result._meta?.error || result._meta?.degraded) {
     throw new Error(result._meta?.error || "AI \u5207\u7247\u964D\u7EA7\uFF0C\u8BF7\u91CD\u8BD5");
@@ -1482,6 +1792,9 @@ async function startAutomationJob(projectId, options = {}) {
   if (!job || job.status !== "running" && job.status !== "paused") {
     job = await createAutomationJob(projectId, 0, options.concurrency || 1);
   }
+  job.status = "running";
+  await updateAutomationJob(job.id, { status: "running", startedAt: (/* @__PURE__ */ new Date()).toISOString() });
+  emit(job.id, { event: "job_progress", data: { jobId: job.id, status: "running" } });
   (async () => {
     try {
       const slices = await ensureModulesGenerated(projectId, job.id);
@@ -3658,6 +3971,44 @@ async function startServer() {
       res.json({ success: true, seeded: true, template });
     } catch (error) {
       res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/version-notes", async (req, res) => {
+    try {
+      const notes = await getAllVersionNotes();
+      res.json(notes);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.put("/api/version-notes/:version", async (req, res) => {
+    try {
+      const { version } = req.params;
+      const { note } = req.body;
+      if (typeof note !== "string") {
+        return res.status(400).json({ error: "note (string) is required" });
+      }
+      const saved = await setVersionNote(version, note);
+      res.json(saved);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/git-info", (req, res) => {
+    try {
+      const projectRoot = process.cwd();
+      const opts = { cwd: projectRoot, encoding: "utf-8", timeout: 3e3 };
+      const headHash = (0, import_child_process.execSync)("git rev-parse --short HEAD", opts).trim();
+      let dirty = false;
+      try {
+        const status = (0, import_child_process.execSync)("git status --porcelain", opts).trim();
+        dirty = status.length > 0;
+      } catch {
+      }
+      const branch = (0, import_child_process.execSync)("git rev-parse --abbrev-ref HEAD", opts).trim();
+      res.json({ headHash, dirty, branch });
+    } catch (error) {
+      res.json({ headHash: "", dirty: false, branch: "", error: error.message });
     }
   });
   app.get("/api/model-configs", async (req, res) => {

@@ -7,8 +7,8 @@
  *  - 同时更新 VERSION_HISTORY，记录本次变更内容
  */
 
-export const APP_VERSION = "1.2.4";
-export const VERSION_UPDATED_AT = "2026-06-25 16:49:50";
+export const APP_VERSION = "1.2.5";
+export const VERSION_UPDATED_AT = "2026-06-25 17:30:00";
 
 export interface VersionEntry {
   version: string;
@@ -27,6 +27,19 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.5",
+    updatedAt: "2026-06-25 17:30:00",
+    gitCommit: "", // 本次会话改动，尚未 commit
+    changes: [
+      "修复 TaskManager 切片阶段显示「等待中」而非「进行中」：orchestrator 创建 Job 后立即设 status=running 并 emit job_progress，避免 parseBook 期间 isRunning=false",
+      "修复自动模式 extract 阶段对话框疯狂弹消息 + 灰屏（根因一）：App.tsx activeStep===3 的批量提取 useEffect 在 executionMode==='auto' 时跳过，避免与 orchestrator 并发提取",
+      "修复自动模式 extract 阶段对话框疯狂弹消息 + 灰屏（根因二，主因）：TaskManager 的 onRefreshProject 内联箭头函数每次渲染引用都变，导致 useEffect 无限循环；改用 useRef 稳定引用，useEffect 只依赖 parseBookDone",
+      "修复自动模式 extract 结果错误（根因一）：App.tsx 手动调整 pdfPageOffset 只更新 state 未保存 DB，orchestrator 读到旧值；新增 changePdfPageOffset 统一入口同步 PATCH /api/projects/:id",
+      "修复自动模式 extract 结果错误（根因二）：orchestrator 在 slice.pageRange 正则不匹配时不回退到 calculatePageRange（与前端不一致），导致 startPrinted/endPrinted 保持默认 1/10 提取错误页面",
+      "orchestrator runSliceExtract 新增诊断日志（slice title/pageRange/coveredChapters/printed/offset/physical），便于排查前后端页码不一致",
+    ],
+  },
   {
     version: "1.2.4",
     updatedAt: "2026-06-25 16:49:50",

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Play, Pause, X, RefreshCw, Download, ChevronRight, AlertCircle,
   CheckCircle2, Clock, Loader, FileText, Scissors, FileCode, Rocket,
@@ -60,11 +60,16 @@ export function TaskManager({
   const [activeStage, setActiveStage] = useState<StageKey>("project");
 
   // 切片生成完成后刷新项目数据（modules / projectInfo）
+  // 使用 ref 保存 onRefreshProject，避免其引用每次渲染变化导致 useEffect 反复执行
+  // （此前 onRefreshProject 为内联箭头函数，每次渲染引用都变，触发无限 loadProject → addAgentMessage → 灰屏）
+  const onRefreshProjectRef = useRef(onRefreshProject);
+  onRefreshProjectRef.current = onRefreshProject;
+
   useEffect(() => {
     if (parseBookDone) {
-      onRefreshProject();
+      onRefreshProjectRef.current();
     }
-  }, [parseBookDone, onRefreshProject]);
+  }, [parseBookDone]);
 
   const handleStart = useCallback(async () => {
     setStarting(true);

@@ -298,6 +298,14 @@ async function runSliceExtract(
           if (m) {
             startPrinted = parseInt(m[1], 10);
             endPrinted = m[2] ? parseInt(m[2], 10) : startPrinted;
+          } else {
+            // pageRange 存在但格式不匹配，回退到 calculatePageRange（与前端 getExtractedTextForModuleAsync 一致）
+            // 此前未回退，导致 startPrinted/endPrinted 保持默认 1/10，提取了错误的页面内容
+            const range = calculatePageRange(slice.coveredChapters || "", directoryItems as PageRef[]);
+            if (range.found && range.startPage) {
+              startPrinted = parseInt(range.startPage, 10) || 1;
+              endPrinted = range.endPage ? (parseInt(range.endPage, 10) || startPrinted) : startPrinted;
+            }
           }
         } else if (slice.coveredChapters) {
           // 无 pageRange 时按 coveredChapters 推算（与前端 calculatePageRange 同源）
@@ -312,6 +320,9 @@ async function runSliceExtract(
         const pdfPageOffset = project?.pdfPageOffset ?? 0;
         const activeStartPhysical = Math.max(1, startPrinted + pdfPageOffset);
         const activeEndPhysical = Math.max(activeStartPhysical, endPrinted + pdfPageOffset);
+
+        // 诊断日志：排查自动模式 extract 页码与手动模式不一致的问题
+        console.log(`[orchestrator] extract slice="${slice.title}" pageRange="${slice.pageRange}" coveredChapters="${slice.coveredChapters}" → printed=${startPrinted}-${endPrinted} offset=${pdfPageOffset} → physical=${activeStartPhysical}-${activeEndPhysical}`);
 
         // 3. 调 /api/extract-pages（与前端同一路由）
         const result = await internalPost(`/api/projects/${projectId}/extract-pages`, {
@@ -609,6 +620,12 @@ export async function startAutomationJob(
     // 切片数量未知，先创建占位 Job（totalSlices 后续更新）
     job = await createAutomationJob(projectId, 0, options.concurrency || 1);
   }
+
+  // 立即设为 running 并通知前端，确保切片生成阶段（parseBook）侧边栏显示"进行中"而非"等待中"
+  // 否则 job.status 会一直停在 "pending" 直到 runJobLoop 才更新，期间用户看不到任何进度反馈
+  job.status = "running";
+  await updateAutomationJob(job.id, { status: "running", startedAt: new Date().toISOString() });
+  emit(job.id, { event: "job_progress", data: { jobId: job.id, status: "running" } });
 
   // 异步执行：先确保切片已生成，再进入主循环
   (async () => {
