@@ -3,6 +3,8 @@ import path from "path";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
+import { extractCompleteJsonContent, streamChatCompletion } from "./ai-stream.js";
+import { applyPromptTemplate } from "./prompt-template.js";
 import {
   createProject,
   updateProject,
@@ -64,7 +66,7 @@ async function callDeepSeek(prompt: string, systemPrompt: string = "", model: st
     }
     
     let accumulated = "";
-    const maxRounds = 5; // prevent infinite loops
+    const maxRounds = 5;
 
     for (let round = 0; round < maxRounds; round++) {
       const messages: any[] = [
@@ -77,26 +79,18 @@ async function callDeepSeek(prompt: string, systemPrompt: string = "", model: st
         messages.push({ role: "user", content: "继续，不要停。如果代码还没写完，请接着上一段继续输出剩余部分。" });
       }
 
-      const requestBody = JSON.stringify({
-        model: deepseekModel,
-        messages,
-        temperature: 0.7,
-        max_tokens: maxTokens,
-        stop: null,
-        ...(jsonMode && round === 0 ? { response_format: { type: "json_object" } } : {})
-      });
-
-      let response: Response | null = null;
+      let result: Awaited<ReturnType<typeof streamChatCompletion>> | null = null;
       let lastError: unknown = null;
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          response = await fetch("https://api.deepseek.com/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${deepseekApiKey}`
-            },
-            body: requestBody
+          result = await streamChatCompletion({
+            url: "https://api.deepseek.com/chat/completions",
+            apiKey: deepseekApiKey,
+            model: deepseekModel,
+            messages,
+            maxTokens,
+            jsonMode: jsonMode && round === 0,
+            thinking: "disabled"
           });
           lastError = null;
           break;
@@ -108,97 +102,33 @@ async function callDeepSeek(prompt: string, systemPrompt: string = "", model: st
         }
       }
 
-      if (!response) {
+      if (!result) {
         throw lastError || new Error("DeepSeek API request failed");
       }
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`DeepSeek API error: ${response.status} - ${errorText}`);
-      }
-      
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || "";
-      const finishReason = data.choices?.[0]?.finish_reason;
+
+      const content = result.content;
+      const finishReason = result.finishReason;
       
       accumulated += content;
-      console.log(`DeepSeek round ${round + 1}: +${content.length} chars, finish_reason=${finishReason}`);
+      console.log(`DeepSeek round ${round + 1}: +${content.length} chars, finish_reason=${finishReason}, interrupted=${result.interrupted}`);
+
+      const completeJson = jsonMode ? extractCompleteJsonContent(accumulated) : null;
+      if (completeJson) {
+        accumulated = completeJson;
+        console.log(`DeepSeek JSON completed after round ${round + 1}; stopping without waiting for [DONE].`);
+        break;
+      }
       
-      if (finishReason !== "length") {
+      if (finishReason !== "length" && !result.interrupted) {
         break; // complete response, no truncation
       }
-      // finish_reason === "length": output was truncated, continue
+      // Truncated output or a network interruption after partial content: continue from accumulated text.
     }
 
     return accumulated;
   } catch (error) {
     console.error("DeepSeek call failed:", error);
     throw error;
-  }
-}
-
-// DeepSeek streaming API client
-async function* callDeepSeekStream(prompt: string, systemPrompt: string = "", model: string = "", maxTokens: number = 16000): AsyncGenerator<string> {
-  const deepseekModel = model || process.env.DEEPSEEK_MODEL || "deepseek-chat";
-  const deepseekApiKey = process.env.DEEPSEEK_API_KEY || "";
-
-  if (!deepseekApiKey) {
-    throw new Error("DEEPSEEK_API_KEY is not configured");
-  }
-
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${deepseekApiKey}`
-    },
-    body: JSON.stringify({
-      model: deepseekModel,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.7,
-      max_tokens: maxTokens,
-      stream: true
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`DeepSeek API error: ${response.status} - ${errorText}`);
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error("No response body");
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith("data:")) continue;
-      const data = trimmed.slice(5).trim();
-      if (data === "[DONE]") return;
-
-      try {
-        const parsed = JSON.parse(data);
-        const content = parsed.choices?.[0]?.delta?.content || "";
-        if (content) yield content;
-      } catch {
-        // skip malformed JSON
-      }
-    }
   }
 }
 
@@ -226,35 +156,29 @@ async function callDashScope(prompt: string, systemPrompt: string = "", model: s
         messages.push({ role: "user", content: "继续，不要停。如果代码还没写完，请接着上一段继续输出剩余部分。" });
       }
 
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${dashscopeApiKey}`
-        },
-        body: JSON.stringify({
-          model: dashscopeModel,
-          messages,
-          temperature: 0.7,
-          max_tokens: maxTokens,
-          stop: null,
-          ...(jsonMode && round === 0 ? { response_format: { type: "json_object" } } : {})
-        })
+      const result = await streamChatCompletion({
+        url: `${baseUrl}/chat/completions`,
+        apiKey: dashscopeApiKey,
+        model: dashscopeModel,
+        messages,
+        maxTokens,
+        jsonMode: jsonMode && round === 0
       });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`DashScope API error: ${response.status} - ${errorText}`);
-      }
-      
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || "";
-      const finishReason = data.choices?.[0]?.finish_reason;
+
+      const content = result.content;
+      const finishReason = result.finishReason;
       
       accumulated += content;
-      console.log(`DashScope round ${round + 1}: +${content.length} chars, finish_reason=${finishReason}`);
+      console.log(`DashScope round ${round + 1}: +${content.length} chars, finish_reason=${finishReason}, interrupted=${result.interrupted}`);
+
+      const completeJson = jsonMode ? extractCompleteJsonContent(accumulated) : null;
+      if (completeJson) {
+        accumulated = completeJson;
+        console.log(`DashScope JSON completed after round ${round + 1}; stopping without waiting for [DONE].`);
+        break;
+      }
       
-      if (finishReason !== "length") {
+      if (finishReason !== "length" && !result.interrupted) {
         break;
       }
     }
@@ -813,10 +737,11 @@ designRationale 	 描述2-3个综合应用场景，说明完整的问题场景
     
     let finalPromptMessage: string;
     if (userPromptTemplate) {
-      // Replace variables in the template
-      finalPromptMessage = userPromptTemplate
-        .replace(/\{title\}/g, title)
-        .replace(/\{directoryText\}/g, directoryText);
+      finalPromptMessage = applyPromptTemplate(userPromptTemplate, {
+        title,
+        bookTitle: title,
+        directoryText
+      });
     } else {
       finalPromptMessage = promptMessage;
     }
@@ -884,6 +809,8 @@ designRationale 	 描述2-3个综合应用场景，说明完整的问题场景
         _meta: {
           model: sliceModel,
           provider: "deepseek",
+          degraded: true,
+          fallbackType: "heuristic",
           systemInstruction,
           userPrompt: promptMessage,
           error: "AI JSON解析失败，使用启发式fallback",
@@ -906,6 +833,8 @@ designRationale 	 描述2-3个综合应用场景，说明完整的问题场景
         _meta: {
           model: "deepseek-v4-flash",
           provider: "deepseek",
+          degraded: true,
+          fallbackType: "heuristic",
           systemInstruction: "",
           userPrompt: "",
           error: `AI API调用失败: ${error.message}，使用启发式fallback`
@@ -1285,15 +1214,16 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
 
     let finalPromptText: string;
     if (userPromptTemplate) {
-      finalPromptText = userPromptTemplate
-        .replace(/\{bookTitle\}/g, bookTitle || "Textbook")
-        .replace(/\{chapterTitle\}/g, chapterTitle || "")
-        .replace(/\{chapterIndex\}/g, String(chapterIndex || ""))
-        .replace(/\{summary\}/g, typeof summary === "string" ? summary : JSON.stringify(summary || {}, null, 2))
-        .replace(/\{infoDensity\}/g, typeof infoDensity === "string" ? infoDensity : JSON.stringify(infoDensity || {}, null, 2))
-        .replace(/\{cohesionDetail\}/g, typeof cohesionDetail === "string" ? cohesionDetail : JSON.stringify(cohesionDetail || {}, null, 2))
-        .replace(/\{designRationale\}/g, designRationale || "未提供")
-        .replace(/\{extractedContent\}/g, (extractedContent || "General academic curriculum rules relative to " + chapterTitle).substring(0, 8000));
+      finalPromptText = applyPromptTemplate(userPromptTemplate, {
+        bookTitle: bookTitle || "Textbook",
+        chapterTitle: chapterTitle || "",
+        chapterIndex: String(chapterIndex || ""),
+        summary: typeof summary === "string" ? summary : JSON.stringify(summary || {}, null, 2),
+        infoDensity: typeof infoDensity === "string" ? infoDensity : JSON.stringify(infoDensity || {}, null, 2),
+        cohesionDetail: typeof cohesionDetail === "string" ? cohesionDetail : JSON.stringify(cohesionDetail || {}, null, 2),
+        designRationale: designRationale || "未提供",
+        extractedContent: (extractedContent || "General academic curriculum rules relative to " + chapterTitle).substring(0, 8000)
+      });
     } else {
       finalPromptText = promptText;
     }
@@ -1305,7 +1235,7 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
       outputText = await callDeepSeek(finalPromptText, finalSystemInstruction, "deepseek-v4-flash", 6144, false);
     } else if (AI_PROVIDER === "dashscope") {
       console.log("🔄 Using DashScope (通义千问) for scenario script generation...");
-      outputText = await callDashScope(finalPromptText, finalSystemInstruction, "", false);
+      outputText = await callDashScope(finalPromptText, finalSystemInstruction, "", 6144, false);
     } else if (AI_PROVIDER === "ollama") {
       console.log("🔄 Using Ollama for scenario script generation...");
       outputText = await callOllama(finalPromptText, finalSystemInstruction, "", false);
@@ -1372,7 +1302,11 @@ ${scriptMarkdown}`;
 
     const systemInstruction = systemPrompt || defaultSystemInstruction;
     const promptText = userPromptTemplate
-      ? userPromptTemplate.replace(/\{scriptMarkdown\}/g, scriptMarkdown).replace(/\{bookTitle\}/g, bookTitle || "").replace(/\{chapterTitle\}/g, chapterTitle || "")
+      ? applyPromptTemplate(userPromptTemplate, {
+          scriptMarkdown,
+          bookTitle: bookTitle || "",
+          chapterTitle: chapterTitle || ""
+        })
       : defaultPromptText;
 
     let outputText: string;

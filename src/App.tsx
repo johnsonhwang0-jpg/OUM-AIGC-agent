@@ -1205,6 +1205,24 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
 
       const rawResponse: any = await response.json();
       const { _meta, ...data } = rawResponse;
+
+      if (_meta?.error || _meta?.degraded) {
+        const degradedMessage = _meta?.error || (
+          language === "en"
+            ? "AI slicing was degraded to a local heuristic result."
+            : "AI 切片调用已降级为本地启发式结果。"
+        );
+        setApiDebugInfo(prev => ({
+          ...prev,
+          model: _meta?.model || prev.model,
+          systemPrompt: _meta?.systemInstruction || prev.systemPrompt,
+          userPrompt: _meta?.userPrompt || prev.userPrompt,
+          status: 'error',
+          rawResponse: JSON.stringify(_meta, null, 2),
+          timestamp: new Date().toLocaleTimeString()
+        }));
+        throw new Error(degradedMessage);
+      }
       
       const currentAiMeta = _meta ? {
         ..._meta,
