@@ -106,6 +106,7 @@ export interface BookModule {
   script?: GameScript; // Legacy challenge-based script
   scenarioScript?: ScenarioScript; // New scenario-based interactive script
   simulationScript?: SimulationBlueprintScript; // Markdown simulation blueprint for AI coding
+  verificationStatus?: VerificationStatus; // 校验模式下的人工校验状态
 }
 
 export interface BookBlueprint {
@@ -154,4 +155,66 @@ export interface GameSessionState {
   userMatches: Record<string, string>; // Match-pair games state
   lastConsequence?: string; // Narrative consequence for scenario-based scripts
   lastExplanation?: string; // Knowledge explanation for scenario-based scripts
+}
+
+// ==================== 自动化任务类型 ====================
+
+export type ExecutionMode = "auto" | "manual";
+
+export type VerificationStatus = "pending" | "verified" | "rejected";
+
+export type AutomationJobStatus =
+  | "pending"
+  | "running"
+  | "paused"
+  | "completed"
+  | "partial"
+  | "cancelled"
+  | "failed";
+
+export type AutomationTaskStage = "extract" | "script" | "app-code";
+
+export type AutomationTaskStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped";
+
+export interface AutomationJob {
+  id: string;
+  projectId: string;
+  status: AutomationJobStatus;
+  totalSlices: number;
+  completedSlices: number;
+  failedSlices: number;
+  concurrency: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutomationTask {
+  id: string;
+  jobId: string;
+  projectId: string;
+  moduleId: string;
+  sliceId: string | null;
+  sliceTitle: string;
+  stage: AutomationTaskStage;
+  status: AutomationTaskStatus;
+  attempts: number;
+  maxAttempts: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutomationJobSnapshot {
+  job: AutomationJob | null;
+  tasks: AutomationTask[];
 }

@@ -53,3 +53,6 @@
 - 2026-06-25：流式客户端支持保留中断前的正文，并能从“残缺前缀 + 模型重新输出的完整 JSON”中恢复最后一份可解析 JSON。
 - 2026-06-25：提示词变量统一由 `prompt-template.ts` 处理，同时支持 `{{variable}}` 与 `{variable}`；真实 Slice 验证无未替换变量。
 - 2026-06-25：Slice fallback 响应增加 `degraded` 和 `fallbackType`；前端检测到 `_meta.error` 或降级标记后进入错误态，不再保存为正常 AI 切片。
+- 2026-06-25：完成双模式（自动模式/校验模式）全自动化流程开发。核心文件：`orchestrator.ts`（任务编排器）、`src/hooks/useAutomationJob.ts`（SSE 监听）、`src/components/Automation.tsx`（控制面板）。数据库新增 `automation_jobs`、`automation_tasks` 表及 `projects.executionMode` 字段（Schema v2→v3 迁移）。`server.ts` 新增 `/api/automation/*` 路由（start/status/stream/pause/resume/cancel/retry/download-all）。任务编排驱动 extract→script→app-code 流水线，支持重试（3 次，退避 0/10s/30s）、断点续传（已完成阶段自动跳过）、SSE 实时推送。实测：13 切片项目，首个切片 extract→script→app-code 全链路打通，HTML 产出正确。
+- 2026-06-25：修复 `orchestrator.ts` 中 `backoffs[0] = 0` 被 `||` 吞掉的 bug：`0 || 60_000` 返回 60 秒等待，导致首次尝试就卡 60 秒。改用 `??` 运算符修复。
+- 2026-06-25：模式切换 API 为 `PUT /api/projects/:id/execution-mode`，body `{ executionMode: "auto" | "manual" }`。前端 `App.tsx` 在第三阶段顶部渲染 `AutomationPanel`，支持模式切换、启动/暂停/恢复/取消/重试、进度看板和切片列表。

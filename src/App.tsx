@@ -55,6 +55,7 @@ import rehypeRaw from "rehype-raw";
 import ModelManagement from "./components/ModelManagement";
 import SystemSettings from "./components/SystemSettings";
 import ApiDebugDrawer from "./components/ApiDebugDrawer";
+import { AutomationPanel } from "./components/Automation";
 
 // Extract valid HTML from AI response, stripping markdown fences and explanatory text
 function extractValidHtml(raw: string): string {
@@ -453,6 +454,8 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
   const [savedScripts, setSavedScripts] = useState<Record<string, any>>({});
   const [showProjectList, setShowProjectList] = useState<boolean>(false);
+  const [executionMode, setExecutionMode] = useState<"auto" | "manual">("manual");
+  const [automationJobId, setAutomationJobId] = useState<string | null>(null);
 
   // Ref pointers for list scroll anchors
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -581,6 +584,7 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       setBookContentText(project.bookContentText || "");
       setPdfFileName(project.pdfFileName || "");
       setPdfData(project.pdfData || null);
+      setExecutionMode(project.executionMode === "auto" ? "auto" : "manual");
 
       if (project.directoryItems) {
         try {
@@ -2819,6 +2823,22 @@ ${script.conclusion}
                 </div>
               </div>
 
+              {/* 模式选择 + 自动化进度看板（目录提取完成后显示） */}
+              {currentProjectId && directoryItems.length > 0 && (
+                <AutomationPanel
+                  projectId={currentProjectId}
+                  modules={[]}
+                  executionMode={executionMode}
+                  onModeChange={setExecutionMode}
+                  onEditSlice={(moduleId) => {
+                    setActiveModuleId(moduleId);
+                  }}
+                  jobId={automationJobId}
+                  onJobIdChange={setAutomationJobId}
+                  compact
+                />
+              )}
+
             </div> {/* max-w-4xl */}
           </div> {/* flex-1 overflow-y-auto */}
 
@@ -2844,6 +2864,7 @@ ${script.conclusion}
                 <Settings className="w-4 h-4" />
               </button>
 
+              {executionMode === "manual" && (
               <button 
                 type="button"
                 onClick={() => handleSplitBook(false)}
@@ -2864,6 +2885,7 @@ ${script.conclusion}
                       </>
                     )}
               </button>
+              )}
             </div>
           </div>
 
@@ -3375,7 +3397,22 @@ API地址：https://api.deepseek.com/chat/completions`}
             <div className="flex-1 flex flex-col h-full z-10 w-full overflow-hidden animate-fadeIn">
               <div className="flex-1 overflow-y-auto p-6">
                 <div className="w-full space-y-6">
-              
+
+              {/* 自动化模式面板 */}
+              {currentProjectId && modules.length > 0 && (
+                <AutomationPanel
+                  projectId={currentProjectId}
+                  modules={modules}
+                  executionMode={executionMode}
+                  onModeChange={setExecutionMode}
+                  onEditSlice={(moduleId) => {
+                    setActiveModuleId(moduleId);
+                  }}
+                  jobId={automationJobId}
+                  onJobIdChange={setAutomationJobId}
+                />
+              )}
+
               <div className="flex flex-col md:flex-row gap-4">
               {/* Left sidebar: Modules list */}
               <div className="w-full md:w-64 border border-white/10 rounded-2xl bg-[#0a0a0f] p-3 space-y-2 shrink-0 flex flex-col overflow-y-auto">

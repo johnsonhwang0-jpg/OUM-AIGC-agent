@@ -37,6 +37,17 @@ import {
   updateModelConfig,
   deleteModelConfig
 } from "./database.js";
+import {
+  startAutomationJob,
+  pauseJob,
+  resumeJob,
+  cancelJob,
+  retryTask,
+  retryAllFailed,
+  getJobSnapshot,
+  registerSseClient,
+  unregisterSseClient,
+} from "./orchestrator.js";
 
 // Load environment variables
 const SERVER_VERSION = "v2026.06.09-list-fix";
@@ -2617,6 +2628,157 @@ async function startServer() {
     try {
       await deleteModelConfig(req.params.id);
       res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================== 自动化任务路由 ====================
+
+  // 切换项目执行模式（auto / manual）
+  app.put("/api/projects/:id/execution-mode", async (req, res) => {
+    try {
+      const { executionMode } = req.body;
+      if (executionMode !== "auto" && executionMode !== "manual") {
+        return res.status(400).json({ error: "executionMode 必须为 auto 或 manual" });
+      }
+      await updateProject(req.params.id, { executionMode });
+      res.json({ success: true, executionMode });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 启动自动化任务
+  app.post("/api/automation/start", async (req, res) => {
+    try {
+      const { projectId, concurrency, model } = req.body;
+      if (!projectId) return res.status(400).json({ error: "缺少 projectId" });
+      const job = await startAutomationJob(projectId, { concurrency, model });
+      res.json({ job });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 查询任务状态
+  app.get("/api/automation/:jobId/status", async (req, res) => {
+    try {
+      const snapshot = await getJobSnapshot(req.params.jobId);
+      if (!snapshot.job) return res.status(404).json({ error: "Job 不存在" });
+      res.json(snapshot);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // SSE 实时事件流
+  app.get("/api/automation/:jobId/stream", async (req, res) => {
+    const { jobId } = req.params;
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    // 发送初始心跳
+    res.write(": connected\n\n");
+    registerSseClient(jobId, res);
+
+    // 立即推送当前快照
+    try {
+      const snapshot = await getJobSnapshot(jobId);
+      if (snapshot.job) {
+        res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
+      }
+    } catch { /* ignore */ }
+
+    // 心跳保活
+    const heartbeat = setInterval(() => {
+      try { res.write(": ping\n\n"); } catch { /* closed */ }
+    }, 15000);
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      unregisterSseClient(jobId, res);
+    });
+  });
+
+  // 暂停
+  app.post("/api/automation/:jobId/pause", async (req, res) => {
+    try {
+      await pauseJob(req.params.jobId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 恢复
+  app.post("/api/automation/:jobId/resume", async (req, res) => {
+    try {
+      await resumeJob(req.params.jobId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 取消
+  app.post("/api/automation/:jobId/cancel", async (req, res) => {
+    try {
+      await cancelJob(req.params.jobId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 重试单个失败任务
+  app.post("/api/automation/task/:taskId/retry", async (req, res) => {
+    try {
+      await retryTask(req.params.taskId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 重试所有失败任务
+  app.post("/api/automation/:jobId/retry-all", async (req, res) => {
+    try {
+      await retryAllFailed(req.params.jobId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 下载全部生成的 HTML（返回 JSON 列表，前端可逐一下载或打包）
+  app.get("/api/projects/:id/app-codes", async (req, res) => {
+    try {
+      const project = await getProject(req.params.id);
+      if (!project) return res.status(404).json({ error: "项目不存在" });
+
+      let modules: any[] = [];
+      try {
+        const parsed = JSON.parse(project.modules);
+        modules = Array.isArray(parsed) ? parsed : (parsed.slices || parsed.modules || []);
+      } catch { /* empty */ }
+
+      const results: { moduleId: string; title: string; coveredChapters?: string; code: string }[] = [];
+      for (const mod of modules) {
+        const code = await getGeneratedAppCode(req.params.id, mod.id);
+        if (code) {
+          results.push({
+            moduleId: mod.id,
+            title: mod.title || mod.sliceId || mod.id,
+            coveredChapters: mod.coveredChapters,
+            code,
+          });
+        }
+      }
+      res.json({ items: results, total: results.length });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

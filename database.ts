@@ -7,7 +7,7 @@ const DB_PATH = path.join(process.cwd(), "booktogame.db");
 const DB_BACKUP_DIR = path.join(process.cwd(), ".db-backups");
 
 // 数据库 schema 版本号，每次修改 schema 时递增
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 /**
  * 在修改数据库 schema 前创建备份
@@ -84,6 +84,7 @@ export interface Project {
   modules: string;
   aiMeta: string; // AI调用元数据 JSON
   rawBlueprintData: string; // AI返回的原始切片数据 JSON
+  executionMode?: "auto" | "manual"; // 项目级执行模式偏好
   createdAt: string;
   updatedAt: string;
 }
@@ -147,6 +148,45 @@ export interface ModelConfig {
   topP: number;
   promptTemplateId: string | null;
   isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ==================== 自动化编排 ====================
+
+export type AutomationJobStatus = "pending" | "running" | "paused" | "completed" | "partial" | "cancelled" | "failed";
+export type AutomationTaskStage = "extract" | "script" | "app-code";
+export type AutomationTaskStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+export interface AutomationJob {
+  id: string;
+  projectId: string;
+  status: AutomationJobStatus;
+  totalSlices: number;
+  completedSlices: number;
+  failedSlices: number;
+  concurrency: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutomationTask {
+  id: string;
+  jobId: string;
+  projectId: string;
+  moduleId: string;
+  sliceId: string | null;
+  sliceTitle: string | null;
+  stage: AutomationTaskStage;
+  status: AutomationTaskStatus;
+  attempts: number;
+  maxAttempts: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -302,6 +342,53 @@ async function initDatabase(): Promise<Database> {
     setSchemaVersion(database, 2);
   }
 
+  // v2 → v3: 自动化编排（projects.executionMode + automation_jobs + automation_tasks）
+  if (currentVersion < 3) {
+    safeAlter(database, `ALTER TABLE projects ADD COLUMN executionMode TEXT DEFAULT 'manual'`, "projects.executionMode");
+
+    database.run(`
+      CREATE TABLE IF NOT EXISTS automation_jobs (
+        id TEXT PRIMARY KEY,
+        projectId TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        totalSlices INTEGER DEFAULT 0,
+        completedSlices INTEGER DEFAULT 0,
+        failedSlices INTEGER DEFAULT 0,
+        concurrency INTEGER DEFAULT 1,
+        startedAt TEXT,
+        finishedAt TEXT,
+        error TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
+      )
+    `);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_auto_jobs_project ON automation_jobs(projectId)`);
+
+    database.run(`
+      CREATE TABLE IF NOT EXISTS automation_tasks (
+        id TEXT PRIMARY KEY,
+        jobId TEXT NOT NULL,
+        projectId TEXT NOT NULL,
+        moduleId TEXT NOT NULL,
+        sliceId TEXT,
+        sliceTitle TEXT,
+        stage TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER DEFAULT 0,
+        maxAttempts INTEGER DEFAULT 3,
+        startedAt TEXT,
+        finishedAt TEXT,
+        error TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (jobId) REFERENCES automation_jobs(id) ON DELETE CASCADE
+      )
+    `);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_auto_tasks_job ON automation_tasks(jobId, status)`);
+    setSchemaVersion(database, 3);
+  }
+
   saveDatabase(database);
   return database;
 }
@@ -373,7 +460,7 @@ export async function createProject(
 
 export async function updateProject(
   id: string,
-  updates: Partial<Pick<Project, "name" | "bookTitle" | "bookContentText" | "directoryItems" | "modules" | "pdfFileName" | "pdfData" | "aiMeta" | "rawBlueprintData">>
+  updates: Partial<Pick<Project, "name" | "bookTitle" | "bookContentText" | "directoryItems" | "modules" | "pdfFileName" | "pdfData" | "aiMeta" | "rawBlueprintData" | "executionMode">>
 ): Promise<void> {
   const database = await getDatabase();
   const now = new Date().toISOString();
@@ -416,6 +503,10 @@ export async function updateProject(
   if (updates.rawBlueprintData !== undefined) {
     fields.push("rawBlueprintData = ?");
     values.push(updates.rawBlueprintData);
+  }
+  if (updates.executionMode !== undefined) {
+    fields.push("executionMode = ?");
+    values.push(updates.executionMode);
   }
 
   if (fields.length === 0) return;
@@ -467,6 +558,11 @@ export async function getProject(id: string): Promise<Project | null> {
     modules: (matchingRow[columns.indexOf("modules")] as string) || "",
     aiMeta: (matchingRow[columns.indexOf("aiMeta")] as string) || "",
     rawBlueprintData: (matchingRow[columns.indexOf("rawBlueprintData")] as string) || "",
+    executionMode: ((): "auto" | "manual" => {
+      const idx = columns.indexOf("executionMode");
+      const val = idx >= 0 ? (matchingRow[idx] as string) : null;
+      return val === "auto" ? "auto" : "manual";
+    })(),
     createdAt: matchingRow[columns.indexOf("createdAt")] as string,
     updatedAt: matchingRow[columns.indexOf("updatedAt")] as string
   };
@@ -495,6 +591,11 @@ export async function getAllProjects(): Promise<Project[]> {
     modules: (row[columns.indexOf("modules")] as string) || "",
     aiMeta: (row[columns.indexOf("aiMeta")] as string) || "",
     rawBlueprintData: (row[columns.indexOf("rawBlueprintData")] as string) || "",
+    executionMode: ((): "auto" | "manual" => {
+      const idx = columns.indexOf("executionMode");
+      const val = idx >= 0 ? (row[idx] as string) : null;
+      return val === "auto" ? "auto" : "manual";
+    })(),
     createdAt: row[columns.indexOf("createdAt")] as string,
     updatedAt: row[columns.indexOf("updatedAt")] as string
   }));
@@ -503,6 +604,8 @@ export async function getAllProjects(): Promise<Project[]> {
 export async function deleteProject(id: string): Promise<void> {
   const database = await getDatabase();
   database.run(`DELETE FROM module_scripts WHERE projectId = ?`, [id]);
+  database.run(`DELETE FROM automation_tasks WHERE projectId = ?`, [id]);
+  database.run(`DELETE FROM automation_jobs WHERE projectId = ?`, [id]);
   database.run(`DELETE FROM projects WHERE id = ?`, [id]);
   saveDatabase(database);
 }
@@ -990,4 +1093,192 @@ export async function deleteModelConfig(id: string): Promise<boolean> {
   database.run(`DELETE FROM model_configs WHERE id = ?`, [id]);
   saveDatabase(database);
   return true;
+}
+
+// ==================== 自动化编排 CRUD ====================
+
+function rowToJob(row: any[], columns: string[]): AutomationJob {
+  return {
+    id: row[columns.indexOf("id")] as string,
+    projectId: row[columns.indexOf("projectId")] as string,
+    status: row[columns.indexOf("status")] as AutomationJobStatus,
+    totalSlices: (row[columns.indexOf("totalSlices")] as number) || 0,
+    completedSlices: (row[columns.indexOf("completedSlices")] as number) || 0,
+    failedSlices: (row[columns.indexOf("failedSlices")] as number) || 0,
+    concurrency: (row[columns.indexOf("concurrency")] as number) || 1,
+    startedAt: (row[columns.indexOf("startedAt")] as string) || null,
+    finishedAt: (row[columns.indexOf("finishedAt")] as string) || null,
+    error: (row[columns.indexOf("error")] as string) || null,
+    createdAt: row[columns.indexOf("createdAt")] as string,
+    updatedAt: row[columns.indexOf("updatedAt")] as string,
+  };
+}
+
+function rowToTask(row: any[], columns: string[]): AutomationTask {
+  return {
+    id: row[columns.indexOf("id")] as string,
+    jobId: row[columns.indexOf("jobId")] as string,
+    projectId: row[columns.indexOf("projectId")] as string,
+    moduleId: row[columns.indexOf("moduleId")] as string,
+    sliceId: (row[columns.indexOf("sliceId")] as string) || null,
+    sliceTitle: (row[columns.indexOf("sliceTitle")] as string) || null,
+    stage: row[columns.indexOf("stage")] as AutomationTaskStage,
+    status: row[columns.indexOf("status")] as AutomationTaskStatus,
+    attempts: (row[columns.indexOf("attempts")] as number) || 0,
+    maxAttempts: (row[columns.indexOf("maxAttempts")] as number) || 3,
+    startedAt: (row[columns.indexOf("startedAt")] as string) || null,
+    finishedAt: (row[columns.indexOf("finishedAt")] as string) || null,
+    error: (row[columns.indexOf("error")] as string) || null,
+    createdAt: row[columns.indexOf("createdAt")] as string,
+    updatedAt: row[columns.indexOf("updatedAt")] as string,
+  };
+}
+
+export async function createAutomationJob(projectId: string, totalSlices: number, concurrency: number = 1): Promise<AutomationJob> {
+  const database = await getDatabase();
+  const id = `job-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const now = new Date().toISOString();
+
+  database.run(
+    `INSERT INTO automation_jobs (id, projectId, status, totalSlices, completedSlices, failedSlices, concurrency, startedAt, finishedAt, error, createdAt, updatedAt)
+     VALUES (?, ?, 'pending', ?, 0, 0, ?, NULL, NULL, NULL, ?, ?)`,
+    [id, projectId, totalSlices, concurrency, now, now]
+  );
+  saveDatabase(database);
+
+  return {
+    id,
+    projectId,
+    status: "pending",
+    totalSlices,
+    completedSlices: 0,
+    failedSlices: 0,
+    concurrency,
+    startedAt: null,
+    finishedAt: null,
+    error: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export async function getAutomationJob(jobId: string): Promise<AutomationJob | null> {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM automation_jobs WHERE id = ?`, [jobId]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  return rowToJob(result[0].values[0], result[0].columns);
+}
+
+export async function getLatestAutomationJob(projectId: string): Promise<AutomationJob | null> {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM automation_jobs WHERE projectId = ? ORDER BY createdAt DESC LIMIT 1`, [projectId]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  return rowToJob(result[0].values[0], result[0].columns);
+}
+
+export async function updateAutomationJob(jobId: string, updates: Partial<AutomationJob>): Promise<void> {
+  const database = await getDatabase();
+  const now = new Date().toISOString();
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  const allowed: (keyof AutomationJob)[] = ["status", "completedSlices", "failedSlices", "concurrency", "startedAt", "finishedAt", "error"];
+  for (const key of allowed) {
+    if (updates[key] !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(updates[key] as any);
+    }
+  }
+  if (fields.length === 0) return;
+
+  fields.push("updatedAt = ?");
+  values.push(now);
+  values.push(jobId);
+
+  database.run(`UPDATE automation_jobs SET ${fields.join(", ")} WHERE id = ?`, values);
+  saveDatabase(database);
+}
+
+export async function createAutomationTask(data: {
+  jobId: string;
+  projectId: string;
+  moduleId: string;
+  sliceId?: string;
+  sliceTitle?: string;
+  stage: AutomationTaskStage;
+  maxAttempts?: number;
+}): Promise<AutomationTask> {
+  const database = await getDatabase();
+  const id = `task-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const now = new Date().toISOString();
+
+  database.run(
+    `INSERT INTO automation_tasks (id, jobId, projectId, moduleId, sliceId, sliceTitle, stage, status, attempts, maxAttempts, startedAt, finishedAt, error, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL, NULL, NULL, ?, ?)`,
+    [id, data.jobId, data.projectId, data.moduleId, data.sliceId || null, data.sliceTitle || null, data.stage, data.maxAttempts || 3, now, now]
+  );
+  saveDatabase(database);
+
+  return {
+    id,
+    jobId: data.jobId,
+    projectId: data.projectId,
+    moduleId: data.moduleId,
+    sliceId: data.sliceId || null,
+    sliceTitle: data.sliceTitle || null,
+    stage: data.stage,
+    status: "pending",
+    attempts: 0,
+    maxAttempts: data.maxAttempts || 3,
+    startedAt: null,
+    finishedAt: null,
+    error: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export async function getAutomationTasksByJob(jobId: string): Promise<AutomationTask[]> {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM automation_tasks WHERE jobId = ? ORDER BY createdAt ASC`, [jobId]);
+  if (result.length === 0) return [];
+  return result[0].values.map(row => rowToTask(row, result[0].columns));
+}
+
+export async function getAutomationTask(taskId: string): Promise<AutomationTask | null> {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM automation_tasks WHERE id = ?`, [taskId]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  return rowToTask(result[0].values[0], result[0].columns);
+}
+
+export async function updateAutomationTask(taskId: string, updates: Partial<AutomationTask>): Promise<void> {
+  const database = await getDatabase();
+  const now = new Date().toISOString();
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  const allowed: (keyof AutomationTask)[] = ["status", "attempts", "startedAt", "finishedAt", "error"];
+  for (const key of allowed) {
+    if (updates[key] !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(updates[key] as any);
+    }
+  }
+  if (fields.length === 0) return;
+
+  fields.push("updatedAt = ?");
+  values.push(now);
+  values.push(taskId);
+
+  database.run(`UPDATE automation_tasks SET ${fields.join(", ")} WHERE id = ?`, values);
+  saveDatabase(database);
+}
+
+// 获取某个切片在该 job 下处于 pending 的任务（用于断点续传）
+export async function getPendingTasksForSlice(jobId: string, moduleId: string): Promise<AutomationTask[]> {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM automation_tasks WHERE jobId = ? AND moduleId = ? AND status = 'pending' ORDER BY createdAt ASC`, [jobId, moduleId]);
+  if (result.length === 0) return [];
+  return result[0].values.map(row => rowToTask(row, result[0].columns));
 }

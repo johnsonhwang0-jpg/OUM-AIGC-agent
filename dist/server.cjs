@@ -4,6 +4,13 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -21,19 +28,90 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// server.ts
-var import_express = __toESM(require("express"), 1);
-var import_path2 = __toESM(require("path"), 1);
-var import_dotenv = __toESM(require("dotenv"), 1);
-var import_genai = require("@google/genai");
-var import_vite = require("vite");
-
 // database.ts
-var import_sql = __toESM(require("sql.js"), 1);
-var import_fs = __toESM(require("fs"), 1);
-var import_path = __toESM(require("path"), 1);
-var db = null;
-var DB_PATH = import_path.default.join(process.cwd(), "booktogame.db");
+var database_exports = {};
+__export(database_exports, {
+  closeDatabase: () => closeDatabase,
+  createAutomationJob: () => createAutomationJob,
+  createAutomationTask: () => createAutomationTask,
+  createModelConfig: () => createModelConfig,
+  createProject: () => createProject,
+  createPromptTemplate: () => createPromptTemplate,
+  createPromptVersion: () => createPromptVersion,
+  deleteModelConfig: () => deleteModelConfig,
+  deleteProject: () => deleteProject,
+  deletePromptTemplate: () => deletePromptTemplate,
+  deletePromptVersion: () => deletePromptVersion,
+  getAllModelConfigs: () => getAllModelConfigs,
+  getAllProjects: () => getAllProjects,
+  getAllPromptTemplates: () => getAllPromptTemplates,
+  getAutomationJob: () => getAutomationJob,
+  getAutomationTask: () => getAutomationTask,
+  getAutomationTasksByJob: () => getAutomationTasksByJob,
+  getDatabase: () => getDatabase,
+  getExtractedContents: () => getExtractedContents,
+  getGeneratedAppCode: () => getGeneratedAppCode,
+  getLatestAutomationJob: () => getLatestAutomationJob,
+  getModelConfig: () => getModelConfig,
+  getModuleScripts: () => getModuleScripts,
+  getPendingTasksForSlice: () => getPendingTasksForSlice,
+  getProject: () => getProject,
+  getPromptTemplate: () => getPromptTemplate,
+  getPromptVersions: () => getPromptVersions,
+  saveExtractedContent: () => saveExtractedContent,
+  saveGeneratedAppCode: () => saveGeneratedAppCode,
+  saveModuleScript: () => saveModuleScript,
+  updateAutomationJob: () => updateAutomationJob,
+  updateAutomationTask: () => updateAutomationTask,
+  updateModelConfig: () => updateModelConfig,
+  updateProject: () => updateProject,
+  updateProjectPdf: () => updateProjectPdf,
+  updatePromptTemplate: () => updatePromptTemplate,
+  updatePromptVersion: () => updatePromptVersion
+});
+function backupDatabaseBeforeMigration(database) {
+  if (!import_fs.default.existsSync(DB_BACKUP_DIR)) {
+    import_fs.default.mkdirSync(DB_BACKUP_DIR, { recursive: true });
+  }
+  const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+  const backupPath = import_path.default.join(DB_BACKUP_DIR, `booktogame-backup-${timestamp}.db`);
+  try {
+    const data = database.export();
+    const buffer = Buffer.from(data);
+    import_fs.default.writeFileSync(backupPath, buffer);
+    console.log(`\u{1F4BE} \u6570\u636E\u5E93\u8FC1\u79FB\u524D\u5DF2\u5907\u4EFD\u5230: ${backupPath}`);
+  } catch (e) {
+    console.error("\u26A0\uFE0F \u6570\u636E\u5E93\u5907\u4EFD\u5931\u8D25:", e);
+  }
+}
+function getSchemaVersion(database) {
+  try {
+    const result = database.exec(`SELECT value FROM schema_version WHERE key = 'version'`);
+    if (result.length > 0 && result[0].values.length > 0) {
+      return result[0].values[0][0];
+    }
+  } catch (e) {
+  }
+  return 0;
+}
+function setSchemaVersion(database, version) {
+  database.run(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      key TEXT PRIMARY KEY,
+      value INTEGER NOT NULL
+    )
+  `);
+  database.run(`INSERT OR REPLACE INTO schema_version (key, value) VALUES ('version', ?)`, [version]);
+  saveDatabase(database);
+}
+function safeAlter(database, sql, description) {
+  try {
+    database.run(sql);
+    console.log(`\u2705 \u8FC1\u79FB\u6210\u529F: ${description}`);
+  } catch (e) {
+    console.log(`\u23ED\uFE0F  \u8DF3\u8FC7\u8FC1\u79FB: ${description} (${e.message})`);
+  }
+}
 async function initDatabase() {
   const SQL = await (0, import_sql.default)();
   let database;
@@ -61,14 +139,6 @@ async function initDatabase() {
       updatedAt TEXT NOT NULL
     )
   `);
-  try {
-    database.run(`ALTER TABLE projects ADD COLUMN aiMeta TEXT`);
-  } catch (e) {
-  }
-  try {
-    database.run(`ALTER TABLE projects ADD COLUMN rawBlueprintData TEXT`);
-  } catch (e) {
-  }
   database.run(`
     CREATE TABLE IF NOT EXISTS module_scripts (
       id TEXT PRIMARY KEY,
@@ -91,6 +161,123 @@ async function initDatabase() {
     )
   `);
   database.run(`CREATE INDEX IF NOT EXISTS idx_extracted_project ON extracted_content(projectId)`);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS generated_app_code (
+      id TEXT PRIMARY KEY,
+      projectId TEXT NOT NULL,
+      moduleId TEXT NOT NULL,
+      code TEXT,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_app_code_project ON generated_app_code(projectId)`);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS prompt_templates (
+      id TEXT PRIMARY KEY,
+      aiEntry TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL DEFAULT 'Untitled',
+      systemPrompt TEXT,
+      userPromptTemplate TEXT,
+      isActive INTEGER DEFAULT 0,
+      note TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_prompt_templates_entry ON prompt_templates(aiEntry)`);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS prompt_versions (
+      id TEXT PRIMARY KEY,
+      promptTemplateId TEXT NOT NULL,
+      systemPrompt TEXT,
+      userPromptTemplate TEXT,
+      version INTEGER NOT NULL,
+      note TEXT,
+      effectRating TEXT,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY (promptTemplateId) REFERENCES prompt_templates(id) ON DELETE CASCADE
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_prompt_versions_template ON prompt_versions(promptTemplateId)`);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS model_configs (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      modelId TEXT NOT NULL,
+      apiKey TEXT,
+      baseUrl TEXT,
+      maxTokens INTEGER DEFAULT 16000,
+      temperature REAL DEFAULT 0.7,
+      topP REAL DEFAULT 0.9,
+      promptTemplateId TEXT,
+      isActive INTEGER DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (promptTemplateId) REFERENCES prompt_templates(id) ON DELETE SET NULL
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_model_configs_prompt ON model_configs(promptTemplateId)`);
+  const currentVersion = getSchemaVersion(database);
+  if (currentVersion < CURRENT_SCHEMA_VERSION) {
+    console.log(`\u{1F504} Schema \u8FC1\u79FB: v${currentVersion} \u2192 v${CURRENT_SCHEMA_VERSION}`);
+    backupDatabaseBeforeMigration(database);
+  }
+  if (currentVersion < 1) {
+    safeAlter(database, `ALTER TABLE projects ADD COLUMN aiMeta TEXT`, "projects.aiMeta");
+    safeAlter(database, `ALTER TABLE projects ADD COLUMN rawBlueprintData TEXT`, "projects.rawBlueprintData");
+    safeAlter(database, `ALTER TABLE prompt_templates ADD COLUMN aiEntry TEXT NOT NULL DEFAULT ''`, "prompt_templates.aiEntry");
+    safeAlter(database, `ALTER TABLE prompt_templates ADD COLUMN name TEXT NOT NULL DEFAULT 'Untitled'`, "prompt_templates.name");
+    safeAlter(database, `ALTER TABLE prompt_templates ADD COLUMN note TEXT`, "prompt_templates.note");
+    setSchemaVersion(database, 1);
+  }
+  if (currentVersion < 2) {
+    setSchemaVersion(database, 2);
+  }
+  if (currentVersion < 3) {
+    safeAlter(database, `ALTER TABLE projects ADD COLUMN executionMode TEXT DEFAULT 'manual'`, "projects.executionMode");
+    database.run(`
+      CREATE TABLE IF NOT EXISTS automation_jobs (
+        id TEXT PRIMARY KEY,
+        projectId TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        totalSlices INTEGER DEFAULT 0,
+        completedSlices INTEGER DEFAULT 0,
+        failedSlices INTEGER DEFAULT 0,
+        concurrency INTEGER DEFAULT 1,
+        startedAt TEXT,
+        finishedAt TEXT,
+        error TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
+      )
+    `);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_auto_jobs_project ON automation_jobs(projectId)`);
+    database.run(`
+      CREATE TABLE IF NOT EXISTS automation_tasks (
+        id TEXT PRIMARY KEY,
+        jobId TEXT NOT NULL,
+        projectId TEXT NOT NULL,
+        moduleId TEXT NOT NULL,
+        sliceId TEXT,
+        sliceTitle TEXT,
+        stage TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER DEFAULT 0,
+        maxAttempts INTEGER DEFAULT 3,
+        startedAt TEXT,
+        finishedAt TEXT,
+        error TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (jobId) REFERENCES automation_jobs(id) ON DELETE CASCADE
+      )
+    `);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_auto_tasks_job ON automation_tasks(jobId, status)`);
+    setSchemaVersion(database, 3);
+  }
   saveDatabase(database);
   return database;
 }
@@ -184,6 +371,10 @@ async function updateProject(id, updates) {
     fields.push("rawBlueprintData = ?");
     values.push(updates.rawBlueprintData);
   }
+  if (updates.executionMode !== void 0) {
+    fields.push("executionMode = ?");
+    values.push(updates.executionMode);
+  }
   if (fields.length === 0) return;
   fields.push("updatedAt = ?");
   values.push(now);
@@ -223,6 +414,11 @@ async function getProject(id) {
     modules: matchingRow[columns.indexOf("modules")] || "",
     aiMeta: matchingRow[columns.indexOf("aiMeta")] || "",
     rawBlueprintData: matchingRow[columns.indexOf("rawBlueprintData")] || "",
+    executionMode: (() => {
+      const idx = columns.indexOf("executionMode");
+      const val = idx >= 0 ? matchingRow[idx] : null;
+      return val === "auto" ? "auto" : "manual";
+    })(),
     createdAt: matchingRow[columns.indexOf("createdAt")],
     updatedAt: matchingRow[columns.indexOf("updatedAt")]
   };
@@ -246,6 +442,11 @@ async function getAllProjects() {
     modules: row[columns.indexOf("modules")] || "",
     aiMeta: row[columns.indexOf("aiMeta")] || "",
     rawBlueprintData: row[columns.indexOf("rawBlueprintData")] || "",
+    executionMode: (() => {
+      const idx = columns.indexOf("executionMode");
+      const val = idx >= 0 ? row[idx] : null;
+      return val === "auto" ? "auto" : "manual";
+    })(),
     createdAt: row[columns.indexOf("createdAt")],
     updatedAt: row[columns.indexOf("updatedAt")]
   }));
@@ -253,6 +454,8 @@ async function getAllProjects() {
 async function deleteProject(id) {
   const database = await getDatabase();
   database.run(`DELETE FROM module_scripts WHERE projectId = ?`, [id]);
+  database.run(`DELETE FROM automation_tasks WHERE projectId = ?`, [id]);
+  database.run(`DELETE FROM automation_jobs WHERE projectId = ?`, [id]);
   database.run(`DELETE FROM projects WHERE id = ?`, [id]);
   saveDatabase(database);
 }
@@ -308,6 +511,1055 @@ async function getExtractedContents(projectId) {
     createdAt: row[columns.indexOf("createdAt")]
   }));
 }
+async function closeDatabase() {
+  if (db) {
+    saveDatabase(db);
+    db.close();
+    db = null;
+  }
+}
+async function saveGeneratedAppCode(projectId, moduleId, code) {
+  const database = await getDatabase();
+  const id = `appcode-${projectId}-${moduleId}`;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  database.run(
+    `INSERT OR REPLACE INTO generated_app_code (id, projectId, moduleId, code, createdAt)
+     VALUES (?, ?, ?, ?, ?)`,
+    [id, projectId, moduleId, code, now]
+  );
+  saveDatabase(database);
+}
+async function getGeneratedAppCode(projectId, moduleId) {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT code FROM generated_app_code WHERE projectId = ? AND moduleId = ?`, [projectId, moduleId]);
+  if (result.length === 0 || result[0].values.length === 0) {
+    return null;
+  }
+  return result[0].values[0][0];
+}
+async function getAllPromptTemplates(aiEntry) {
+  const database = await getDatabase();
+  const query = aiEntry ? `SELECT * FROM prompt_templates WHERE aiEntry = ? ORDER BY isActive DESC, createdAt DESC` : `SELECT * FROM prompt_templates ORDER BY isActive DESC, createdAt DESC`;
+  const result = database.exec(query, aiEntry ? [aiEntry] : []);
+  if (result.length === 0) return [];
+  return result[0].values.map((row) => ({
+    id: row[0],
+    aiEntry: row[1],
+    name: row[2],
+    systemPrompt: row[3],
+    userPromptTemplate: row[4],
+    isActive: row[5] === 1,
+    note: row[6],
+    createdAt: row[7],
+    updatedAt: row[8]
+  }));
+}
+async function getPromptTemplate(id) {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM prompt_templates WHERE id = ?`, [id]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  const row = result[0].values[0];
+  return {
+    id: row[0],
+    aiEntry: row[1],
+    name: row[2],
+    systemPrompt: row[3],
+    userPromptTemplate: row[4],
+    isActive: row[5] === 1,
+    note: row[6],
+    createdAt: row[7],
+    updatedAt: row[8]
+  };
+}
+async function createPromptTemplate(data) {
+  const database = await getDatabase();
+  const id = `pt-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  database.run(
+    `INSERT INTO prompt_templates (id, aiEntry, name, systemPrompt, userPromptTemplate, isActive, note, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      data.aiEntry,
+      data.name,
+      data.systemPrompt || null,
+      data.userPromptTemplate || null,
+      data.isActive !== void 0 ? data.isActive ? 1 : 0 : 0,
+      data.note || null,
+      now,
+      now
+    ]
+  );
+  saveDatabase(database);
+  return {
+    id,
+    aiEntry: data.aiEntry,
+    name: data.name,
+    systemPrompt: data.systemPrompt || null,
+    userPromptTemplate: data.userPromptTemplate || null,
+    isActive: data.isActive !== void 0 ? data.isActive : false,
+    note: data.note || null,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+async function updatePromptTemplate(id, data) {
+  const database = await getDatabase();
+  const existing = await getPromptTemplate(id);
+  if (!existing) return null;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const updated = {
+    name: data.name ?? existing.name,
+    systemPrompt: data.systemPrompt !== void 0 ? data.systemPrompt : existing.systemPrompt,
+    userPromptTemplate: data.userPromptTemplate !== void 0 ? data.userPromptTemplate : existing.userPromptTemplate,
+    note: data.note !== void 0 ? data.note : existing.note,
+    isActive: data.isActive !== void 0 ? data.isActive : existing.isActive
+  };
+  database.run(
+    `UPDATE prompt_templates SET name=?, systemPrompt=?, userPromptTemplate=?, note=?, isActive=?, updatedAt=? WHERE id=?`,
+    [
+      updated.name,
+      updated.systemPrompt,
+      updated.userPromptTemplate,
+      updated.note,
+      updated.isActive ? 1 : 0,
+      now,
+      id
+    ]
+  );
+  saveDatabase(database);
+  return { ...existing, ...updated, updatedAt: now };
+}
+async function deletePromptTemplate(id) {
+  const database = await getDatabase();
+  database.run(`DELETE FROM prompt_templates WHERE id = ?`, [id]);
+  saveDatabase(database);
+  return true;
+}
+async function getPromptVersions(promptTemplateId) {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM prompt_versions WHERE promptTemplateId = ? ORDER BY version DESC`, [promptTemplateId]);
+  if (result.length === 0) return [];
+  return result[0].values.map((row) => ({
+    id: row[0],
+    promptTemplateId: row[1],
+    systemPrompt: row[2],
+    userPromptTemplate: row[3],
+    version: row[4],
+    note: row[5],
+    effectRating: row[6],
+    createdAt: row[7]
+  }));
+}
+async function createPromptVersion(data) {
+  const database = await getDatabase();
+  const id = `pv-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  database.run(
+    `INSERT INTO prompt_versions (id, promptTemplateId, systemPrompt, userPromptTemplate, version, note, effectRating, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      data.promptTemplateId,
+      data.systemPrompt || null,
+      data.userPromptTemplate || null,
+      data.version,
+      data.note || null,
+      data.effectRating || null,
+      now
+    ]
+  );
+  saveDatabase(database);
+  return {
+    id,
+    promptTemplateId: data.promptTemplateId,
+    systemPrompt: data.systemPrompt || null,
+    userPromptTemplate: data.userPromptTemplate || null,
+    version: data.version,
+    note: data.note || null,
+    effectRating: data.effectRating || null,
+    createdAt: now
+  };
+}
+async function updatePromptVersion(id, data) {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM prompt_versions WHERE id = ?`, [id]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  const row = result[0].values[0];
+  const existing = {
+    id: row[0],
+    promptTemplateId: row[1],
+    systemPrompt: row[2],
+    userPromptTemplate: row[3],
+    version: row[4],
+    note: row[5],
+    effectRating: row[6],
+    createdAt: row[7]
+  };
+  database.run(
+    `UPDATE prompt_versions SET note=?, effectRating=? WHERE id=?`,
+    [
+      data.note !== void 0 ? data.note : existing.note,
+      data.effectRating !== void 0 ? data.effectRating : existing.effectRating,
+      id
+    ]
+  );
+  saveDatabase(database);
+  return { ...existing, note: data.note !== void 0 ? data.note : existing.note, effectRating: data.effectRating !== void 0 ? data.effectRating : existing.effectRating };
+}
+async function deletePromptVersion(id) {
+  const database = await getDatabase();
+  database.run(`DELETE FROM prompt_versions WHERE id = ?`, [id]);
+  saveDatabase(database);
+  return true;
+}
+async function getAllModelConfigs() {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM model_configs ORDER BY createdAt DESC`);
+  if (result.length === 0) return [];
+  return result[0].values.map((row) => ({
+    id: row[0],
+    name: row[1],
+    provider: row[2],
+    modelId: row[3],
+    apiKey: row[4],
+    baseUrl: row[5],
+    maxTokens: row[6],
+    temperature: row[7],
+    topP: row[8],
+    promptTemplateId: row[9],
+    isActive: row[10] === 1,
+    createdAt: row[11],
+    updatedAt: row[12]
+  }));
+}
+async function getModelConfig(id) {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM model_configs WHERE id = ?`, [id]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  const row = result[0].values[0];
+  return {
+    id: row[0],
+    name: row[1],
+    provider: row[2],
+    modelId: row[3],
+    apiKey: row[4],
+    baseUrl: row[5],
+    maxTokens: row[6],
+    temperature: row[7],
+    topP: row[8],
+    promptTemplateId: row[9],
+    isActive: row[10] === 1,
+    createdAt: row[11],
+    updatedAt: row[12]
+  };
+}
+async function createModelConfig(data) {
+  const database = await getDatabase();
+  const id = `mc-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  database.run(
+    `INSERT INTO model_configs (id, name, provider, modelId, apiKey, baseUrl, maxTokens, temperature, topP, promptTemplateId, isActive, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      data.name,
+      data.provider,
+      data.modelId,
+      data.apiKey || null,
+      data.baseUrl || null,
+      data.maxTokens || 16e3,
+      data.temperature || 0.7,
+      data.topP || 0.9,
+      data.promptTemplateId || null,
+      data.isActive ? 1 : 0,
+      now,
+      now
+    ]
+  );
+  saveDatabase(database);
+  return {
+    id,
+    name: data.name,
+    provider: data.provider,
+    modelId: data.modelId,
+    apiKey: data.apiKey || null,
+    baseUrl: data.baseUrl || null,
+    maxTokens: data.maxTokens || 16e3,
+    temperature: data.temperature || 0.7,
+    topP: data.topP || 0.9,
+    promptTemplateId: data.promptTemplateId || null,
+    isActive: data.isActive || false,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+async function updateModelConfig(id, data) {
+  const database = await getDatabase();
+  const existing = await getModelConfig(id);
+  if (!existing) return null;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const updated = {
+    name: data.name ?? existing.name,
+    provider: data.provider ?? existing.provider,
+    modelId: data.modelId ?? existing.modelId,
+    apiKey: data.apiKey !== void 0 ? data.apiKey : existing.apiKey,
+    baseUrl: data.baseUrl !== void 0 ? data.baseUrl : existing.baseUrl,
+    maxTokens: data.maxTokens ?? existing.maxTokens,
+    temperature: data.temperature ?? existing.temperature,
+    topP: data.topP ?? existing.topP,
+    promptTemplateId: data.promptTemplateId !== void 0 ? data.promptTemplateId : existing.promptTemplateId,
+    isActive: data.isActive !== void 0 ? data.isActive : existing.isActive
+  };
+  database.run(
+    `UPDATE model_configs SET name=?, provider=?, modelId=?, apiKey=?, baseUrl=?, maxTokens=?, temperature=?, topP=?, promptTemplateId=?, isActive=?, updatedAt=? WHERE id=?`,
+    [
+      updated.name,
+      updated.provider,
+      updated.modelId,
+      updated.apiKey,
+      updated.baseUrl,
+      updated.maxTokens,
+      updated.temperature,
+      updated.topP,
+      updated.promptTemplateId,
+      updated.isActive ? 1 : 0,
+      now,
+      id
+    ]
+  );
+  saveDatabase(database);
+  return { ...updated, id, createdAt: existing.createdAt, updatedAt: now };
+}
+async function deleteModelConfig(id) {
+  const database = await getDatabase();
+  database.run(`DELETE FROM model_configs WHERE id = ?`, [id]);
+  saveDatabase(database);
+  return true;
+}
+function rowToJob(row, columns) {
+  return {
+    id: row[columns.indexOf("id")],
+    projectId: row[columns.indexOf("projectId")],
+    status: row[columns.indexOf("status")],
+    totalSlices: row[columns.indexOf("totalSlices")] || 0,
+    completedSlices: row[columns.indexOf("completedSlices")] || 0,
+    failedSlices: row[columns.indexOf("failedSlices")] || 0,
+    concurrency: row[columns.indexOf("concurrency")] || 1,
+    startedAt: row[columns.indexOf("startedAt")] || null,
+    finishedAt: row[columns.indexOf("finishedAt")] || null,
+    error: row[columns.indexOf("error")] || null,
+    createdAt: row[columns.indexOf("createdAt")],
+    updatedAt: row[columns.indexOf("updatedAt")]
+  };
+}
+function rowToTask(row, columns) {
+  return {
+    id: row[columns.indexOf("id")],
+    jobId: row[columns.indexOf("jobId")],
+    projectId: row[columns.indexOf("projectId")],
+    moduleId: row[columns.indexOf("moduleId")],
+    sliceId: row[columns.indexOf("sliceId")] || null,
+    sliceTitle: row[columns.indexOf("sliceTitle")] || null,
+    stage: row[columns.indexOf("stage")],
+    status: row[columns.indexOf("status")],
+    attempts: row[columns.indexOf("attempts")] || 0,
+    maxAttempts: row[columns.indexOf("maxAttempts")] || 3,
+    startedAt: row[columns.indexOf("startedAt")] || null,
+    finishedAt: row[columns.indexOf("finishedAt")] || null,
+    error: row[columns.indexOf("error")] || null,
+    createdAt: row[columns.indexOf("createdAt")],
+    updatedAt: row[columns.indexOf("updatedAt")]
+  };
+}
+async function createAutomationJob(projectId, totalSlices, concurrency = 1) {
+  const database = await getDatabase();
+  const id = `job-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  database.run(
+    `INSERT INTO automation_jobs (id, projectId, status, totalSlices, completedSlices, failedSlices, concurrency, startedAt, finishedAt, error, createdAt, updatedAt)
+     VALUES (?, ?, 'pending', ?, 0, 0, ?, NULL, NULL, NULL, ?, ?)`,
+    [id, projectId, totalSlices, concurrency, now, now]
+  );
+  saveDatabase(database);
+  return {
+    id,
+    projectId,
+    status: "pending",
+    totalSlices,
+    completedSlices: 0,
+    failedSlices: 0,
+    concurrency,
+    startedAt: null,
+    finishedAt: null,
+    error: null,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+async function getAutomationJob(jobId) {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM automation_jobs WHERE id = ?`, [jobId]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  return rowToJob(result[0].values[0], result[0].columns);
+}
+async function getLatestAutomationJob(projectId) {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM automation_jobs WHERE projectId = ? ORDER BY createdAt DESC LIMIT 1`, [projectId]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  return rowToJob(result[0].values[0], result[0].columns);
+}
+async function updateAutomationJob(jobId, updates) {
+  const database = await getDatabase();
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const fields = [];
+  const values = [];
+  const allowed = ["status", "completedSlices", "failedSlices", "concurrency", "startedAt", "finishedAt", "error"];
+  for (const key of allowed) {
+    if (updates[key] !== void 0) {
+      fields.push(`${key} = ?`);
+      values.push(updates[key]);
+    }
+  }
+  if (fields.length === 0) return;
+  fields.push("updatedAt = ?");
+  values.push(now);
+  values.push(jobId);
+  database.run(`UPDATE automation_jobs SET ${fields.join(", ")} WHERE id = ?`, values);
+  saveDatabase(database);
+}
+async function createAutomationTask(data) {
+  const database = await getDatabase();
+  const id = `task-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  database.run(
+    `INSERT INTO automation_tasks (id, jobId, projectId, moduleId, sliceId, sliceTitle, stage, status, attempts, maxAttempts, startedAt, finishedAt, error, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL, NULL, NULL, ?, ?)`,
+    [id, data.jobId, data.projectId, data.moduleId, data.sliceId || null, data.sliceTitle || null, data.stage, data.maxAttempts || 3, now, now]
+  );
+  saveDatabase(database);
+  return {
+    id,
+    jobId: data.jobId,
+    projectId: data.projectId,
+    moduleId: data.moduleId,
+    sliceId: data.sliceId || null,
+    sliceTitle: data.sliceTitle || null,
+    stage: data.stage,
+    status: "pending",
+    attempts: 0,
+    maxAttempts: data.maxAttempts || 3,
+    startedAt: null,
+    finishedAt: null,
+    error: null,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+async function getAutomationTasksByJob(jobId) {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM automation_tasks WHERE jobId = ? ORDER BY createdAt ASC`, [jobId]);
+  if (result.length === 0) return [];
+  return result[0].values.map((row) => rowToTask(row, result[0].columns));
+}
+async function getAutomationTask(taskId) {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM automation_tasks WHERE id = ?`, [taskId]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  return rowToTask(result[0].values[0], result[0].columns);
+}
+async function updateAutomationTask(taskId, updates) {
+  const database = await getDatabase();
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const fields = [];
+  const values = [];
+  const allowed = ["status", "attempts", "startedAt", "finishedAt", "error"];
+  for (const key of allowed) {
+    if (updates[key] !== void 0) {
+      fields.push(`${key} = ?`);
+      values.push(updates[key]);
+    }
+  }
+  if (fields.length === 0) return;
+  fields.push("updatedAt = ?");
+  values.push(now);
+  values.push(taskId);
+  database.run(`UPDATE automation_tasks SET ${fields.join(", ")} WHERE id = ?`, values);
+  saveDatabase(database);
+}
+async function getPendingTasksForSlice(jobId, moduleId) {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT * FROM automation_tasks WHERE jobId = ? AND moduleId = ? AND status = 'pending' ORDER BY createdAt ASC`, [jobId, moduleId]);
+  if (result.length === 0) return [];
+  return result[0].values.map((row) => rowToTask(row, result[0].columns));
+}
+var import_sql, import_fs, import_path, db, DB_PATH, DB_BACKUP_DIR, CURRENT_SCHEMA_VERSION;
+var init_database = __esm({
+  "database.ts"() {
+    import_sql = __toESM(require("sql.js"), 1);
+    import_fs = __toESM(require("fs"), 1);
+    import_path = __toESM(require("path"), 1);
+    db = null;
+    DB_PATH = import_path.default.join(process.cwd(), "booktogame.db");
+    DB_BACKUP_DIR = import_path.default.join(process.cwd(), ".db-backups");
+    CURRENT_SCHEMA_VERSION = 3;
+  }
+});
+
+// server.ts
+var import_express = __toESM(require("express"), 1);
+var import_path2 = __toESM(require("path"), 1);
+var import_dotenv = __toESM(require("dotenv"), 1);
+var import_genai = require("@google/genai");
+var import_vite = require("vite");
+
+// ai-stream.ts
+function getErrorMessage(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed?.error?.message || parsed?.message || raw;
+  } catch {
+    return raw;
+  }
+}
+function extractCompleteJsonContent(raw) {
+  const normalized = raw.trim().replace(/\s*```\s*$/i, "").trim();
+  for (let index = 0; index < normalized.length; index++) {
+    if (normalized[index] !== "{") continue;
+    const candidate = normalized.slice(index).trim();
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {
+    }
+  }
+  return null;
+}
+async function collectOpenAIStream(response) {
+  if (!response.ok) {
+    const raw = await response.text();
+    throw new Error(`AI API error: ${response.status} - ${getErrorMessage(raw)}`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("AI API streaming response has no body");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let finishReason = null;
+  const processEvent = (event) => {
+    const data = event.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n").trim();
+    if (!data) return false;
+    if (data === "[DONE]") return true;
+    const parsed = JSON.parse(data);
+    const choice = parsed?.choices?.[0];
+    content += choice?.delta?.content || "";
+    if (choice?.finish_reason) finishReason = choice.finish_reason;
+    return false;
+  };
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split(/\r?\n\r?\n/);
+      buffer = events.pop() || "";
+      for (const event of events) {
+        if (processEvent(event)) {
+          await reader.cancel();
+          return { content, finishReason, interrupted: false };
+        }
+      }
+    }
+  } catch (error) {
+    if (buffer.trim()) {
+      try {
+        processEvent(buffer);
+      } catch {
+      }
+    }
+    if (!content) throw error;
+    return { content, finishReason, interrupted: true };
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) processEvent(buffer);
+  return { content, finishReason, interrupted: false };
+}
+async function streamChatCompletion(options) {
+  const fetchImpl = options.fetchImpl || fetch;
+  const response = await fetchImpl(options.url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${options.apiKey}`
+    },
+    body: JSON.stringify({
+      model: options.model,
+      messages: options.messages,
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens,
+      stop: null,
+      stream: true,
+      stream_options: { include_usage: true },
+      ...options.thinking ? { thinking: { type: options.thinking } } : {},
+      ...options.jsonMode ? { response_format: { type: "json_object" } } : {}
+    })
+  });
+  return collectOpenAIStream(response);
+}
+
+// prompt-template.ts
+function applyPromptTemplate(template, variables) {
+  return Object.entries(variables).reduce((result, [key, value]) => {
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return result.replace(new RegExp(`\\{\\{${escapedKey}\\}\\}|\\{${escapedKey}\\}`, "g"), value);
+  }, template);
+}
+
+// server.ts
+init_database();
+
+// orchestrator.ts
+init_database();
+var sseClients = /* @__PURE__ */ new Map();
+function registerSseClient(jobId, res) {
+  if (!sseClients.has(jobId)) sseClients.set(jobId, /* @__PURE__ */ new Set());
+  sseClients.get(jobId).add(res);
+}
+function unregisterSseClient(jobId, res) {
+  const clients = sseClients.get(jobId);
+  if (!clients) return;
+  clients.delete(res);
+  if (clients.size === 0) sseClients.delete(jobId);
+}
+function emit(jobId, event) {
+  const clients = sseClients.get(jobId);
+  if (!clients || clients.size === 0) return;
+  const payload = `event: ${event.event}
+data: ${JSON.stringify(event.data)}
+
+`;
+  for (const res of clients) {
+    try {
+      res.write(payload);
+    } catch {
+    }
+  }
+}
+async function internalPost(path3, body) {
+  const port = process.env.PORT ? parseInt(process.env.PORT) : 8080;
+  const url = `http://localhost:${port}${path3}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const text = await res.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = { error: text };
+  }
+  if (!res.ok) {
+    throw new Error(json.error || `Internal ${path3} failed: ${res.status}`);
+  }
+  return json;
+}
+function computePageRange(coveredChapters, directoryItems) {
+  if (!coveredChapters || directoryItems.length === 0) {
+    return { startPage: 1, endPage: 10 };
+  }
+  const parts = coveredChapters.split(/[-–—/]/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length === 0) return { startPage: 1, endPage: 10 };
+  const startToken = parts[0];
+  const endToken = parts[parts.length - 1];
+  const findPage = (token) => {
+    for (const item of directoryItems) {
+      const title = item.title || "";
+      if (title.startsWith(token + " ") || title.startsWith(token + "\uFF1A") || title.startsWith(token + ":") || title === token) {
+        const p = parseInt(item.page || "", 10);
+        if (!isNaN(p) && p > 0) return p;
+      }
+    }
+    return null;
+  };
+  const startPage = findPage(startToken);
+  if (startPage == null) return { startPage: 1, endPage: 10 };
+  const endPageFound = findPage(endToken);
+  let endPage;
+  if (endPageFound != null && endToken !== startToken) {
+    const endIdx = directoryItems.findIndex((i) => {
+      const t = i.title || "";
+      return t.startsWith(endToken + " ") || t.startsWith(endToken + "\uFF1A") || t.startsWith(endToken + ":") || t === endToken;
+    });
+    if (endIdx >= 0 && endIdx + 1 < directoryItems.length) {
+      const nextItem = directoryItems[endIdx + 1];
+      const nextP = parseInt(nextItem.page || "", 10);
+      endPage = !isNaN(nextP) && nextP > endPageFound ? nextP - 1 : endPageFound + 14;
+    } else {
+      endPage = endPageFound + 14;
+    }
+  } else {
+    endPage = startPage + 14;
+  }
+  return { startPage: Math.max(1, startPage), endPage: Math.max(startPage, endPage) };
+}
+function parseModules(modulesJson) {
+  try {
+    const parsed = JSON.parse(modulesJson);
+    const arr = Array.isArray(parsed) ? parsed : parsed.slices || parsed.modules || [];
+    return arr;
+  } catch {
+    return [];
+  }
+}
+function parseDirectoryItems(dirJson) {
+  try {
+    return JSON.parse(dirJson);
+  } catch {
+    return [];
+  }
+}
+async function runTaskWithRetry(jobId, projectId, slice, stage, existingTask, runOnce) {
+  let task = existingTask;
+  if (!task) {
+    task = await createAutomationTask({
+      jobId,
+      projectId,
+      moduleId: slice.id,
+      sliceId: slice.sliceId || null,
+      sliceTitle: slice.title,
+      stage
+    });
+  }
+  if (task.status === "completed") return task;
+  if (task.status === "skipped") return task;
+  const maxAttempts = task.maxAttempts || 3;
+  const backoffs = [0, 1e4, 3e4];
+  for (let attempt = task.attempts; attempt < maxAttempts; attempt++) {
+    const idx = Math.min(attempt, backoffs.length - 1);
+    const waitMs = backoffs[idx] ?? 6e4;
+    if (waitMs > 0) {
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+    await updateAutomationTask(task.id, {
+      status: "running",
+      attempts: attempt + 1,
+      startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      finishedAt: null,
+      error: null
+    });
+    emit(jobId, {
+      event: "task_update",
+      data: { taskId: task.id, moduleId: slice.id, sliceId: slice.sliceId, stage, status: "running", attempt: attempt + 1 }
+    });
+    try {
+      await runOnce();
+      await updateAutomationTask(task.id, { status: "completed", finishedAt: (/* @__PURE__ */ new Date()).toISOString(), error: null });
+      emit(jobId, {
+        event: "task_complete",
+        data: { taskId: task.id, moduleId: slice.id, sliceId: slice.sliceId, stage, status: "completed" }
+      });
+      return task;
+    } catch (err) {
+      const errMsg = err?.message || String(err);
+      console.error(`[orchestrator] task ${task.id} (${slice.sliceId || slice.id} / ${stage}) attempt ${attempt + 1} failed:`, errMsg);
+      await updateAutomationTask(task.id, { status: "failed", error: errMsg });
+      emit(jobId, {
+        event: "task_failed",
+        data: { taskId: task.id, moduleId: slice.id, sliceId: slice.sliceId, stage, status: "failed", error: errMsg, attempt: attempt + 1, retryable: attempt + 1 < maxAttempts }
+      });
+      if (attempt + 1 >= maxAttempts) {
+        return task;
+      }
+    }
+  }
+  return task;
+}
+async function runSlicePipeline(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model) {
+  const job = await getAutomationJob(jobId);
+  if (job && (job.status === "cancelled" || job.status === "paused")) {
+    return { extracted: false, scripted: false, built: false };
+  }
+  const project = await getProject(projectId);
+  let extractedContent = "";
+  if (hasPdf && project?.pdfData) {
+    const { getExtractedContents: queryExtracted } = await Promise.resolve().then(() => (init_database(), database_exports));
+    const existingExtracts = await queryExtracted(projectId);
+    const matchedExtract0 = existingExtracts.find((e) => e.moduleId === slice.id);
+    if (matchedExtract0?.content) {
+      extractedContent = matchedExtract0.content;
+      emit(jobId, { event: "task_complete", data: { moduleId: slice.id, sliceId: slice.sliceId, stage: "extract", status: "skipped" } });
+    } else {
+      const existingExtractTasks = await getPendingTasksForSlice(jobId, slice.id);
+      const extractTask = existingExtractTasks.find((t) => t.stage === "extract") || null;
+      await runTaskWithRetry(jobId, projectId, slice, "extract", extractTask, async () => {
+        let startPage = 1;
+        let endPage = 10;
+        if (slice.pageRange) {
+          const m = slice.pageRange.match(/(\d+)\s*[-–—]\s*(\d+)/);
+          if (m) {
+            startPage = parseInt(m[1], 10);
+            endPage = parseInt(m[2], 10);
+          }
+        } else if (slice.coveredChapters) {
+          const range = computePageRange(slice.coveredChapters, directoryItems);
+          startPage = range.startPage;
+          endPage = range.endPage;
+        }
+        const result = await internalPost(`/api/projects/${projectId}/extract-pages`, {
+          startPage,
+          endPage
+        });
+        const pages = result.pages || [];
+        extractedContent = pages.map((p) => p.content || "").filter(Boolean).join("\n\n");
+        if (!extractedContent) {
+          throw new Error("PDF \u63D0\u53D6\u5185\u5BB9\u4E3A\u7A7A");
+        }
+        await saveExtractedContent(projectId, slice.id, extractedContent);
+      });
+    }
+  } else {
+    const skipTask = await createAutomationTask({
+      jobId,
+      projectId,
+      moduleId: slice.id,
+      sliceId: slice.sliceId || null,
+      sliceTitle: slice.title,
+      stage: "extract"
+    });
+    await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: (/* @__PURE__ */ new Date()).toISOString() });
+    emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "extract", status: "skipped" } });
+  }
+  const job2 = await getAutomationJob(jobId);
+  if (job2 && (job2.status === "cancelled" || job2.status === "paused")) {
+    return { extracted: true, scripted: false, built: false };
+  }
+  let scriptMarkdown = "";
+  const { getExtractedContents: getExtractedContents2 } = await Promise.resolve().then(() => (init_database(), database_exports));
+  const extractedRows = await getExtractedContents2(projectId);
+  const matchedExtract = extractedRows.find((e) => e.moduleId === slice.id);
+  const contentForScript = matchedExtract?.content || extractedContent || `General academic curriculum rules relative to ${slice.title}`;
+  const existingScriptTasks = await getPendingTasksForSlice(jobId, slice.id);
+  const scriptTask = existingScriptTasks.find((t) => t.stage === "script") || null;
+  await runTaskWithRetry(jobId, projectId, slice, "script", scriptTask, async () => {
+    const result = await internalPost("/api/generate-script", {
+      bookTitle,
+      chapterTitle: slice.title,
+      chapterIndex: slice.sliceId || slice.coveredChapters || "",
+      coveredChapters: slice.coveredChapters || "",
+      summary: slice.summary,
+      infoDensity: slice.infoDensity,
+      cohesionDetail: slice.cohesionDetail,
+      designRationale: slice.designRationale,
+      extractedContent: contentForScript.substring(0, 8e3)
+    });
+    scriptMarkdown = result.markdown || "";
+    if (!scriptMarkdown) throw new Error("AI \u672A\u8FD4\u56DE\u811A\u672C\u5185\u5BB9");
+    if (result._meta?.error || result._meta?.degraded) {
+      throw new Error(result._meta?.error || "AI \u8FD4\u56DE\u964D\u7EA7\u7ED3\u679C");
+    }
+    await saveModuleScript(projectId, slice.id, {
+      id: slice.id,
+      moduleId: slice.id,
+      kind: "simulation_blueprint_markdown",
+      markdown: scriptMarkdown,
+      generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  });
+  const job3 = await getAutomationJob(jobId);
+  if (job3 && (job3.status === "cancelled" || job3.status === "paused")) {
+    return { extracted: true, scripted: true, built: false };
+  }
+  const { getModuleScripts: getModuleScripts2 } = await Promise.resolve().then(() => (init_database(), database_exports));
+  const scripts = await getModuleScripts2(projectId);
+  const matchedScript = scripts.find((s) => s.moduleId === slice.id);
+  let finalMarkdown = scriptMarkdown;
+  if (!finalMarkdown && matchedScript) {
+    try {
+      const parsed = JSON.parse(matchedScript.script);
+      finalMarkdown = parsed.markdown || "";
+    } catch {
+      finalMarkdown = matchedScript.script;
+    }
+  }
+  if (!finalMarkdown) {
+    const skipTask = await createAutomationTask({
+      jobId,
+      projectId,
+      moduleId: slice.id,
+      sliceId: slice.sliceId || null,
+      sliceTitle: slice.title,
+      stage: "app-code"
+    });
+    await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: (/* @__PURE__ */ new Date()).toISOString(), error: "\u65E0\u53EF\u7528\u811A\u672C" });
+    emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "app-code", status: "skipped" } });
+    return { extracted: true, scripted: true, built: false };
+  }
+  const existingAppTasks = await getPendingTasksForSlice(jobId, slice.id);
+  const appTask = existingAppTasks.find((t) => t.stage === "app-code") || null;
+  await runTaskWithRetry(jobId, projectId, slice, "app-code", appTask, async () => {
+    const result = await internalPost("/api/generate-app-code", {
+      bookTitle,
+      chapterTitle: slice.title,
+      coveredChapters: slice.coveredChapters || "",
+      scriptMarkdown: finalMarkdown,
+      model
+    });
+    const code = result.code || "";
+    if (!code) throw new Error("AI \u672A\u8FD4\u56DE HTML \u4EE3\u7801");
+    await saveGeneratedAppCode(projectId, slice.id, code);
+  });
+  return { extracted: true, scripted: true, built: true };
+}
+async function startAutomationJob(projectId, options = {}) {
+  const project = await getProject(projectId);
+  if (!project) throw new Error("\u9879\u76EE\u4E0D\u5B58\u5728");
+  const slices = parseModules(project.modules);
+  if (slices.length === 0) throw new Error("\u9879\u76EE\u65E0\u5207\u7247\u6570\u636E\uFF0C\u8BF7\u5148\u5B8C\u6210 AI \u5207\u7247");
+  const directoryItems = parseDirectoryItems(project.directoryItems);
+  const hasPdf = !!(project.pdfFileName && project.pdfData);
+  const model = options.model || "deepseek-v4-flash";
+  let job = await getLatestAutomationJob(projectId);
+  if (job && (job.status === "running" || job.status === "paused")) {
+  } else {
+    job = await createAutomationJob(projectId, slices.length, options.concurrency || 1);
+  }
+  runJobLoop(job.id, projectId, project.bookTitle, slices, directoryItems, hasPdf, model).catch((err) => {
+    console.error(`[orchestrator] job ${job.id} crashed:`, err);
+  });
+  return job;
+}
+async function runJobLoop(jobId, projectId, bookTitle, slices, directoryItems, hasPdf, model) {
+  const job = await getAutomationJob(jobId);
+  if (!job) return;
+  await updateAutomationJob(jobId, {
+    status: "running",
+    startedAt: job.startedAt || (/* @__PURE__ */ new Date()).toISOString()
+  });
+  emit(jobId, { event: "job_progress", data: { jobId, completed: job.completedSlices, total: job.totalSlices, status: "running" } });
+  let completed = job.completedSlices;
+  let failed = job.failedSlices;
+  for (const slice of slices) {
+    const current = await getAutomationJob(jobId);
+    if (!current || current.status === "cancelled") break;
+    if (current.status === "paused") {
+      emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, status: "paused" } });
+      return;
+    }
+    const existingCode = await Promise.resolve().then(() => (init_database(), database_exports)).then((db2) => db2.getGeneratedAppCode(projectId, slice.id));
+    if (existingCode) {
+      completed += 1;
+      await updateAutomationJob(jobId, { completedSlices: completed });
+      emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, status: "running" } });
+      continue;
+    }
+    emit(jobId, { event: "slice_start", data: { jobId, moduleId: slice.id, sliceId: slice.sliceId, title: slice.title } });
+    try {
+      await runSlicePipeline(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model);
+      const tasks = await getAutomationTasksByJob(jobId);
+      const appTask = tasks.find((t) => t.moduleId === slice.id && t.stage === "app-code");
+      if (appTask && appTask.status === "completed") {
+        completed += 1;
+      } else {
+        failed += 1;
+      }
+    } catch (err) {
+      console.error(`[orchestrator] slice ${slice.sliceId || slice.id} failed:`, err);
+      failed += 1;
+    }
+    await updateAutomationJob(jobId, { completedSlices: completed, failedSlices: failed });
+    emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, failed, status: "running" } });
+  }
+  const finalJob = await getAutomationJob(jobId);
+  const allFailed = failed === slices.length && slices.length > 0;
+  let finalStatus;
+  if (finalJob?.status === "cancelled") {
+    finalStatus = "cancelled";
+  } else if (failed === 0) {
+    finalStatus = "completed";
+  } else if (completed > 0) {
+    finalStatus = "partial";
+  } else {
+    finalStatus = allFailed ? "partial" : "completed";
+  }
+  await updateAutomationJob(jobId, {
+    status: finalStatus,
+    finishedAt: (/* @__PURE__ */ new Date()).toISOString()
+  });
+  emit(jobId, {
+    event: finalStatus === "completed" ? "job_complete" : "job_finished",
+    data: { jobId, completed, failed, total: slices.length, status: finalStatus }
+  });
+}
+async function pauseJob(jobId) {
+  await updateAutomationJob(jobId, { status: "paused" });
+  emit(jobId, { event: "job_progress", data: { jobId, status: "paused" } });
+}
+async function resumeJob(jobId) {
+  const job = await getAutomationJob(jobId);
+  if (!job) throw new Error("Job \u4E0D\u5B58\u5728");
+  if (job.status !== "paused" && job.status !== "partial") {
+    throw new Error(`\u5F53\u524D\u72B6\u6001 ${job.status} \u4E0D\u53EF\u6062\u590D`);
+  }
+  const project = await getProject(job.projectId);
+  if (!project) throw new Error("\u9879\u76EE\u4E0D\u5B58\u5728");
+  const slices = parseModules(project.modules);
+  const directoryItems = parseDirectoryItems(project.directoryItems);
+  const hasPdf = !!(project.pdfFileName && project.pdfData);
+  await updateAutomationJob(jobId, { status: "running", finishedAt: null });
+  runJobLoop(jobId, job.projectId, project.bookTitle, slices, directoryItems, hasPdf, "deepseek-v4-flash").catch((err) => {
+    console.error(`[orchestrator] job ${jobId} resume crashed:`, err);
+  });
+}
+async function cancelJob(jobId) {
+  await updateAutomationJob(jobId, { status: "cancelled", finishedAt: (/* @__PURE__ */ new Date()).toISOString() });
+  emit(jobId, { event: "job_progress", data: { jobId, status: "cancelled" } });
+}
+async function retryTask(taskId) {
+  const task = await getAutomationTask(taskId);
+  if (!task) throw new Error("\u4EFB\u52A1\u4E0D\u5B58\u5728");
+  const job = await getAutomationJob(task.jobId);
+  if (!job) throw new Error("Job \u4E0D\u5B58\u5728");
+  const project = await getProject(task.projectId);
+  if (!project) throw new Error("\u9879\u76EE\u4E0D\u5B58\u5728");
+  const slices = parseModules(project.modules);
+  const slice = slices.find((s) => s.id === task.moduleId);
+  if (!slice) throw new Error("\u5207\u7247\u4E0D\u5B58\u5728");
+  const directoryItems = parseDirectoryItems(project.directoryItems);
+  const hasPdf = !!(project.pdfFileName && project.pdfData);
+  await updateAutomationTask(taskId, { status: "pending", attempts: 0, error: null, startedAt: null, finishedAt: null });
+  runSlicePipeline(task.jobId, task.projectId, project.bookTitle, slice, directoryItems, hasPdf, "deepseek-v4-flash").then(async () => {
+    const tasks = await getAutomationTasksByJob(task.jobId);
+    const moduleTasks = tasks.filter((t) => t.moduleId === slice.id);
+    const allDone = moduleTasks.every((t) => t.status === "completed" || t.status === "skipped");
+    if (allDone) {
+      const freshJob = await getAutomationJob(task.jobId);
+      if (freshJob) {
+        await updateAutomationJob(task.jobId, {
+          completedSlices: freshJob.completedSlices + 1,
+          failedSlices: Math.max(0, freshJob.failedSlices - 1)
+        });
+      }
+    }
+    emit(task.jobId, { event: "task_complete", data: { taskId, moduleId: slice.id, stage: task.stage, status: "completed" } });
+  }).catch((err) => {
+    console.error(`[orchestrator] retry task ${taskId} failed:`, err);
+    emit(task.jobId, { event: "task_failed", data: { taskId, error: err.message } });
+  });
+}
+async function retryAllFailed(jobId) {
+  const tasks = await getAutomationTasksByJob(jobId);
+  const failed = tasks.filter((t) => t.status === "failed");
+  for (const t of failed) {
+    await retryTask(t.id);
+  }
+}
+async function getJobSnapshot(jobId) {
+  const job = await getAutomationJob(jobId);
+  const tasks = await getAutomationTasksByJob(jobId);
+  return { job, tasks };
+}
 
 // server.ts
 var SERVER_VERSION = "v2026.06.09-list-fix";
@@ -325,81 +1577,104 @@ async function callDeepSeek(prompt, systemPrompt = "", model = "", maxTokens = 4
     if (!deepseekApiKey) {
       throw new Error("DEEPSEEK_API_KEY is not configured");
     }
-    const requestBody = JSON.stringify({
-      model: deepseekModel,
-      messages: [
+    let accumulated = "";
+    const maxRounds = 5;
+    for (let round = 0; round < maxRounds; round++) {
+      const messages = [
         { role: "system", content: systemPrompt },
         { role: "user", content: prompt }
-      ],
-      temperature: 0.7,
-      max_tokens: maxTokens,
-      ...jsonMode ? { response_format: { type: "json_object" } } : {}
-    });
-    let response = null;
-    let lastError = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        response = await fetch("https://api.deepseek.com/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${deepseekApiKey}`
-          },
-          body: requestBody
-        });
-        lastError = null;
+      ];
+      if (accumulated) {
+        messages.push({ role: "assistant", content: accumulated });
+        messages.push({ role: "user", content: "\u7EE7\u7EED\uFF0C\u4E0D\u8981\u505C\u3002\u5982\u679C\u4EE3\u7801\u8FD8\u6CA1\u5199\u5B8C\uFF0C\u8BF7\u63A5\u7740\u4E0A\u4E00\u6BB5\u7EE7\u7EED\u8F93\u51FA\u5269\u4F59\u90E8\u5206\u3002" });
+      }
+      let result = null;
+      let lastError = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          result = await streamChatCompletion({
+            url: "https://api.deepseek.com/chat/completions",
+            apiKey: deepseekApiKey,
+            model: deepseekModel,
+            messages,
+            maxTokens,
+            jsonMode: jsonMode && round === 0,
+            thinking: "disabled"
+          });
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err;
+          if (attempt === 2) throw err;
+          console.warn("DeepSeek fetch aborted, retrying once...");
+          await new Promise((resolve) => setTimeout(resolve, 700));
+        }
+      }
+      if (!result) {
+        throw lastError || new Error("DeepSeek API request failed");
+      }
+      const content = result.content;
+      const finishReason = result.finishReason;
+      accumulated += content;
+      console.log(`DeepSeek round ${round + 1}: +${content.length} chars, finish_reason=${finishReason}, interrupted=${result.interrupted}`);
+      const completeJson = jsonMode ? extractCompleteJsonContent(accumulated) : null;
+      if (completeJson) {
+        accumulated = completeJson;
+        console.log(`DeepSeek JSON completed after round ${round + 1}; stopping without waiting for [DONE].`);
         break;
-      } catch (err) {
-        lastError = err;
-        if (attempt === 2) throw err;
-        console.warn("DeepSeek fetch aborted, retrying once...");
-        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+      if (finishReason !== "length" && !result.interrupted) {
+        break;
       }
     }
-    if (!response) {
-      throw lastError || new Error("DeepSeek API request failed");
-    }
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`DeepSeek API error: ${response.status} - ${errorText}`);
-    }
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || "";
+    return accumulated;
   } catch (error) {
     console.error("DeepSeek call failed:", error);
     throw error;
   }
 }
-async function callDashScope(prompt, systemPrompt = "", model = "", jsonMode = true) {
+async function callDashScope(prompt, systemPrompt = "", model = "", maxTokens = 4096, jsonMode = true) {
   try {
     const dashscopeModel = model || process.env.DASHSCOPE_MODEL || "qwen-plus";
     const dashscopeApiKey = process.env.DASHSCOPE_API_KEY || "";
+    const baseUrl = process.env.DASHSCOPE_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
     if (!dashscopeApiKey) {
       throw new Error("DASHSCOPE_API_KEY is not configured");
     }
-    const response = await fetch("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${dashscopeApiKey}`
-      },
-      body: JSON.stringify({
+    let accumulated = "";
+    const maxRounds = 5;
+    for (let round = 0; round < maxRounds; round++) {
+      const messages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt }
+      ];
+      if (accumulated) {
+        messages.push({ role: "assistant", content: accumulated });
+        messages.push({ role: "user", content: "\u7EE7\u7EED\uFF0C\u4E0D\u8981\u505C\u3002\u5982\u679C\u4EE3\u7801\u8FD8\u6CA1\u5199\u5B8C\uFF0C\u8BF7\u63A5\u7740\u4E0A\u4E00\u6BB5\u7EE7\u7EED\u8F93\u51FA\u5269\u4F59\u90E8\u5206\u3002" });
+      }
+      const result = await streamChatCompletion({
+        url: `${baseUrl}/chat/completions`,
+        apiKey: dashscopeApiKey,
         model: dashscopeModel,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        temperature: 0.7,
-        max_tokens: 4096,
-        ...jsonMode ? { response_format: { type: "json_object" } } : {}
-      })
-    });
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`DashScope API error: ${response.status} - ${errorText}`);
+        messages,
+        maxTokens,
+        jsonMode: jsonMode && round === 0
+      });
+      const content = result.content;
+      const finishReason = result.finishReason;
+      accumulated += content;
+      console.log(`DashScope round ${round + 1}: +${content.length} chars, finish_reason=${finishReason}, interrupted=${result.interrupted}`);
+      const completeJson = jsonMode ? extractCompleteJsonContent(accumulated) : null;
+      if (completeJson) {
+        accumulated = completeJson;
+        console.log(`DashScope JSON completed after round ${round + 1}; stopping without waiting for [DONE].`);
+        break;
+      }
+      if (finishReason !== "length" && !result.interrupted) {
+        break;
+      }
     }
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || "";
+    return accumulated;
   } catch (error) {
     console.error("DashScope call failed:", error);
     throw error;
@@ -656,6 +1931,25 @@ app.post("/api/projects/:id/extracted", async (req, res) => {
     res.status(500).json({ error: "Failed to save extracted content" });
   }
 });
+app.post("/api/projects/:id/app-code", async (req, res) => {
+  try {
+    const { moduleId, code } = req.body;
+    await saveGeneratedAppCode(req.params.id, moduleId, code);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to save app code:", error);
+    res.status(500).json({ error: "Failed to save app code" });
+  }
+});
+app.get("/api/projects/:id/app-code/:moduleId", async (req, res) => {
+  try {
+    const code = await getGeneratedAppCode(req.params.id, req.params.moduleId);
+    res.json({ code: code || null });
+  } catch (error) {
+    console.error("Failed to get app code:", error);
+    res.status(500).json({ error: "Failed to get app code" });
+  }
+});
 app.post("/api/projects/:id/extract-pages", async (req, res) => {
   try {
     const { startPage, endPage } = req.body;
@@ -732,7 +2026,7 @@ app.get("/api/projects/:id/images", async (req, res) => {
 });
 app.post("/api/parse-book", async (req, res) => {
   try {
-    const { title, fullText, directoryStructure } = req.body;
+    const { title, fullText, directoryStructure, systemPrompt, userPromptTemplate } = req.body;
     console.log("\n\u{1F4DA} ========== PARSE BOOK API CALL ==========");
     console.log("\u{1F4D5} Book Title (dynamic from frontend):", title);
     console.log("\u{1F4C2} Directory Structure length:", directoryStructure?.length || 0);
@@ -777,7 +2071,7 @@ app.post("/api/parse-book", async (req, res) => {
     {
       "sliceId": "S1",
       "title": "\u5207\u7247\u4E3B\u9898\u540D\u79F0\uFF08\u4E00\u53E5\u8BDD\uFF0C\u8BA9\u5B66\u751F\u77E5\u9053\u8FD9\u4E2A\u5207\u7247\u5728\u8BB2\u4EC0\u4E48\uFF09",
-      "coveredChapters": "1.1-1.2",
+      "coveredChapters": "1.1-1.2/1.1/1.1.1-1.1.5",
       "summary": {
         "learnedPoints": [
           "\u80FD\u8BF4\u51FA/\u7406\u89E3/\u533A\u5206XXX\uFF08\u5177\u4F53\u53EF\u9648\u8FF0\u7684\u77E5\u8BC6\u70B9\uFF09",
@@ -850,17 +2144,28 @@ ${directoryText}
 1. \u76EE\u5F55\u91C7\u7528\u624B\u98CE\u7434\u5C42\u7EA7\u7ED3\u6784\uFF0C\u4F8B\u5982 Topic 3 \u4E0B\u9762\u53EF\u80FD\u6709 3.1\u30013.2\u30013.3...3.7\uFF0C\u4F46\u53EF\u80FD\u6CA1\u6709 3.8 \u6216 3.9\u3002\u4F60\u5728\u586B\u5199 coveredChapters \u65F6\uFF0C\u5FC5\u987B\u5148\u786E\u8BA4\u76EE\u5F55\u4E2D\u5B9E\u9645\u5B58\u5728\u54EA\u4E9B\u7AE0\u8282\u7F16\u53F7\uFF0C\u53EA\u80FD\u4F7F\u7528\u76EE\u5F55\u4E2D\u771F\u5B9E\u5B58\u5728\u7684\u7AE0\u8282\uFF01
 2. \u6CE8\u610F\u591A\u5C42\u7EA7\u7F16\u53F7\u7684\u533A\u522B\uFF1A\u5982\u679C 3.1 \u4E0B\u9762\u6709\u5B50\u7AE0\u8282 3.1.1\u30013.1.2...3.1.5\uFF0C\u4F60\u60F3\u8986\u76D6\u8FD9\u4E9B\u5B50\u7AE0\u8282\u65F6\uFF0CcoveredChapters \u5FC5\u987B\u5199\u6210 "3.1.1-3.1.5"\uFF0C\u7EDD\u5BF9\u4E0D\u80FD\u5199\u6210 "3.1-3.5"\uFF08\u8FD9\u8868\u793A\u7684\u662F 3.1\u30013.2\u30013.3\u30013.4\u30013.5 \u4E94\u4E2A\u540C\u7EA7\u7AE0\u8282\uFF09\uFF01
 3. \u586B\u5199\u524D\u8BF7\u5148\u786E\u8BA4\u4F60\u8981\u8986\u76D6\u7684\u7AE0\u8282\u5728\u76EE\u5F55\u4E2D\u7684\u5B8C\u6574\u7F16\u53F7\uFF0C\u7136\u540E\u628A\u5B8C\u6574\u7F16\u53F7\u5199\u8FDB coveredChapters\u3002`;
+    const finalSystemInstruction = systemPrompt || systemInstruction;
+    let finalPromptMessage;
+    if (userPromptTemplate) {
+      finalPromptMessage = applyPromptTemplate(userPromptTemplate, {
+        title,
+        bookTitle: title,
+        directoryText
+      });
+    } else {
+      finalPromptMessage = promptMessage;
+    }
     console.log("\n\u{1F4DD} ========== PROMPT MESSAGE SENT TO AI ==========");
     console.log("Title used:", title);
     console.log("Directory text length:", directoryText.length);
     console.log("Directory text first 500 chars:", directoryText.substring(0, 500));
     console.log("Directory text last 300 chars:", directoryText.substring(directoryText.length - 300));
-    console.log("Full prompt message first 1500 chars:", promptMessage.substring(0, 1500));
+    console.log("Full prompt message first 1500 chars:", finalPromptMessage.substring(0, 1500));
     console.log("==========================================\n");
     let outputText;
     const sliceModel = "deepseek-v4-flash";
     console.log(`\u{1F504} [parse-book] Forcing DeepSeek model: ${sliceModel}`);
-    outputText = await callDeepSeek(promptMessage, systemInstruction, sliceModel, 16384);
+    outputText = await callDeepSeek(finalPromptMessage, finalSystemInstruction, sliceModel, 16384);
     try {
       const resultObj = parseJsonResponse(outputText);
       if (resultObj && Array.isArray(resultObj.slices)) {
@@ -895,8 +2200,8 @@ ${directoryText}
         _meta: {
           model: sliceModel,
           provider: "deepseek",
-          systemInstruction,
-          userPrompt: promptMessage
+          systemInstruction: finalSystemInstruction,
+          userPrompt: finalPromptMessage
         }
       });
     } catch (parseErr) {
@@ -907,6 +2212,8 @@ ${directoryText}
         _meta: {
           model: sliceModel,
           provider: "deepseek",
+          degraded: true,
+          fallbackType: "heuristic",
           systemInstruction,
           userPrompt: promptMessage,
           error: "AI JSON\u89E3\u6790\u5931\u8D25\uFF0C\u4F7F\u7528\u542F\u53D1\u5F0Ffallback",
@@ -928,6 +2235,8 @@ ${directoryText}
         _meta: {
           model: "deepseek-v4-flash",
           provider: "deepseek",
+          degraded: true,
+          fallbackType: "heuristic",
           systemInstruction: "",
           userPrompt: "",
           error: `AI API\u8C03\u7528\u5931\u8D25: ${error.message}\uFF0C\u4F7F\u7528\u542F\u53D1\u5F0Ffallback`
@@ -1151,36 +2460,42 @@ app.post("/api/generate-script", async (req, res) => {
       infoDensity,
       cohesionDetail,
       designRationale,
-      extractedContent
+      extractedContent,
+      systemPrompt,
+      userPromptTemplate
     } = req.body;
     if (!chapterTitle) {
       return res.status(400).json({ error: "Missing required chapter metadata (chapterTitle)." });
     }
-    const systemInstruction = `\u4F60\u662F\u4E00\u540D\u201C\u6559\u5B66\u6A21\u62DF\u4EA7\u54C1\u8BBE\u8BA1\u5E08 + \u4E92\u52A8\u5B66\u4E60\u811A\u672C\u67B6\u6784\u5E08\u201D\u3002
+    const systemInstruction = `\u4F60\u662F\u4E00\u540D"\u6559\u5B66\u6A21\u62DF\u4EA7\u54C1\u8BBE\u8BA1\u5E08 + \u4E92\u52A8\u5B66\u4E60\u811A\u672C\u67B6\u6784\u5E08"\u3002
 
 \u4F60\u7684\u4EFB\u52A1\u4E0D\u662F\u751F\u6210 quiz\u3001\u9009\u62E9\u9898\u3001\u5224\u65AD\u9898\u3001\u586B\u7A7A\u9898\u3001\u9898\u5E93\u3001\u5267\u60C5\u95EE\u7B54\u6216\u6362\u76AE\u95EF\u5173\u3002
-\u4F60\u7684\u4EFB\u52A1\u662F\u628A\u4E00\u4E2A\u6559\u5B66\u5207\u7247\u8F6C\u5316\u4E3A\u4E00\u4EFD\u53EF\u4EA4\u7ED9 AI coding agent \u5B9E\u73B0\u7684\u201C\u53EF\u89C6\u5316\u3001\u6C89\u6D78\u5F0F\u3001\u95EE\u9898\u9A71\u52A8\u7684\u4E92\u52A8\u6A21\u62DF\u5668\u751F\u6210\u811A\u672C\u201D\u3002
+\u4F60\u7684\u4EFB\u52A1\u662F\u628A\u4E00\u4E2A\u6559\u5B66\u5207\u7247\u8F6C\u5316\u4E3A\u4E00\u4EFD\u53EF\u4EA4\u7ED9 AI coding agent \u5B9E\u73B0\u7684"\u6C89\u6D78\u5F0F\u3001\u95EE\u9898\u9A71\u52A8\u7684\u4E92\u52A8\u6A21\u62DF\u5668\u751F\u6210\u811A\u672C"\u3002
+
+\u8FD9\u4EFD\u811A\u672C\u5E94\u8BE5\u4E13\u6CE8\u63CF\u8FF0\u529F\u80FD\u3001\u4EA4\u4E92\u548C\u7528\u6237\u4F53\u9A8C\uFF08UX\uFF09\uFF0C\u4E0D\u8981\u6307\u5B9A\u4EFB\u4F55\u89C6\u89C9\u6837\u5F0F\uFF08\u989C\u8272\u3001\u5B57\u4F53\u3001\u5E03\u5C40\u3001\u52A8\u753B\u7B49\uFF09\u3002\u89C6\u89C9\u8BBE\u8BA1\u7531\u540E\u7EED\u7684 AI coding agent \u8D1F\u8D23\u3002
 
 \u6838\u5FC3\u539F\u5219\uFF1A
 1. \u6BCF\u4E2A\u6A21\u62DF\u5FC5\u987B\u56F4\u7ED5\u4E00\u4E2A\u7EFC\u5408\u95EE\u9898\u573A\u666F\u3002\u5B66\u751F\u8FDB\u5165\u5177\u4F53\u60C5\u5883\uFF0C\u626E\u6F14\u5177\u4F53\u89D2\u8272\uFF0C\u9762\u5BF9\u5FC5\u987B\u4F7F\u7528\u672C\u5207\u7247\u77E5\u8BC6\u624D\u80FD\u89E3\u51B3\u7684\u4EFB\u52A1\u3002
-2. \u4E92\u52A8\u5FC5\u987B\u662F\u201C\u5E94\u7528\u77E5\u8BC6\u5E72\u9884\u573A\u666F\u201D\uFF0C\u4E0D\u662F\u201C\u56DE\u5FC6\u77E5\u8BC6\u56DE\u7B54\u95EE\u9898\u201D\u3002\u5B66\u751F\u5E94\u89C2\u5BDF\u573A\u666F\u3001\u8C03\u6574\u53D8\u91CF\u3001\u9009\u62E9\u7B56\u7565\u3001\u5B89\u6392\u6B65\u9AA4\u3001\u8BCA\u65AD\u539F\u56E0\u3001\u5206\u914D\u8D44\u6E90\u3001\u9884\u6D4B\u540E\u679C\u6216\u4F18\u5316\u65B9\u6848\u3002
+2. \u4E92\u52A8\u5FC5\u987B\u662F"\u5E94\u7528\u77E5\u8BC6\u5E72\u9884\u573A\u666F"\uFF0C\u4E0D\u662F"\u56DE\u5FC6\u77E5\u8BC6\u56DE\u7B54\u95EE\u9898"\u3002\u5B66\u751F\u5E94\u89C2\u5BDF\u573A\u666F\u3001\u8C03\u6574\u53D8\u91CF\u3001\u9009\u62E9\u7B56\u7565\u3001\u5B89\u6392\u6B65\u9AA4\u3001\u8BCA\u65AD\u539F\u56E0\u3001\u5206\u914D\u8D44\u6E90\u3001\u9884\u6D4B\u540E\u679C\u6216\u4F18\u5316\u65B9\u6848\u3002
 3. \u77E5\u8BC6\u70B9\u5FC5\u987B\u53D8\u6210\u573A\u666F\u673A\u5236\u3002\u5207\u7247\u4E2D\u7684\u6982\u5FF5\u3001\u5173\u7CFB\u3001\u6D41\u7A0B\u3001\u5224\u65AD\u6807\u51C6\u5FC5\u987B\u6620\u5C04\u4E3A\u53EF\u89C2\u5BDF\u5BF9\u8C61\u3001\u72B6\u6001\u53D8\u91CF\u3001\u7528\u6237\u64CD\u4F5C\u3001\u53CD\u9988\u89C4\u5219\u3001\u6210\u529F/\u5931\u8D25\u6761\u4EF6\u3002
 4. \u53CD\u9988\u5FC5\u987B\u4F53\u73B0\u56E0\u679C\u3002\u6BCF\u6B21\u64CD\u4F5C\u540E\u7684\u53CD\u9988\u8981\u8BF4\u660E\u573A\u666F\u53D1\u751F\u4E86\u4EC0\u4E48\u53D8\u5316\u3001\u4E3A\u4EC0\u4E48\u4F1A\u8FD9\u6837\u3001\u5BF9\u5E94\u6559\u6750\u4E2D\u7684\u54EA\u4E2A\u673A\u5236\u3001\u4E0B\u4E00\u6B65\u5E94\u5982\u4F55\u8C03\u6574\u3002
-5. \u89C6\u89C9\u8BBE\u8BA1\u8981\u670D\u52A1\u6559\u5B66\u5185\u5BB9\u3002\u4E0D\u540C\u5B66\u79D1\u5E94\u751F\u6210\u4E0D\u540C\u6A21\u62DF\u5F62\u6001\uFF0C\u4F8B\u5982\u5E94\u6025\u5904\u7F6E\u3001\u8BFE\u5802/\u89D2\u8272\u5B9E\u8DF5\u3001\u53D8\u91CF\u5B9E\u9A8C\u5BA4\u3001\u8BCA\u65AD\u51B3\u7B56\u3001\u7CFB\u7EDF\u4F18\u5316\u3001\u6D41\u7A0B\u642D\u5EFA\u3001\u60C5\u5883\u63A8\u7406\u3001\u8BC1\u636E\u7814\u5224\u7B49\u3002\u4E0D\u8981\u5957\u7528\u56FA\u5B9A\u73A9\u6CD5\u6A21\u677F\u3002
+5. \u4E0D\u540C\u5B66\u79D1\u5E94\u751F\u6210\u4E0D\u540C\u6A21\u62DF\u5F62\u6001\uFF0C\u4F8B\u5982\u5E94\u6025\u5904\u7F6E\u3001\u8BFE\u5802/\u89D2\u8272\u5B9E\u8DF5\u3001\u53D8\u91CF\u5B9E\u9A8C\u5BA4\u3001\u8BCA\u65AD\u51B3\u7B56\u3001\u7CFB\u7EDF\u4F18\u5316\u3001\u6D41\u7A0B\u642D\u5EFA\u3001\u60C5\u5883\u63A8\u7406\u3001\u8BC1\u636E\u7814\u5224\u7B49\u3002\u4E0D\u8981\u5957\u7528\u56FA\u5B9A\u73A9\u6CD5\u6A21\u677F\u3002
 
 \u8F93\u51FA\u8981\u6C42\uFF1A
 - \u4F7F\u7528\u4E2D\u6587\u3002
 - \u8F93\u51FA\u7ED3\u6784\u5316 Markdown\uFF0C\u4E0D\u8981\u8F93\u51FA JSON\uFF0C\u4E0D\u8981\u8F93\u51FA\u4EE3\u7801\u3002
-- \u8FD9\u4EFD Markdown \u5C06\u88AB AI coding agent \u76F4\u63A5\u7528\u6765\u751F\u6210\u7F51\u9875\u5E94\u7528\uFF0C\u6240\u4EE5\u5FC5\u987B\u5177\u4F53\u3001\u53EF\u5B9E\u73B0\u3001\u53EF\u6E32\u67D3\u3001\u53EF\u7F16\u8F91\u3002
-- \u5FC5\u987B\u5305\u542B\u9875\u9762\u5E03\u5C40\u3001\u4E3B\u8981\u7EC4\u4EF6\u3001\u573A\u666F\u5BF9\u8C61\u3001\u72B6\u6001\u53D8\u91CF\u3001\u4EA4\u4E92\u9636\u6BB5\u3001\u64CD\u4F5C\u53CD\u9988\u3001\u77E5\u8BC6\u673A\u5236\u89E3\u91CA\u548C\u5B8C\u6210\u6761\u4EF6\u3002
+- \u8FD9\u4EFD Markdown \u5C06\u88AB AI coding agent \u76F4\u63A5\u7528\u6765\u751F\u6210\u7F51\u9875\u5E94\u7528\uFF0C\u6240\u4EE5\u5FC5\u987B\u5177\u4F53\u3001\u53EF\u5B9E\u73B0\u3001\u53EF\u4EA4\u4E92\u3002
+- \u4E0D\u8981\u6307\u5B9A\u4EFB\u4F55\u89C6\u89C9\u6837\u5F0F\uFF08\u989C\u8272\u3001\u5B57\u4F53\u3001\u5E03\u5C40\u3001\u52A8\u753B\u3001\u56FE\u6807\u7B49\uFF09\uFF0C\u53EA\u63CF\u8FF0\u529F\u80FD\u3001\u4EA4\u4E92\u903B\u8F91\u548C\u7528\u6237\u4F53\u9A8C\u3002
+- \u5FC5\u987B\u5305\u542B\u6BCF\u4E2A\u6B65\u9AA4\u7684\u4EA4\u4E92\u573A\u666F\u3001\u7528\u6237\u64CD\u4F5C\u3001\u4EA4\u4E92\u7ED3\u679C\u3001\u5173\u8054\u77E5\u8BC6\u70B9\u3002
 
 \u7981\u6B62\uFF1A
-- \u201C\u8BF7\u9009\u62E9\u6B63\u786E\u7B54\u6848\u201D
+- "\u8BF7\u9009\u62E9\u6B63\u786E\u7B54\u6848"
 - A/B/C/D \u7B54\u9898\u5361
 - \u5224\u65AD\u9898/\u586B\u7A7A\u9898/\u5355\u7EAF\u95EE\u7B54
 - \u53EA\u6709\u5267\u60C5\uFF0C\u6CA1\u6709\u53EF\u64CD\u4F5C\u5BF9\u8C61\u6216\u72B6\u6001\u53D8\u5316
 - \u53EA\u6709\u8BB2\u89E3\uFF0C\u6CA1\u6709\u6A21\u62DF\u4EFB\u52A1
-- \u6BCF\u4E2A\u9636\u6BB5\u53EA\u662F\u4E00\u4E2A quiz question`;
+- \u6BCF\u4E2A\u9636\u6BB5\u53EA\u662F\u4E00\u4E2A quiz question
+- \u6307\u5B9A\u989C\u8272\u3001\u5B57\u4F53\u3001\u5E03\u5C40\u3001\u52A8\u753B\u7B49\u89C6\u89C9\u6837\u5F0F`;
     const promptText = `\u8BF7\u57FA\u4E8E\u4EE5\u4E0B\u6559\u5B66\u5207\u7247\uFF0C\u751F\u6210\u4E00\u4EFD\u201C\u53EF\u4EA4\u7ED9 AI coding \u5B9E\u73B0\u7684\u6C89\u6D78\u5F0F\u5B66\u4E60\u6A21\u62DF\u5668\u811A\u672C\u201D\u3002
 
 \u6559\u6750\u540D\u79F0\uFF1A
@@ -1202,34 +2517,66 @@ ${designRationale || "\u672A\u63D0\u4F9B"}
 \u6559\u6750\u539F\u6587\uFF1A
 ${(extractedContent || "General academic curriculum rules relative to " + chapterTitle).substring(0, 8e3)}
 
-\u8BF7\u5148\u5224\u65AD\u8FD9\u4E2A\u6559\u5B66\u5207\u7247\u6700\u9002\u5408\u88AB\u8F6C\u5316\u6210\u54EA\u4E00\u79CD\u4E92\u52A8\u6A21\u62DF\u5F62\u5F0F\uFF0C\u7136\u540E\u8F93\u51FA\u7ED3\u6784\u5316 Markdown\u3002\u5EFA\u8BAE\u5305\u542B\u4EE5\u4E0B\u7AE0\u8282\uFF1A
+\u8BF7\u8F93\u51FA\u4EE5\u4E0B5\u4E2A\u90E8\u5206\u7684\u7ED3\u6784\u5316 Markdown\uFF1A
 
-# \u6A21\u62DF\u5668\u6807\u9898
-## 1. \u6559\u5B66\u5207\u7247\u7406\u89E3
-## 2. \u6A21\u62DF\u5668\u6982\u5FF5
-## 3. \u53EF\u89C6\u5316\u573A\u666F\u8BBE\u8BA1
-## 4. \u72B6\u6001\u53D8\u91CF\u4E0E\u77E5\u8BC6\u673A\u5236\u6620\u5C04
-## 5. \u4EA4\u4E92\u6D41\u7A0B
-## 6. \u64CD\u4F5C\u53CD\u9988\u89C4\u5219
-## 7. \u5B8C\u6210\u6761\u4EF6\u4E0E\u5B66\u4E60\u53CD\u601D
-## 8. \u7ED9 AI coding \u7684\u5B9E\u73B0\u8BF4\u660E
+# 1. \u6559\u5B66\u5207\u7247\u7406\u89E3
+- **\u6838\u5FC3\u77E5\u8BC6\u70B9**\uFF1A\u5217\u51FA\u672C\u5207\u7247\u7684\u5173\u952E\u6982\u5FF5\u3001\u539F\u7406\u3001\u6D41\u7A0B\u6216\u5224\u65AD\u6807\u51C6
+- **\u7EFC\u5408\u5B9E\u8DF5\u60C5\u666F**\uFF1A\u8FD9\u4E9B\u77E5\u8BC6\u70B9\u7EC4\u7EC7\u5728\u4E00\u8D77\uFF0C\u662F\u7528\u6765\u7406\u89E3\u3001\u9762\u5BF9\u3001\u89E3\u51B3\u4EC0\u4E48\u6837\u7684\u7EFC\u5408\u6027\u5927\u95EE\u9898/\u5927\u60C5\u666F\u7684\uFF1F\u63CF\u8FF0\u4E00\u4E2A\u8D2F\u7A7F\u6574\u4E2A\u6A21\u62DF\u7684\u5927\u573A\u666F
+
+# 2. \u6574\u4F53\u6D41\u7A0B\u7B80\u8981\u8BBE\u8BA1
+- \u63CF\u8FF0\u6574\u4E2A\u6A21\u62DF\u7684\u903B\u8F91\u6D41\u7A0B\u548C\u60C5\u666F\u63A8\u8FDB
+- \u6BCF\u4E2A\u73AF\u8282\u5982\u4F55\u628A\u5BF9\u5E94\u7684\u77E5\u8BC6\u70B9\u878D\u5165\u5B9E\u8DF5\u6848\u4F8B
+- \u73AF\u8282\u4E4B\u95F4\u7684\u6545\u4E8B\u8854\u63A5\u5982\u4F55\u4FDD\u6301\u60C5\u666F\u7684\u5408\u7406\u6027\u3001\u8FDE\u8D2F\u6027\u3001\u6D41\u7545\u6027
+
+# 3. \u6A21\u62DF\u811A\u672C\u4E92\u52A8\u6D41\u7A0B\u8BBE\u8BA1
+\u8F93\u51FA\u5206\u6B65\u9AA4\u7684\u8BE6\u7EC6\u6D41\u7A0B\uFF0C\u6BCF\u4E2A\u6B65\u9AA4\u5305\u542B\uFF1A
+- **\u6B65\u9AA4\u7F16\u53F7**\uFF1A\u5982"\u7B2C\u4E00\u6B65"\u3001"\u7B2C\u4E8C\u6B65"
+- **\u4EA4\u4E92\u573A\u666F\u63CF\u8FF0**\uFF1A\u5728\u5927\u60C5\u666F\u4E2D\u9047\u5230\u4E86\u4EC0\u4E48\u5C0F\u6D41\u7A0B\u8282\u70B9\uFF1F\u5F53\u524D\u573A\u666F\u662F\u4EC0\u4E48\uFF1F\u9700\u8981\u7528\u6237\u89E3\u51B3\u4EC0\u4E48\u95EE\u9898\uFF1F
+- **\u7528\u6237\u4EA4\u4E92\u65B9\u5F0F**\uFF1A\u7528\u6237\u5177\u4F53\u600E\u4E48\u64CD\u4F5C\uFF1F\uFF08\u5982\u62D6\u62FD\u6392\u5E8F\u3001\u8C03\u6574\u6ED1\u5757\u3001\u9009\u62E9\u7B56\u7565\u3001\u5206\u914D\u8D44\u6E90\u3001\u8BCA\u65AD\u539F\u56E0\u3001\u9884\u6D4B\u540E\u679C\u7B49\uFF09
+- **\u4EA4\u4E92\u7ED3\u679C\u53CD\u9988**\uFF1A\u6BCF\u79CD\u64CD\u4F5C\u4F1A\u8FD4\u56DE\u4EC0\u4E48\u7ED3\u679C\uFF1F\u573A\u666F\u5982\u4F55\u53D8\u5316\uFF1F\u4E3A\u4EC0\u4E48\u8FD9\u6837\u53D8\u5316\uFF1F
+- **\u5173\u8054\u77E5\u8BC6\u70B9**\uFF1A\u8FD9\u4E2A\u6B65\u9AA4\u5BF9\u5E94\u6559\u5B66\u5207\u7247\u4E2D\u7684\u54EA\u4E9B\u77E5\u8BC6\u70B9\uFF1F
+
+# 4. \u603B\u7ED3 Feedback \u8BBE\u8BA1
+- \u57FA\u4E8E\u7528\u6237\u5728\u6240\u6709\u6B65\u9AA4\u4E2D\u7684\u6574\u4F53\u4E92\u52A8\u8FC7\u7A0B\uFF0C\u6700\u540E\u7ED9\u51FA\u4EC0\u4E48\u6837\u7684\u603B\u7ED3\u6027\u53CD\u9988\uFF1F
+- \u53CD\u9988\u5E94\u6DB5\u76D6\u54EA\u4E9B\u7EF4\u5EA6\uFF1F\uFF08\u5982\u77E5\u8BC6\u5E94\u7528\u6B63\u786E\u6027\u3001\u51B3\u7B56\u5408\u7406\u6027\u3001\u9057\u6F0F\u7684\u5173\u952E\u70B9\u7B49\uFF09
+- \u5982\u4F55\u6839\u636E\u7528\u6237\u7684\u8868\u73B0\u7ED9\u51FA\u5DEE\u5F02\u5316\u7684\u53CD\u9988\uFF1F
+
+# 5. \u7279\u6B8A\u8981\u6C42\u8BF4\u660E
+- \u8BED\u8A00\u8981\u6C42\uFF08\u5982\u4F7F\u7528\u4E2D\u6587/\u82F1\u6587\uFF09
+- \u4E0D\u8981\u51FA\u73B0\u8BFE\u540E\u53CD\u601D\u586B\u7A7A\u7B49\u4E0E\u6A21\u62DF\u65E0\u5173\u7684\u5185\u5BB9
+- \u5176\u4ED6\u9700\u8981\u6CE8\u610F\u7684\u4E8B\u9879
 
 \u8BF7\u786E\u4FDD\u5B83\u4E0D\u662F\u9898\u5E93\uFF0C\u800C\u662F\u4E00\u4E2A\u5B66\u751F\u53EF\u4EE5\u901A\u8FC7\u89C2\u5BDF\u3001\u5E72\u9884\u3001\u9A8C\u8BC1\u3001\u4FEE\u6B63\u6765\u5B8C\u6210\u7684\u4E92\u52A8\u6A21\u62DF\u5668\u3002`;
+    const finalSystemInstruction = systemPrompt || systemInstruction;
+    let finalPromptText;
+    if (userPromptTemplate) {
+      finalPromptText = applyPromptTemplate(userPromptTemplate, {
+        bookTitle: bookTitle || "Textbook",
+        chapterTitle: chapterTitle || "",
+        chapterIndex: String(chapterIndex || ""),
+        summary: typeof summary === "string" ? summary : JSON.stringify(summary || {}, null, 2),
+        infoDensity: typeof infoDensity === "string" ? infoDensity : JSON.stringify(infoDensity || {}, null, 2),
+        cohesionDetail: typeof cohesionDetail === "string" ? cohesionDetail : JSON.stringify(cohesionDetail || {}, null, 2),
+        designRationale: designRationale || "\u672A\u63D0\u4F9B",
+        extractedContent: (extractedContent || "General academic curriculum rules relative to " + chapterTitle).substring(0, 8e3)
+      });
+    } else {
+      finalPromptText = promptText;
+    }
     let outputText;
     if (AI_PROVIDER === "deepseek") {
-      const scriptModel = process.env.DEEPSEEK_SCRIPT_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-chat";
-      console.log(`\u{1F504} Using DeepSeek (${scriptModel}) for scenario script generation...`);
-      outputText = await callDeepSeek(promptText, systemInstruction, scriptModel, 6144, false);
+      console.log(`\u{1F504} Using DeepSeek (deepseek-v4-flash) for scenario script generation...`);
+      outputText = await callDeepSeek(finalPromptText, finalSystemInstruction, "deepseek-v4-flash", 6144, false);
     } else if (AI_PROVIDER === "dashscope") {
       console.log("\u{1F504} Using DashScope (\u901A\u4E49\u5343\u95EE) for scenario script generation...");
-      outputText = await callDashScope(promptText, systemInstruction, "", false);
+      outputText = await callDashScope(finalPromptText, finalSystemInstruction, "", 6144, false);
     } else if (AI_PROVIDER === "ollama") {
       console.log("\u{1F504} Using Ollama for scenario script generation...");
-      outputText = await callOllama(promptText, systemInstruction, "", false);
+      outputText = await callOllama(finalPromptText, finalSystemInstruction, "", false);
     } else if (AI_PROVIDER === "huggingface") {
       console.log("\u{1F504} Using Hugging Face for scenario script generation...");
-      outputText = await callHuggingFace(promptText, systemInstruction);
-    } else {
+      outputText = await callHuggingFace(finalPromptText, finalSystemInstruction);
+    } else if (AI_PROVIDER === "gemini") {
       const key = process.env.GEMINI_API_KEY;
       if (!key || key.trim() === "" || key.trim() === "your-actual-gemini-api-key-here") {
         return res.status(401).json({
@@ -1242,9 +2589,9 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
       console.log("\u{1F504} Using Gemini for scenario script generation...");
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: promptText,
+        contents: finalPromptText,
         config: {
-          systemInstruction
+          systemInstruction: finalSystemInstruction
         }
       });
       outputText = response.text;
@@ -1257,8 +2604,8 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
       _meta: {
         model: AI_PROVIDER === "deepseek" ? process.env.DEEPSEEK_SCRIPT_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-chat" : AI_PROVIDER,
         provider: AI_PROVIDER,
-        systemInstruction,
-        userPrompt: promptText
+        systemInstruction: finalSystemInstruction,
+        userPrompt: finalPromptText
       }
     });
   } catch (error) {
@@ -1268,61 +2615,35 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
 });
 app.post("/api/generate-app-code", async (req, res) => {
   try {
-    const { bookTitle, uiTheme, primaryColor, modules } = req.body;
-    if (!modules || !Array.isArray(modules) || modules.length === 0) {
-      return res.status(400).json({ error: "Missing simulation blueprint modules." });
+    const { bookTitle, chapterTitle, coveredChapters, scriptMarkdown, model, systemPrompt, userPromptTemplate } = req.body;
+    if (!scriptMarkdown || typeof scriptMarkdown !== "string") {
+      return res.status(400).json({ error: "Missing scriptMarkdown." });
     }
-    const systemInstruction = `\u4F60\u662F\u4E00\u540D\u8D44\u6DF1\u524D\u7AEF\u5DE5\u7A0B\u5E08\u548C\u6559\u80B2\u6A21\u62DF\u5668\u4EA7\u54C1\u5B9E\u73B0\u4E13\u5BB6\u3002
+    const defaultSystemInstruction = `\u4F60\u662F\u4E00\u4E2A\u9876\u7EA7\u7684\u5168\u6808\u5DE5\u7A0B\u5E08\uFF0C\u5FC5\u987B\u8F93\u51FA\u53EF\u76F4\u63A5\u8FD0\u884C\u7684\u5B8C\u6574\u4EE3\u7801\uFF0C\u6CE8\u91CDUI\u7F8E\u611F\u548C\u4EA4\u4E92\u7EC6\u8282\uFF0C\u5982\u679C\u4EE3\u7801\u88AB\u622A\u65AD\u8981\u4E3B\u52A8\u91CD\u8BD5\u3002\u53EA\u9700\u8981\u8F93\u51FA\u4EE3\u7801\uFF0C\u4E0D\u9700\u8981\u89E3\u91CA\u6587\u5B57\u3002`;
+    const defaultPromptText = `\u6839\u636E\u4EE5\u4E0B\u8981\u6C42\uFF0C\u5E2E\u6211\u5B9E\u73B0\u4E00\u4E2Aweb\u7AEF\u7684html\u3002\u8FD9\u662F\u4E00\u4E2A\u573A\u666F\u6A21\u62DF\u6E38\u620F\uFF0C\u8BA9\u5B66\u751F\u901A\u8FC7\u8FD9\u4E2A\u6A21\u62DF\u6E38\u620F\uFF0C\u5C06\u6240\u5B66\u7684\u77E5\u8BC6\u8FDB\u884C\u5E94\u7528\uFF0C\u5B66\u4EE5\u81F4\u7528\u3002\u6211\u5E0C\u671B\u6574\u4F53\u4E92\u52A8\u662F\u6C89\u6D78\u5F0F\u7684\uFF0C\u5C31\u662F\u6BCF\u4E2A\u64CD\u4F5C\u90FD\u6709\u4E30\u5BCC\u7684\u53EF\u89C6\u5316\u7684\u573A\u666F\u753B\u9762\u3002\u5E76\u4E14\u6211\u5E0C\u671B\u4E0D\u8981\u6240\u6709\u5185\u5BB9\u90FD\u662F\u5C40\u9650\u5728\u4E00\u4E2A\u9875\u9762\u4E0A\u7684\uFF0C\u800C\u662F\u4E00\u4E2A\u884C\u4E3A\u53EF\u80FD\u5C31\u662F\u5728\u4E00\u4E2A\u9875\u9762\u4E0A\u5B8C\u6210\u3002\u5B8C\u6210\u8FD9\u4E2A\u884C\u4E3A\u53EF\u80FD\u5C31\u9700\u8981\u8FDB\u5165\u5230\u65B0\u573A\u666F\u4E86\u3002
 
-\u4F60\u7684\u4EFB\u52A1\u662F\u6839\u636E\u4E00\u7EC4\u6559\u5B66\u6A21\u62DF\u5668 Markdown brief\uFF0C\u751F\u6210\u4E00\u4E2A\u53EF\u76F4\u63A5\u590D\u5236\u5230 React/Vite \u9879\u76EE\u4E2D\u8FD0\u884C\u7684\u5355\u6587\u4EF6 React + TypeScript \u5E94\u7528\u7EC4\u4EF6\u3002
+\u4EE5\u4E0B\u662F\u8BE5\u7AE0\u8282\u7684\u4E92\u52A8\u811A\u672C\u5185\u5BB9\uFF0C\u8BF7\u6839\u636E\u811A\u672C\u4E2D\u7684\u573A\u666F\u3001\u89D2\u8272\u3001\u4EA4\u4E92\u6D41\u7A0B\u3001\u53CD\u9988\u89C4\u5219\u7B49\u6765\u5B9E\u73B0HTML\u573A\u666F\u6A21\u62DF\u6E38\u620F\uFF1A
 
-\u786C\u6027\u8981\u6C42\uFF1A
-- \u53EA\u8F93\u51FA\u4EE3\u7801\uFF0C\u4E0D\u8981\u8F93\u51FA\u89E3\u91CA\u6587\u5B57\u3002
-- \u4F7F\u7528 React \u51FD\u6570\u7EC4\u4EF6\uFF0C\u9ED8\u8BA4\u5BFC\u51FA\u7EC4\u4EF6\u3002
-- \u4E0D\u8981\u8C03\u7528\u4EFB\u4F55\u5916\u90E8 API\uFF0C\u4E0D\u8981\u4F9D\u8D56\u540E\u7AEF\u3002
-- \u4E0D\u8981\u4F7F\u7528\u4F20\u7EDF quiz/\u9898\u5E93\u6A21\u677F\u3002
-- \u5E94\u6839\u636E brief \u4E2D\u7684\u573A\u666F\u5BF9\u8C61\u3001\u72B6\u6001\u53D8\u91CF\u3001\u4EA4\u4E92\u6D41\u7A0B\u3001\u53CD\u9988\u89C4\u5219\uFF0C\u5B9E\u73B0\u53EF\u89C6\u5316\u3001\u6C89\u6D78\u5F0F\u3001\u95EE\u9898\u9A71\u52A8\u7684\u6A21\u62DF\u4E92\u52A8\u3002
-- \u7528\u5185\u7F6E\u72B6\u6001\u7BA1\u7406\u6A21\u62DF\u53D8\u91CF\u53D8\u5316\u3001\u5B66\u751F\u64CD\u4F5C\u3001\u9636\u6BB5\u63A8\u8FDB\u548C\u53CD\u9988\u3002
-- \u4EE3\u7801\u5E94\u5305\u542B\u6837\u4F8B\u6570\u636E\u5E38\u91CF\uFF0C\u6765\u81EA\u8F93\u5165 brief\u3002
-- \u6837\u5F0F\u4F7F\u7528 Tailwind CSS className\uFF1B\u4E0D\u8981\u5F15\u5165 CSS \u6587\u4EF6\u3002
-- \u53EF\u4EE5\u4F7F\u7528 lucide-react \u56FE\u6807\uFF0C\u4F46\u4E0D\u8981\u5047\u8BBE\u5176\u4ED6\u7B2C\u4E09\u65B9 UI \u5E93\u5B58\u5728\u3002
-- \u8F93\u51FA\u4E00\u4E2A\u5B8C\u6574 TSX \u6587\u4EF6\u5185\u5BB9\u3002`;
-    const promptText = `\u8BF7\u57FA\u4E8E\u4EE5\u4E0B BookToGame \u4E92\u52A8\u6A21\u62DF\u5668 brief\uFF0C\u751F\u6210\u4E00\u4E2A\u5B8C\u6574\u7684 React/TypeScript \u5355\u6587\u4EF6\u5E94\u7528\u7EC4\u4EF6\u3002
-
-\u6559\u6750\u540D\u79F0\uFF1A
-${bookTitle || "\u672A\u547D\u540D\u6559\u6750"}
-
-\u89C6\u89C9\u4E3B\u9898\uFF1A
-${uiTheme || "minimal"}
-
-\u5F3A\u8C03\u8272\uFF1A
-${primaryColor || "#06b6d4"}
-
-\u6A21\u62DF\u5668 brief \u5217\u8868\uFF1A
-${modules.map((mod, idx) => `
-===== MODULE ${idx + 1}: ${mod.chapterIndex || ""} ${mod.title || ""} =====
-${mod.markdown || ""}
-`).join("\n\n")}
-
-\u5B9E\u73B0\u8981\u6C42\uFF1A
-1. \u7B2C\u4E00\u5C4F\u76F4\u63A5\u662F\u53EF\u7528\u7684\u6A21\u62DF\u5668\uFF0C\u4E0D\u8981\u505A\u8425\u9500 landing page\u3002
-2. \u5DE6\u4FA7\u6216\u9876\u90E8\u63D0\u4F9B\u6A21\u5757\u5207\u6362\u3002
-3. \u6BCF\u4E2A\u6A21\u5757\u8981\u6709\u72EC\u7ACB\u7684\u573A\u666F\u9762\u677F\u3001\u72B6\u6001\u53D8\u91CF\u9762\u677F\u3001\u5B66\u751F\u64CD\u4F5C\u533A\u3001\u53CD\u9988\u533A\u548C\u5B66\u4E60\u53CD\u601D\u533A\u3002
-4. \u5B66\u751F\u64CD\u4F5C\u5E94\u6539\u53D8\u72B6\u6001\u53D8\u91CF\u6216\u573A\u666F\u72B6\u6001\uFF0C\u800C\u4E0D\u662F\u53EA\u5224\u65AD\u5BF9\u9519\u3002
-5. \u53CD\u9988\u8981\u89E3\u91CA\u53D8\u91CF\u53D8\u5316\u80CC\u540E\u7684\u77E5\u8BC6\u673A\u5236\u3002
-6. \u754C\u9762\u8981\u7CBE\u81F4\u3001\u7A33\u5B9A\u3001\u9002\u5408\u6559\u5B66\u6F14\u793A\uFF0C\u907F\u514D\u6587\u5B57\u6EA2\u51FA\u3002
-7. \u53EA\u8F93\u51FA TSX \u4EE3\u7801\uFF0C\u4E0D\u8981 Markdown \u4EE3\u7801\u56F4\u680F\u3002`;
-    const outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 12e3, false);
-    const code = outputText.trim().replace(/^```(?:tsx|typescript|ts|jsx|javascript|js)?\s*/i, "").replace(/\s*```$/i, "").trim();
-    res.json({
-      code,
-      _meta: {
-        model: "deepseek-v4-flash",
-        provider: "deepseek",
-        systemInstruction,
-        userPrompt: promptText
-      }
-    });
+${scriptMarkdown}`;
+    const systemInstruction = systemPrompt || defaultSystemInstruction;
+    const promptText = userPromptTemplate ? applyPromptTemplate(userPromptTemplate, {
+      scriptMarkdown,
+      bookTitle: bookTitle || "",
+      chapterTitle: chapterTitle || ""
+    }) : defaultPromptText;
+    let outputText;
+    const selectedModel = model || "deepseek-v4-flash";
+    if (selectedModel === "qwen3.7-plus") {
+      outputText = await callDashScope(promptText, systemInstruction, "qwen3.7-plus", 32e3, false);
+    } else {
+      outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 32e3, false);
+    }
+    let code = outputText.trim();
+    code = code.replace(/^```(?:html|HTML)?\s*\n?/i, "");
+    code = code.replace(/\n?\s*```$/i, "");
+    code = code.replace(/```(?:html|HTML)?\s*\n?/gi, "");
+    code = code.trim();
+    res.json({ code, model: selectedModel });
   } catch (error) {
     console.error("Error generating app code:", error);
     res.status(500).json({ error: error.message || "Failed to generate app code" });
@@ -2121,6 +3442,280 @@ function getMockBlueprint(title) {
   };
 }
 async function startServer() {
+  app.get("/api/prompt-templates", async (req, res) => {
+    try {
+      const aiEntry = req.query.aiEntry;
+      const templates = await getAllPromptTemplates(aiEntry);
+      res.json(templates);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/prompt-templates/:id", async (req, res) => {
+    try {
+      const template = await getPromptTemplate(req.params.id);
+      if (!template) return res.status(404).json({ error: "Prompt template not found" });
+      res.json(template);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/prompt-templates", async (req, res) => {
+    try {
+      const template = await createPromptTemplate(req.body);
+      res.json(template);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.put("/api/prompt-templates/:id", async (req, res) => {
+    try {
+      const template = await updatePromptTemplate(req.params.id, req.body);
+      if (!template) return res.status(404).json({ error: "Prompt template not found" });
+      res.json(template);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.delete("/api/prompt-templates/:id", async (req, res) => {
+    try {
+      await deletePromptTemplate(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/prompt-templates/:templateId/versions", async (req, res) => {
+    try {
+      const versions = await getPromptVersions(req.params.templateId);
+      res.json(versions);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/prompt-templates/:templateId/versions", async (req, res) => {
+    try {
+      const existingVersions = await getPromptVersions(req.params.templateId);
+      const nextVersion = existingVersions.length > 0 ? Math.max(...existingVersions.map((v) => v.version)) + 1 : 1;
+      const version = await createPromptVersion({
+        ...req.body,
+        promptTemplateId: req.params.templateId,
+        version: nextVersion
+      });
+      res.json(version);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.put("/api/prompt-versions/:id", async (req, res) => {
+    try {
+      const version = await updatePromptVersion(req.params.id, req.body);
+      if (!version) return res.status(404).json({ error: "Prompt version not found" });
+      res.json(version);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.delete("/api/prompt-versions/:id", async (req, res) => {
+    try {
+      await deletePromptVersion(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/prompt-templates/seed", async (req, res) => {
+    try {
+      const { aiEntry, name, systemPrompt, userPromptTemplate } = req.body;
+      if (!aiEntry || !name) {
+        return res.status(400).json({ error: "aiEntry and name are required" });
+      }
+      const existing = await getAllPromptTemplates(aiEntry);
+      if (existing.length > 0) {
+        return res.json({ success: true, seeded: false, existing });
+      }
+      const template = await createPromptTemplate({
+        aiEntry,
+        name,
+        systemPrompt: systemPrompt || null,
+        userPromptTemplate: userPromptTemplate || null,
+        isActive: true
+      });
+      res.json({ success: true, seeded: true, template });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/model-configs", async (req, res) => {
+    try {
+      const configs = await getAllModelConfigs();
+      res.json(configs);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/model-configs/:id", async (req, res) => {
+    try {
+      const config = await getModelConfig(req.params.id);
+      if (!config) return res.status(404).json({ error: "Model config not found" });
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/model-configs", async (req, res) => {
+    try {
+      const config = await createModelConfig(req.body);
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.put("/api/model-configs/:id", async (req, res) => {
+    try {
+      const config = await updateModelConfig(req.params.id, req.body);
+      if (!config) return res.status(404).json({ error: "Model config not found" });
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.delete("/api/model-configs/:id", async (req, res) => {
+    try {
+      await deleteModelConfig(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.put("/api/projects/:id/execution-mode", async (req, res) => {
+    try {
+      const { executionMode } = req.body;
+      if (executionMode !== "auto" && executionMode !== "manual") {
+        return res.status(400).json({ error: "executionMode \u5FC5\u987B\u4E3A auto \u6216 manual" });
+      }
+      await updateProject(req.params.id, { executionMode });
+      res.json({ success: true, executionMode });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/automation/start", async (req, res) => {
+    try {
+      const { projectId, concurrency, model } = req.body;
+      if (!projectId) return res.status(400).json({ error: "\u7F3A\u5C11 projectId" });
+      const job = await startAutomationJob(projectId, { concurrency, model });
+      res.json({ job });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/automation/:jobId/status", async (req, res) => {
+    try {
+      const snapshot = await getJobSnapshot(req.params.jobId);
+      if (!snapshot.job) return res.status(404).json({ error: "Job \u4E0D\u5B58\u5728" });
+      res.json(snapshot);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/automation/:jobId/stream", async (req, res) => {
+    const { jobId } = req.params;
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    res.write(": connected\n\n");
+    registerSseClient(jobId, res);
+    try {
+      const snapshot = await getJobSnapshot(jobId);
+      if (snapshot.job) {
+        res.write(`event: snapshot
+data: ${JSON.stringify(snapshot)}
+
+`);
+      }
+    } catch {
+    }
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(": ping\n\n");
+      } catch {
+      }
+    }, 15e3);
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      unregisterSseClient(jobId, res);
+    });
+  });
+  app.post("/api/automation/:jobId/pause", async (req, res) => {
+    try {
+      await pauseJob(req.params.jobId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/automation/:jobId/resume", async (req, res) => {
+    try {
+      await resumeJob(req.params.jobId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/automation/:jobId/cancel", async (req, res) => {
+    try {
+      await cancelJob(req.params.jobId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/automation/task/:taskId/retry", async (req, res) => {
+    try {
+      await retryTask(req.params.taskId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/automation/:jobId/retry-all", async (req, res) => {
+    try {
+      await retryAllFailed(req.params.jobId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/projects/:id/app-codes", async (req, res) => {
+    try {
+      const project = await getProject(req.params.id);
+      if (!project) return res.status(404).json({ error: "\u9879\u76EE\u4E0D\u5B58\u5728" });
+      let modules = [];
+      try {
+        const parsed = JSON.parse(project.modules);
+        modules = Array.isArray(parsed) ? parsed : parsed.slices || parsed.modules || [];
+      } catch {
+      }
+      const results = [];
+      for (const mod of modules) {
+        const code = await getGeneratedAppCode(req.params.id, mod.id);
+        if (code) {
+          results.push({
+            moduleId: mod.id,
+            title: mod.title || mod.sliceId || mod.id,
+            coveredChapters: mod.coveredChapters,
+            code
+          });
+        }
+      }
+      res.json({ items: results, total: results.length });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
   if (process.env.NODE_ENV !== "production") {
     const vite = await (0, import_vite.createServer)({
       server: { middlewareMode: true },
