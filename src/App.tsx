@@ -42,9 +42,9 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError
   }
 }
 import { TEMPLATE_BOOKS } from "./data";
-import { 
+import {
   BookModule, BookBlueprint, GameScript, Message, GameSessionState, GameChallenge, GameType, DirectoryItem,
-  SummaryInfo, InfoDensity, CohesionDetail, ExtractedImage, SimulationBlueprintScript
+  SummaryInfo, InfoDensity, CohesionDetail, ExtractedImage, SimulationBlueprintScript, ProjectInfo
 } from "./types";
 import { parseTextToDirectory, serializeDirectoryToText } from "./utils/directoryParser";
 import { getExtractedTextForModule, getExtractedTextForModuleAsync, calculateAutoPageOffset } from "./utils/textbookMatcher";
@@ -460,6 +460,7 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   const [executionMode, setExecutionMode] = useState<"auto" | "manual">("manual");
   const [automationJobId, setAutomationJobId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"steps" | "task-manager">("steps");
+  const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
   const [showNewProjectModal, setShowNewProjectModal] = useState<boolean>(false);
 
   // Ref pointers for list scroll anchors
@@ -591,6 +592,14 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       setPdfData(project.pdfData || null);
       setExecutionMode(project.executionMode === "auto" ? "auto" : "manual");
       setViewMode(project.executionMode === "auto" ? "task-manager" : "steps");
+      setProjectInfo({
+        id: project.id,
+        name: project.name || "",
+        bookTitle: project.bookTitle || "",
+        pdfFileName: project.pdfFileName || "",
+        createdAt: project.createdAt || "",
+        executionMode: project.executionMode === "auto" ? "auto" : "manual",
+      });
 
       if (project.directoryItems) {
         try {
@@ -773,6 +782,14 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
     setPdfPageOffset(result.pdfPageOffset);
     setModules([]); // 新建项目无切片
     setExecutionMode(result.mode);
+    setProjectInfo({
+      id: result.projectId,
+      name: result.bookTitle || "",
+      bookTitle: result.bookTitle || "",
+      pdfFileName: result.pdfFileName || "",
+      createdAt: new Date().toISOString(),
+      executionMode: result.mode,
+    });
     setActiveStep(2); // 目录提取步骤
     await loadProjectList();
 
@@ -2499,6 +2516,8 @@ ${script.conclusion}
                 projectId={currentProjectId}
                 bookTitle={bookTitle}
                 modules={modules}
+                directoryItems={directoryItems}
+                projectInfo={projectInfo}
                 jobId={automationJobId}
                 onJobIdChange={setAutomationJobId}
                 onSwitchToManual={() => setViewMode("steps")}
@@ -2508,6 +2527,9 @@ ${script.conclusion}
                   setActiveStep(3);
                 }}
                 onBack={() => setViewMode("steps")}
+                onRefreshProject={() => {
+                  if (currentProjectId) loadProject(currentProjectId);
+                }}
               />
             </div>
           )}

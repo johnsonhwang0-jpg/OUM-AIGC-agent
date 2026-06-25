@@ -1276,10 +1276,10 @@ async function runTaskWithRetry(jobId, projectId, slice, stage, existingTask, ru
   }
   return task;
 }
-async function runSlicePipeline(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model) {
+async function runSliceExtract(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model) {
   const job = await getAutomationJob(jobId);
   if (job && (job.status === "cancelled" || job.status === "paused")) {
-    return { extracted: false, scripted: false, built: false };
+    return { extracted: false, content: "" };
   }
   const project = await getProject(projectId);
   let extractedContent = "";
@@ -1331,9 +1331,12 @@ async function runSlicePipeline(jobId, projectId, bookTitle, slice, directoryIte
     await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: (/* @__PURE__ */ new Date()).toISOString() });
     emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "extract", status: "skipped" } });
   }
-  const job2 = await getAutomationJob(jobId);
-  if (job2 && (job2.status === "cancelled" || job2.status === "paused")) {
-    return { extracted: true, scripted: false, built: false };
+  return { extracted: true, content: extractedContent };
+}
+async function runSliceScript(jobId, projectId, bookTitle, slice, extractedContent, model) {
+  const job = await getAutomationJob(jobId);
+  if (job && (job.status === "cancelled" || job.status === "paused")) {
+    return { scripted: false, markdown: "" };
   }
   let scriptMarkdown = "";
   const { getExtractedContents: getExtractedContents2 } = await Promise.resolve().then(() => (init_database(), database_exports));
@@ -1367,9 +1370,12 @@ async function runSlicePipeline(jobId, projectId, bookTitle, slice, directoryIte
       generatedAt: (/* @__PURE__ */ new Date()).toISOString()
     });
   });
-  const job3 = await getAutomationJob(jobId);
-  if (job3 && (job3.status === "cancelled" || job3.status === "paused")) {
-    return { extracted: true, scripted: true, built: false };
+  return { scripted: true, markdown: scriptMarkdown };
+}
+async function runSliceAppCode(jobId, projectId, bookTitle, slice, scriptMarkdown, model) {
+  const job = await getAutomationJob(jobId);
+  if (job && (job.status === "cancelled" || job.status === "paused")) {
+    return { built: false };
   }
   const { getModuleScripts: getModuleScripts2 } = await Promise.resolve().then(() => (init_database(), database_exports));
   const scripts = await getModuleScripts2(projectId);
@@ -1394,7 +1400,7 @@ async function runSlicePipeline(jobId, projectId, bookTitle, slice, directoryIte
     });
     await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: (/* @__PURE__ */ new Date()).toISOString(), error: "\u65E0\u53EF\u7528\u811A\u672C" });
     emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "app-code", status: "skipped" } });
-    return { extracted: true, scripted: true, built: false };
+    return { built: false };
   }
   const existingAppTasks = await getPendingTasksForSlice(jobId, slice.id);
   const appTask = existingAppTasks.find((t) => t.stage === "app-code") || null;
@@ -1410,24 +1416,87 @@ async function runSlicePipeline(jobId, projectId, bookTitle, slice, directoryIte
     if (!code) throw new Error("AI \u672A\u8FD4\u56DE HTML \u4EE3\u7801");
     await saveGeneratedAppCode(projectId, slice.id, code);
   });
-  return { extracted: true, scripted: true, built: true };
+  return { built: true };
+}
+async function runSlicePipeline(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model) {
+  const job = await getAutomationJob(jobId);
+  if (job && (job.status === "cancelled" || job.status === "paused")) {
+    return { extracted: false, scripted: false, built: false };
+  }
+  const { extracted, content } = await runSliceExtract(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model);
+  if (!extracted) return { extracted: false, scripted: false, built: false };
+  const job2 = await getAutomationJob(jobId);
+  if (job2 && (job2.status === "cancelled" || job2.status === "paused")) {
+    return { extracted: true, scripted: false, built: false };
+  }
+  const { scripted, markdown } = await runSliceScript(jobId, projectId, bookTitle, slice, content, model);
+  if (!scripted) return { extracted: true, scripted: false, built: false };
+  const job3 = await getAutomationJob(jobId);
+  if (job3 && (job3.status === "cancelled" || job3.status === "paused")) {
+    return { extracted: true, scripted: true, built: false };
+  }
+  const { built } = await runSliceAppCode(jobId, projectId, bookTitle, slice, markdown, model);
+  return { extracted: true, scripted: true, built };
+}
+async function ensureModulesGenerated(projectId, jobId) {
+  const project = await getProject(projectId);
+  if (!project) throw new Error("\u9879\u76EE\u4E0D\u5B58\u5728");
+  const existing = parseModules(project.modules);
+  if (existing.length > 0) return existing;
+  const directoryItems = parseDirectoryItems(project.directoryItems);
+  if (directoryItems.length === 0) {
+    throw new Error("\u9879\u76EE\u65E0\u76EE\u5F55\u6570\u636E\uFF0C\u65E0\u6CD5\u81EA\u52A8\u5207\u7247");
+  }
+  emit(jobId, { event: "parse_book_start", data: { projectId, status: "running" } });
+  const result = await internalPost("/api/parse-book", {
+    title: project.bookTitle || project.name || "\u672A\u547D\u540D\u6559\u6750",
+    fullText: project.bookContentText || "",
+    directoryStructure: directoryItems
+  });
+  if (result._meta?.error || result._meta?.degraded) {
+    throw new Error(result._meta?.error || "AI \u5207\u7247\u964D\u7EA7\uFF0C\u8BF7\u91CD\u8BD5");
+  }
+  const rawSlices = result.slices || result.modules || [];
+  if (rawSlices.length === 0) {
+    throw new Error("AI \u672A\u8FD4\u56DE\u5207\u7247");
+  }
+  const { updateProject: updateProject2 } = await Promise.resolve().then(() => (init_database(), database_exports));
+  const modules = rawSlices.map((mod, index) => ({
+    ...mod,
+    id: mod.id || `mod-${index + 1}-${Date.now()}`,
+    sliceId: mod.sliceId || `S${index + 1}`,
+    chapterIndex: mod.chapterIndex || mod.sliceId || `S${index + 1}`,
+    scriptStatus: "pending"
+  }));
+  await updateProject2(projectId, { modules: JSON.stringify(modules), rawBlueprintData: JSON.stringify(result) });
+  emit(jobId, { event: "parse_book_complete", data: { projectId, sliceCount: modules.length, status: "completed" } });
+  return modules;
 }
 async function startAutomationJob(projectId, options = {}) {
   const project = await getProject(projectId);
   if (!project) throw new Error("\u9879\u76EE\u4E0D\u5B58\u5728");
-  const slices = parseModules(project.modules);
-  if (slices.length === 0) throw new Error("\u9879\u76EE\u65E0\u5207\u7247\u6570\u636E\uFF0C\u8BF7\u5148\u5B8C\u6210 AI \u5207\u7247");
   const directoryItems = parseDirectoryItems(project.directoryItems);
   const hasPdf = !!(project.pdfFileName && project.pdfData);
   const model = options.model || "deepseek-v4-flash";
   let job = await getLatestAutomationJob(projectId);
-  if (job && (job.status === "running" || job.status === "paused")) {
-  } else {
-    job = await createAutomationJob(projectId, slices.length, options.concurrency || 1);
+  if (!job || job.status !== "running" && job.status !== "paused") {
+    job = await createAutomationJob(projectId, 0, options.concurrency || 1);
   }
-  runJobLoop(job.id, projectId, project.bookTitle, slices, directoryItems, hasPdf, model).catch((err) => {
-    console.error(`[orchestrator] job ${job.id} crashed:`, err);
-  });
+  (async () => {
+    try {
+      const slices = await ensureModulesGenerated(projectId, job.id);
+      await updateAutomationJob(job.id, { totalSlices: slices.length });
+      await runJobLoop(job.id, projectId, project.bookTitle, slices, directoryItems, hasPdf, model);
+    } catch (err) {
+      console.error(`[orchestrator] job ${job.id} crashed:`, err);
+      await updateAutomationJob(job.id, {
+        status: "failed",
+        error: err?.message || String(err),
+        finishedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      emit(job.id, { event: "job_failed", data: { jobId: job.id, error: err?.message || String(err) } });
+    }
+  })();
   return job;
 }
 async function runJobLoop(jobId, projectId, bookTitle, slices, directoryItems, hasPdf, model) {
@@ -1438,38 +1507,81 @@ async function runJobLoop(jobId, projectId, bookTitle, slices, directoryItems, h
     startedAt: job.startedAt || (/* @__PURE__ */ new Date()).toISOString()
   });
   emit(jobId, { event: "job_progress", data: { jobId, completed: job.completedSlices, total: job.totalSlices, status: "running" } });
-  let completed = job.completedSlices;
-  let failed = job.failedSlices;
-  for (const slice of slices) {
+  const succeededExtract = [];
+  const succeededScript = [];
+  let completed = 0;
+  let failed = 0;
+  const checkStatus = async () => {
     const current = await getAutomationJob(jobId);
-    if (!current || current.status === "cancelled") break;
-    if (current.status === "paused") {
+    if (!current || current.status === "cancelled") return "cancelled";
+    if (current.status === "paused") return "paused";
+    return "continue";
+  };
+  for (const slice of slices) {
+    const status = await checkStatus();
+    if (status === "cancelled") break;
+    if (status === "paused") {
       emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, status: "paused" } });
       return;
     }
-    const existingCode = await Promise.resolve().then(() => (init_database(), database_exports)).then((db2) => db2.getGeneratedAppCode(projectId, slice.id));
-    if (existingCode) {
-      completed += 1;
-      await updateAutomationJob(jobId, { completedSlices: completed });
-      emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, status: "running" } });
-      continue;
-    }
-    emit(jobId, { event: "slice_start", data: { jobId, moduleId: slice.id, sliceId: slice.sliceId, title: slice.title } });
+    const { getExtractedContents: queryExtracted } = await Promise.resolve().then(() => (init_database(), database_exports));
+    const existingExtracts = await queryExtracted(projectId);
+    const matchedExtract = existingExtracts.find((e) => e.moduleId === slice.id);
+    emit(jobId, { event: "slice_start", data: { jobId, moduleId: slice.id, sliceId: slice.sliceId, title: slice.title, stage: "extract" } });
     try {
-      await runSlicePipeline(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model);
-      const tasks = await getAutomationTasksByJob(jobId);
-      const appTask = tasks.find((t) => t.moduleId === slice.id && t.stage === "app-code");
-      if (appTask && appTask.status === "completed") {
+      const { extracted, content } = await runSliceExtract(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model);
+      if (extracted) {
+        succeededExtract.push({ slice, content: content || matchedExtract?.content || "" });
+      } else {
+        failed += 1;
+      }
+    } catch (err) {
+      console.error(`[orchestrator] extract slice ${slice.sliceId || slice.id} failed:`, err);
+      failed += 1;
+    }
+    await updateAutomationJob(jobId, { failedSlices: failed });
+    emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, failed, status: "running", stage: "extract" } });
+  }
+  for (const { slice, content } of succeededExtract) {
+    const status = await checkStatus();
+    if (status === "cancelled") break;
+    if (status === "paused") {
+      emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, status: "paused" } });
+      return;
+    }
+    emit(jobId, { event: "slice_start", data: { jobId, moduleId: slice.id, sliceId: slice.sliceId, title: slice.title, stage: "script" } });
+    try {
+      const { scripted, markdown } = await runSliceScript(jobId, projectId, bookTitle, slice, content, model);
+      if (scripted) {
+        succeededScript.push({ slice, markdown });
+      } else {
+      }
+    } catch (err) {
+      console.error(`[orchestrator] script slice ${slice.sliceId || slice.id} failed:`, err);
+    }
+    emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, failed, status: "running", stage: "script" } });
+  }
+  for (const { slice, markdown } of succeededScript) {
+    const status = await checkStatus();
+    if (status === "cancelled") break;
+    if (status === "paused") {
+      emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, status: "paused" } });
+      return;
+    }
+    emit(jobId, { event: "slice_start", data: { jobId, moduleId: slice.id, sliceId: slice.sliceId, title: slice.title, stage: "app-code" } });
+    try {
+      const { built } = await runSliceAppCode(jobId, projectId, bookTitle, slice, markdown, model);
+      if (built) {
         completed += 1;
       } else {
         failed += 1;
       }
     } catch (err) {
-      console.error(`[orchestrator] slice ${slice.sliceId || slice.id} failed:`, err);
+      console.error(`[orchestrator] app-code slice ${slice.sliceId || slice.id} failed:`, err);
       failed += 1;
     }
     await updateAutomationJob(jobId, { completedSlices: completed, failedSlices: failed });
-    emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, failed, status: "running" } });
+    emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, failed, status: "running", stage: "app-code" } });
   }
   const finalJob = await getAutomationJob(jobId);
   const allFailed = failed === slices.length && slices.length > 0;
@@ -1485,6 +1597,8 @@ async function runJobLoop(jobId, projectId, bookTitle, slices, directoryItems, h
   }
   await updateAutomationJob(jobId, {
     status: finalStatus,
+    completedSlices: completed,
+    failedSlices: failed,
     finishedAt: (/* @__PURE__ */ new Date()).toISOString()
   });
   emit(jobId, {
@@ -1562,7 +1676,7 @@ async function getJobSnapshot(jobId) {
 }
 
 // server.ts
-var SERVER_VERSION = "v2026.06.09-list-fix";
+var SERVER_VERSION = "v1.2.1-stage-serial";
 import_dotenv.default.config();
 var app = (0, import_express.default)();
 var PORT = process.env.PORT ? parseInt(process.env.PORT) : 8080;

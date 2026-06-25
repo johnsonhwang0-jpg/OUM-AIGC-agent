@@ -10,6 +10,7 @@ interface UseAutomationJobResult {
   tasks: AutomationTask[];
   connected: boolean;
   error: string | null;
+  parseBookDone: boolean;
   start: (projectId: string, opts?: { concurrency?: number; model?: string }) => Promise<string>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
@@ -28,6 +29,7 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
   const [tasks, setTasks] = useState<AutomationTask[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [parseBookDone, setParseBookDone] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   // 拉取初始快照
@@ -49,6 +51,9 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
       setConnected(false);
       return;
     }
+
+    // 重置 parseBookDone（新 jobId 时重新等待切片完成事件）
+    setParseBookDone(false);
 
     // 先拉取一次快照
     fetchSnapshot(jobId);
@@ -85,6 +90,13 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
         // 可选：标记当前正在处理的切片
         void data;
       } catch { /* */ }
+    });
+
+    // 切片生成完成：通知上层刷新 modules
+    es.addEventListener("parse_book_complete", () => {
+      setParseBookDone(true);
+      // 顺便拉取一次最新快照，让 tasks 数据也更新
+      fetchSnapshot(jobId);
     });
 
     es.addEventListener("task_update", (e) => {
@@ -205,5 +217,5 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
     await fetchSnapshot(jobId);
   }, [jobId, fetchSnapshot]);
 
-  return { job, tasks, connected, error, start, pause, resume, cancel, retryTask, retryAll, refresh };
+  return { job, tasks, connected, error, parseBookDone, start, pause, resume, cancel, retryTask, retryAll, refresh };
 }

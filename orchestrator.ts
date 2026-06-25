@@ -262,7 +262,7 @@ async function runTaskWithRetry(
   return task;
 }
 
-async function runSlicePipeline(
+async function runSliceExtract(
   jobId: string,
   projectId: string,
   bookTitle: string,
@@ -270,10 +270,10 @@ async function runSlicePipeline(
   directoryItems: SimpleDirItem[],
   hasPdf: boolean,
   model: string
-): Promise<{ extracted: boolean; scripted: boolean; built: boolean }> {
+): Promise<{ extracted: boolean; content: string }> {
   const job = await getAutomationJob(jobId);
   if (job && (job.status === "cancelled" || job.status === "paused")) {
-    return { extracted: false, scripted: false, built: false };
+    return { extracted: false, content: "" };
   }
 
   const project = await getProject(projectId);
@@ -333,10 +333,20 @@ async function runSlicePipeline(
     emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "extract", status: "skipped" } });
   }
 
-  // 若已被取消/暂停，停止后续阶段
-  const job2 = await getAutomationJob(jobId);
-  if (job2 && (job2.status === "cancelled" || job2.status === "paused")) {
-    return { extracted: true, scripted: false, built: false };
+  return { extracted: true, content: extractedContent };
+}
+
+async function runSliceScript(
+  jobId: string,
+  projectId: string,
+  bookTitle: string,
+  slice: SliceMeta,
+  extractedContent: string,
+  model: string
+): Promise<{ scripted: boolean; markdown: string }> {
+  const job = await getAutomationJob(jobId);
+  if (job && (job.status === "cancelled" || job.status === "paused")) {
+    return { scripted: false, markdown: "" };
   }
 
   // ---- 阶段 2: script ----
@@ -380,9 +390,20 @@ async function runSlicePipeline(
     });
   });
 
-  const job3 = await getAutomationJob(jobId);
-  if (job3 && (job3.status === "cancelled" || job3.status === "paused")) {
-    return { extracted: true, scripted: true, built: false };
+  return { scripted: true, markdown: scriptMarkdown };
+}
+
+async function runSliceAppCode(
+  jobId: string,
+  projectId: string,
+  bookTitle: string,
+  slice: SliceMeta,
+  scriptMarkdown: string,
+  model: string
+): Promise<{ built: boolean }> {
+  const job = await getAutomationJob(jobId);
+  if (job && (job.status === "cancelled" || job.status === "paused")) {
+    return { built: false };
   }
 
   // ---- 阶段 3: app-code ----
@@ -407,7 +428,7 @@ async function runSlicePipeline(
     });
     await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: new Date().toISOString(), error: "无可用脚本" });
     emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "app-code", status: "skipped" } });
-    return { extracted: true, scripted: true, built: false };
+    return { built: false };
   }
 
   const existingAppTasks = await getPendingTasksForSlice(jobId, slice.id);
@@ -428,7 +449,45 @@ async function runSlicePipeline(
     await saveGeneratedAppCode(projectId, slice.id, code);
   });
 
-  return { extracted: true, scripted: true, built: true };
+  return { built: true };
+}
+
+/**
+ * @deprecated 旧版逐切片全流程，保留以兼容 retry 入口。
+ * 新自动流程使用 runJobLoop 的阶段间串行模式。
+ */
+async function runSlicePipeline(
+  jobId: string,
+  projectId: string,
+  bookTitle: string,
+  slice: SliceMeta,
+  directoryItems: SimpleDirItem[],
+  hasPdf: boolean,
+  model: string
+): Promise<{ extracted: boolean; scripted: boolean; built: boolean }> {
+  const job = await getAutomationJob(jobId);
+  if (job && (job.status === "cancelled" || job.status === "paused")) {
+    return { extracted: false, scripted: false, built: false };
+  }
+
+  const { extracted, content } = await runSliceExtract(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model);
+  if (!extracted) return { extracted: false, scripted: false, built: false };
+
+  const job2 = await getAutomationJob(jobId);
+  if (job2 && (job2.status === "cancelled" || job2.status === "paused")) {
+    return { extracted: true, scripted: false, built: false };
+  }
+
+  const { scripted, markdown } = await runSliceScript(jobId, projectId, bookTitle, slice, content, model);
+  if (!scripted) return { extracted: true, scripted: false, built: false };
+
+  const job3 = await getAutomationJob(jobId);
+  if (job3 && (job3.status === "cancelled" || job3.status === "paused")) {
+    return { extracted: true, scripted: true, built: false };
+  }
+
+  const { built } = await runSliceAppCode(jobId, projectId, bookTitle, slice, markdown, model);
+  return { extracted: true, scripted: true, built };
 }
 
 // ==================== Job 主循环 ====================
@@ -549,48 +608,101 @@ async function runJobLoop(
 
   emit(jobId, { event: "job_progress", data: { jobId, completed: job.completedSlices, total: job.totalSlices, status: "running" } });
 
-  let completed = job.completedSlices;
-  let failed = job.failedSlices;
+  // 阶段间串行：所有切片 extract → 所有切片 script → 所有切片 app-code
+  // 每个阶段内部对切片逐个执行；某切片失败不影响其他切片，但失败切片不进入下一阶段
+  const succeededExtract: { slice: SliceMeta; content: string }[] = [];
+  const succeededScript: { slice: SliceMeta; markdown: string }[] = [];
+  let completed = 0;
+  let failed = 0;
 
-  for (const slice of slices) {
-    // 检查取消/暂停
+  // 检查暂停/取消的辅助函数
+  const checkStatus = async (): Promise<"continue" | "paused" | "cancelled"> => {
     const current = await getAutomationJob(jobId);
-    if (!current || current.status === "cancelled") break;
-    if (current.status === "paused") {
-      // 暂停时退出循环；resume 会重新调用 runJobLoop
+    if (!current || current.status === "cancelled") return "cancelled";
+    if (current.status === "paused") return "paused";
+    return "continue";
+  };
+
+  // ============ 阶段 1: extract（所有切片） ============
+  for (const slice of slices) {
+    const status = await checkStatus();
+    if (status === "cancelled") break;
+    if (status === "paused") {
       emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, status: "paused" } });
       return;
     }
 
-    // 检查该切片是否已有完成的 app-code（断点续传跳过）
-    const existingCode = await import("./database.js").then(db => db.getGeneratedAppCode(projectId, slice.id));
-    if (existingCode) {
-      completed += 1;
-      await updateAutomationJob(jobId, { completedSlices: completed });
-      emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, status: "running" } });
-      continue;
-    }
+    // 断点续传：检查数据库是否已有该切片的提取内容（视为已完成）
+    const { getExtractedContents: queryExtracted } = await import("./database.js");
+    const existingExtracts = await queryExtracted(projectId);
+    const matchedExtract = existingExtracts.find(e => e.moduleId === slice.id);
 
-    emit(jobId, { event: "slice_start", data: { jobId, moduleId: slice.id, sliceId: slice.sliceId, title: slice.title } });
+    emit(jobId, { event: "slice_start", data: { jobId, moduleId: slice.id, sliceId: slice.sliceId, title: slice.title, stage: "extract" } });
 
     try {
-      await runSlicePipeline(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model);
+      const { extracted, content } = await runSliceExtract(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model);
+      if (extracted) {
+        succeededExtract.push({ slice, content: content || matchedExtract?.content || "" });
+      } else {
+        failed += 1;
+      }
+    } catch (err: any) {
+      console.error(`[orchestrator] extract slice ${slice.sliceId || slice.id} failed:`, err);
+      failed += 1;
+    }
+    await updateAutomationJob(jobId, { failedSlices: failed });
+    emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, failed, status: "running", stage: "extract" } });
+  }
 
-      // 判断该切片是否最终成功（app-code 任务完成）
-      const tasks = await getAutomationTasksByJob(jobId);
-      const appTask = tasks.find(t => t.moduleId === slice.id && t.stage === "app-code");
-      if (appTask && appTask.status === "completed") {
+  // ============ 阶段 2: script（仅对 extract 成功的切片） ============
+  for (const { slice, content } of succeededExtract) {
+    const status = await checkStatus();
+    if (status === "cancelled") break;
+    if (status === "paused") {
+      emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, status: "paused" } });
+      return;
+    }
+
+    emit(jobId, { event: "slice_start", data: { jobId, moduleId: slice.id, sliceId: slice.sliceId, title: slice.title, stage: "script" } });
+
+    try {
+      const { scripted, markdown } = await runSliceScript(jobId, projectId, bookTitle, slice, content, model);
+      if (scripted) {
+        succeededScript.push({ slice, markdown });
+      } else {
+        // script 失败不立即计入 failed，将在 app-code 阶段未完成时计入
+      }
+    } catch (err: any) {
+      console.error(`[orchestrator] script slice ${slice.sliceId || slice.id} failed:`, err);
+    }
+    emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, failed, status: "running", stage: "script" } });
+  }
+
+  // ============ 阶段 3: app-code（仅对 script 成功的切片） ============
+  for (const { slice, markdown } of succeededScript) {
+    const status = await checkStatus();
+    if (status === "cancelled") break;
+    if (status === "paused") {
+      emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, status: "paused" } });
+      return;
+    }
+
+    emit(jobId, { event: "slice_start", data: { jobId, moduleId: slice.id, sliceId: slice.sliceId, title: slice.title, stage: "app-code" } });
+
+    try {
+      const { built } = await runSliceAppCode(jobId, projectId, bookTitle, slice, markdown, model);
+      if (built) {
         completed += 1;
       } else {
         failed += 1;
       }
     } catch (err: any) {
-      console.error(`[orchestrator] slice ${slice.sliceId || slice.id} failed:`, err);
+      console.error(`[orchestrator] app-code slice ${slice.sliceId || slice.id} failed:`, err);
       failed += 1;
     }
 
     await updateAutomationJob(jobId, { completedSlices: completed, failedSlices: failed });
-    emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, failed, status: "running" } });
+    emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, failed, status: "running", stage: "app-code" } });
   }
 
   // 收尾
@@ -609,6 +721,8 @@ async function runJobLoop(
 
   await updateAutomationJob(jobId, {
     status: finalStatus,
+    completedSlices: completed,
+    failedSlices: failed,
     finishedAt: new Date().toISOString(),
   });
 

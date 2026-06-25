@@ -218,3 +218,12 @@ export interface AutomationJobSnapshot {
   job: AutomationJob | null;
   tasks: AutomationTask[];
 }
+
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  bookTitle: string;
+  pdfFileName: string;
+  createdAt: string;
+  executionMode: ExecutionMode;
+}

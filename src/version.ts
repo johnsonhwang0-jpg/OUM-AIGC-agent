@@ -7,8 +7,8 @@
  *  - 同时更新 VERSION_HISTORY，记录本次变更内容
  */
 
-export const APP_VERSION = "1.2.0";
-export const VERSION_UPDATED_AT = "2026-06-25 12:30:00";
+export const APP_VERSION = "1.2.1";
+export const VERSION_UPDATED_AT = "2026-06-25 13:05:00";
 
 export interface VersionEntry {
   version: string;
@@ -20,6 +20,18 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.1",
+    updatedAt: "2026-06-25 13:05:00",
+    changes: [
+      "TaskManager 左栏流程阶段文案改为「创建项目 / 目录提取 / 智能切片 / 内容提取 / 脚本生成 / 游戏生成」6 步并支持中英双语切换",
+      "左栏点击对应阶段时，右栏展示该阶段的汇总信息（项目信息、目录列表、切片统计、各阶段进度）",
+      "修复自动模式任务管理器中切片数据不显示的问题：通过 SSE 监听 parse_book_complete 事件触发项目数据刷新",
+      "orchestrator 重构 runJobLoop 为阶段间串行：所有切片先 extract → 再统一 script → 最后统一 app-code，避免切片未完成就进入后续阶段",
+      "App.tsx 传入 directoryItems / projectInfo / onRefreshProject 给 TaskManager，新建项目后自动加载项目数据",
+      "新增 ProjectInfo 类型规范项目信息数据结构",
+    ],
+  },
   {
     version: "1.2.0",
     updatedAt: "2026-06-25 12:30:00",
