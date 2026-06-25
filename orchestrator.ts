@@ -154,6 +154,7 @@ interface SimpleDirItem {
 interface SliceMeta {
   id: string;
   sliceId?: string;
+  chapterIndex?: string;
   title: string;
   coveredChapters?: string;
   pageRange?: string;
@@ -263,66 +264,81 @@ async function runSliceExtract(
   slice: SliceMeta,
   directoryItems: SimpleDirItem[],
   hasPdf: boolean,
-  model: string
+  model: string,
+  project?: any,
+  existingExtracts?: { moduleId: string; content: string }[]
 ): Promise<{ extracted: boolean; content: string }> {
   const job = await getAutomationJob(jobId);
   if (job && (job.status === "cancelled" || job.status === "paused")) {
     return { extracted: false, content: "" };
   }
 
-  const project = await getProject(projectId);
+  // 复用调用方传入的 project 和 existingExtracts，避免每个切片重复 DB 查询
+  // 此前每个切片都 getProject + queryExtracted，N 切片 = 2N 次 DB 查询
+  const proj = project ?? await getProject(projectId);
 
   // ---- 阶段 1: extract ----
   let extractedContent = "";
-  if (hasPdf && project?.pdfData) {
+  if (hasPdf && proj?.pdfData) {
     // 断点续传：检查数据库是否已有该切片的提取内容
-    const { getExtractedContents: queryExtracted } = await import("./database.js");
-    const existingExtracts = await queryExtracted(projectId);
-    const matchedExtract0 = existingExtracts.find(e => e.moduleId === slice.id);
+    const allExtracts = existingExtracts ?? (await (await import("./database.js")).getExtractedContents(projectId));
+    const matchedExtract0 = allExtracts.find(e => e.moduleId === slice.id);
     if (matchedExtract0?.content) {
       extractedContent = matchedExtract0.content;
-      emit(jobId, { event: "task_complete", data: { moduleId: slice.id, sliceId: slice.sliceId, stage: "extract", status: "skipped" } });
+      // 断点续传：查找或创建 task 标记为 skipped，emit 时必须带 taskId
+      // 否则前端 useAutomationJob 的 task_complete 监听器 findIndex 找不到（taskId=undefined）
+      // 会触发 fetchSnapshot，N 个切片 × 多阶段 = fetchSnapshot 风暴 → React 崩溃灰屏
+      const existingExtractTasks = await getPendingTasksForSlice(jobId, slice.id);
+      let skipTask = existingExtractTasks.find(t => t.stage === "extract") || null;
+      if (!skipTask) {
+        skipTask = await createAutomationTask({
+          jobId, projectId, moduleId: slice.id, sliceId: slice.sliceId || null, sliceTitle: slice.title, stage: "extract",
+        });
+      }
+      await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: new Date().toISOString() });
+      emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "extract", status: "skipped" } });
     } else {
       const existingExtractTasks = await getPendingTasksForSlice(jobId, slice.id);
       const extractTask = existingExtractTasks.find(t => t.stage === "extract") || null;
 
       await runTaskWithRetry(jobId, projectId, slice, "extract", extractTask, async () => {
-        // ===== 复刻前端 getExtractedTextForModuleAsync 的 6 步流程 =====
-        // 1. calculatePageRange：用 coveredChapters + directoryItems 算页码（与前端同源 shared）
-        let startPrinted = 1;
-        let endPrinted = 10;
+        // ===== 严格对齐前端 getExtractedTextForModuleAsync（src/utils/textbookMatcher.ts:908）=====
+        // 原则：同一能力，两个入口，必须用完全相同的页码计算和内容拼接逻辑
+        const covered = (slice.coveredChapters || "").trim();
+        if (!covered) {
+          throw new Error("章节覆盖信息缺失，无法提取");
+        }
+
+        // 1. 优先使用手动设置的页码范围（正则与前端完全一致：/P\.(\d+)(?:-(\d+))?/）
+        //    此前后端正则为 /P\.?(\d+).../i（点号可选）+ /(\d+)\s*[-–—]\s*(\d+)/（纯数字），
+        //    导致 "P15-30" / "15-30" 格式：前端回退 calculatePageRange，后端直接用数字 → 页码不一致
+        let startPrinted: number;
+        let endPrinted: number;
 
         if (slice.pageRange) {
-          // 优先使用模块 pageRange（如 "P.15-30"）
-          const m = slice.pageRange.match(/P\.?(\d+)(?:\s*[-–—]\s*P?\.?(\d+))?/i) || slice.pageRange.match(/(\d+)\s*[-–—]\s*(\d+)/);
-          if (m) {
-            startPrinted = parseInt(m[1], 10);
-            endPrinted = m[2] ? parseInt(m[2], 10) : startPrinted;
+          const match = slice.pageRange.match(/P\.(\d+)(?:-(\d+))?/);
+          if (match) {
+            startPrinted = parseInt(match[1], 10);
+            endPrinted = match[2] ? parseInt(match[2], 10) : startPrinted;
           } else {
-            // pageRange 存在但格式不匹配，回退到 calculatePageRange（与前端 getExtractedTextForModuleAsync 一致）
-            // 此前未回退，导致 startPrinted/endPrinted 保持默认 1/10，提取了错误的页面内容
-            const range = calculatePageRange(slice.coveredChapters || "", directoryItems as PageRef[]);
-            if (range.found && range.startPage) {
-              startPrinted = parseInt(range.startPage, 10) || 1;
-              endPrinted = range.endPage ? (parseInt(range.endPage, 10) || startPrinted) : startPrinted;
-            }
-          }
-        } else if (slice.coveredChapters) {
-          // 无 pageRange 时按 coveredChapters 推算（与前端 calculatePageRange 同源）
-          const range = calculatePageRange(slice.coveredChapters, directoryItems as PageRef[]);
-          if (range.found && range.startPage) {
+            // pageRange 不匹配正则 → 回退 calculatePageRange（与前端一致）
+            const range = calculatePageRange(covered, directoryItems as PageRef[]);
             startPrinted = parseInt(range.startPage, 10) || 1;
             endPrinted = range.endPage ? (parseInt(range.endPage, 10) || startPrinted) : startPrinted;
           }
+        } else {
+          const range = calculatePageRange(covered, directoryItems as PageRef[]);
+          startPrinted = parseInt(range.startPage, 10) || 1;
+          endPrinted = range.endPage ? (parseInt(range.endPage, 10) || startPrinted) : startPrinted;
         }
 
         // 2. 应用 pdfPageOffset（印刷页 → 物理页偏移，从 DB 读取）
-        const pdfPageOffset = project?.pdfPageOffset ?? 0;
+        //    默认值与前端一致：endPrinted 默认 = startPrinted（不是 10）
+        const pdfPageOffset = proj?.pdfPageOffset ?? 0;
         const activeStartPhysical = Math.max(1, startPrinted + pdfPageOffset);
         const activeEndPhysical = Math.max(activeStartPhysical, endPrinted + pdfPageOffset);
 
-        // 诊断日志：排查自动模式 extract 页码与手动模式不一致的问题
-        console.log(`[orchestrator] extract slice="${slice.title}" pageRange="${slice.pageRange}" coveredChapters="${slice.coveredChapters}" → printed=${startPrinted}-${endPrinted} offset=${pdfPageOffset} → physical=${activeStartPhysical}-${activeEndPhysical}`);
+        console.log(`[orchestrator] extract slice="${slice.title}" pageRange="${slice.pageRange}" covered="${covered}" → printed=${startPrinted}-${endPrinted} offset=${pdfPageOffset} → physical=${activeStartPhysical}-${activeEndPhysical}`);
 
         // 3. 调 /api/extract-pages（与前端同一路由）
         const result = await internalPost(`/api/projects/${projectId}/extract-pages`, {
@@ -335,13 +351,13 @@ async function runSliceExtract(
           throw new Error("PDF 提取内容为空");
         }
 
-        // 4. filterAndFormatLines：过滤页眉页脚 + 格式化（与前端同源 shared）
-        // 5. 收集图片内嵌成 markdown（与前端逻辑一致）
+        // 4. filterAndFormatLines + 5. 收集图片（与前端完全一致：formattedLines 后不加 \n\n）
+        //    此前后端 += formatted + "\n\n"（多了 \n\n），导致拼接格式与前端不同
         let mdOutput = "";
         for (const page of pages) {
           const lines = (page.content || "").split("\n");
-          const formatted = filterAndFormatLines(lines, directoryItems as PageRef[]);
-          mdOutput += formatted + "\n\n";
+          const formattedLines = filterAndFormatLines(lines, directoryItems as PageRef[]);
+          mdOutput += formattedLines;
 
           if (page.images && page.images.length > 0) {
             mdOutput += "\n\n";
@@ -353,10 +369,9 @@ async function runSliceExtract(
           mdOutput += "\n\n";
         }
 
-        // 6. trimExtractedContent：裁剪范围外的冗余内容（与前端同源 shared）
-        if (slice.coveredChapters) {
-          mdOutput = trimExtractedContent(mdOutput, slice.coveredChapters, directoryItems as PageRef[]);
-        }
+        // 6. trimExtractedContent：总是调用（与前端一致，前端无 if 条件）
+        //    此前后端 if (slice.coveredChapters) 有条件调用，导致 covered 为空时不裁剪
+        mdOutput = trimExtractedContent(mdOutput, covered, directoryItems as PageRef[]);
 
         extractedContent = mdOutput.trim();
         if (!extractedContent) {
@@ -408,7 +423,7 @@ async function runSliceScript(
     const result = await internalPost("/api/generate-script", {
       bookTitle,
       chapterTitle: slice.title,
-      chapterIndex: slice.sliceId || slice.coveredChapters || "",
+      chapterIndex: slice.chapterIndex || slice.sliceId || "",
       coveredChapters: slice.coveredChapters || "",
       summary: slice.summary,
       infoDensity: slice.infoDensity,
@@ -485,7 +500,7 @@ async function runSliceAppCode(
     const appPrompt = await getSavedPrompt("app-code");
     const result = await internalPost("/api/generate-app-code", {
       bookTitle,
-      chapterTitle: slice.title,
+      chapterTitle: `${slice.chapterIndex || ""} · ${slice.title}`,
       coveredChapters: slice.coveredChapters || "",
       scriptMarkdown: finalMarkdown,
       model,
@@ -685,6 +700,12 @@ async function runJobLoop(
   };
 
   // ============ 阶段 1: extract（所有切片） ============
+  // 提前查一次 project 和 extracted_contents，传给 runSliceExtract 复用
+  // 此前每个切片都 getProject + queryExtracted，N 切片 = 2N 次 DB 查询
+  const projectForExtract = await getProject(projectId);
+  const { getExtractedContents: queryExtractedForLoop } = await import("./database.js");
+  const allExistingExtracts = await queryExtractedForLoop(projectId);
+
   for (const slice of slices) {
     const status = await checkStatus();
     if (status === "cancelled") break;
@@ -694,14 +715,12 @@ async function runJobLoop(
     }
 
     // 断点续传：检查数据库是否已有该切片的提取内容（视为已完成）
-    const { getExtractedContents: queryExtracted } = await import("./database.js");
-    const existingExtracts = await queryExtracted(projectId);
-    const matchedExtract = existingExtracts.find(e => e.moduleId === slice.id);
+    const matchedExtract = allExistingExtracts.find(e => e.moduleId === slice.id);
 
     emit(jobId, { event: "slice_start", data: { jobId, moduleId: slice.id, sliceId: slice.sliceId, title: slice.title, stage: "extract" } });
 
     try {
-      const { extracted, content } = await runSliceExtract(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model);
+      const { extracted, content } = await runSliceExtract(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model, projectForExtract, allExistingExtracts);
       if (extracted) {
         succeededExtract.push({ slice, content: content || matchedExtract?.content || "" });
       } else {

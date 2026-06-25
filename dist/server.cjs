@@ -1544,49 +1544,61 @@ async function runTaskWithRetry(jobId, projectId, slice, stage, existingTask, ru
   }
   return task;
 }
-async function runSliceExtract(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model) {
+async function runSliceExtract(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model, project, existingExtracts) {
   const job = await getAutomationJob(jobId);
   if (job && (job.status === "cancelled" || job.status === "paused")) {
     return { extracted: false, content: "" };
   }
-  const project = await getProject(projectId);
+  const proj = project ?? await getProject(projectId);
   let extractedContent = "";
-  if (hasPdf && project?.pdfData) {
-    const { getExtractedContents: queryExtracted } = await Promise.resolve().then(() => (init_database(), database_exports));
-    const existingExtracts = await queryExtracted(projectId);
-    const matchedExtract0 = existingExtracts.find((e) => e.moduleId === slice.id);
+  if (hasPdf && proj?.pdfData) {
+    const allExtracts = existingExtracts ?? await (await Promise.resolve().then(() => (init_database(), database_exports))).getExtractedContents(projectId);
+    const matchedExtract0 = allExtracts.find((e) => e.moduleId === slice.id);
     if (matchedExtract0?.content) {
       extractedContent = matchedExtract0.content;
-      emit(jobId, { event: "task_complete", data: { moduleId: slice.id, sliceId: slice.sliceId, stage: "extract", status: "skipped" } });
+      const existingExtractTasks = await getPendingTasksForSlice(jobId, slice.id);
+      let skipTask = existingExtractTasks.find((t) => t.stage === "extract") || null;
+      if (!skipTask) {
+        skipTask = await createAutomationTask({
+          jobId,
+          projectId,
+          moduleId: slice.id,
+          sliceId: slice.sliceId || null,
+          sliceTitle: slice.title,
+          stage: "extract"
+        });
+      }
+      await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: (/* @__PURE__ */ new Date()).toISOString() });
+      emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "extract", status: "skipped" } });
     } else {
       const existingExtractTasks = await getPendingTasksForSlice(jobId, slice.id);
       const extractTask = existingExtractTasks.find((t) => t.stage === "extract") || null;
       await runTaskWithRetry(jobId, projectId, slice, "extract", extractTask, async () => {
-        let startPrinted = 1;
-        let endPrinted = 10;
+        const covered = (slice.coveredChapters || "").trim();
+        if (!covered) {
+          throw new Error("\u7AE0\u8282\u8986\u76D6\u4FE1\u606F\u7F3A\u5931\uFF0C\u65E0\u6CD5\u63D0\u53D6");
+        }
+        let startPrinted;
+        let endPrinted;
         if (slice.pageRange) {
-          const m = slice.pageRange.match(/P\.?(\d+)(?:\s*[-–—]\s*P?\.?(\d+))?/i) || slice.pageRange.match(/(\d+)\s*[-–—]\s*(\d+)/);
-          if (m) {
-            startPrinted = parseInt(m[1], 10);
-            endPrinted = m[2] ? parseInt(m[2], 10) : startPrinted;
+          const match = slice.pageRange.match(/P\.(\d+)(?:-(\d+))?/);
+          if (match) {
+            startPrinted = parseInt(match[1], 10);
+            endPrinted = match[2] ? parseInt(match[2], 10) : startPrinted;
           } else {
-            const range = calculatePageRange(slice.coveredChapters || "", directoryItems);
-            if (range.found && range.startPage) {
-              startPrinted = parseInt(range.startPage, 10) || 1;
-              endPrinted = range.endPage ? parseInt(range.endPage, 10) || startPrinted : startPrinted;
-            }
-          }
-        } else if (slice.coveredChapters) {
-          const range = calculatePageRange(slice.coveredChapters, directoryItems);
-          if (range.found && range.startPage) {
+            const range = calculatePageRange(covered, directoryItems);
             startPrinted = parseInt(range.startPage, 10) || 1;
             endPrinted = range.endPage ? parseInt(range.endPage, 10) || startPrinted : startPrinted;
           }
+        } else {
+          const range = calculatePageRange(covered, directoryItems);
+          startPrinted = parseInt(range.startPage, 10) || 1;
+          endPrinted = range.endPage ? parseInt(range.endPage, 10) || startPrinted : startPrinted;
         }
-        const pdfPageOffset = project?.pdfPageOffset ?? 0;
+        const pdfPageOffset = proj?.pdfPageOffset ?? 0;
         const activeStartPhysical = Math.max(1, startPrinted + pdfPageOffset);
         const activeEndPhysical = Math.max(activeStartPhysical, endPrinted + pdfPageOffset);
-        console.log(`[orchestrator] extract slice="${slice.title}" pageRange="${slice.pageRange}" coveredChapters="${slice.coveredChapters}" \u2192 printed=${startPrinted}-${endPrinted} offset=${pdfPageOffset} \u2192 physical=${activeStartPhysical}-${activeEndPhysical}`);
+        console.log(`[orchestrator] extract slice="${slice.title}" pageRange="${slice.pageRange}" covered="${covered}" \u2192 printed=${startPrinted}-${endPrinted} offset=${pdfPageOffset} \u2192 physical=${activeStartPhysical}-${activeEndPhysical}`);
         const result = await internalPost(`/api/projects/${projectId}/extract-pages`, {
           startPage: activeStartPhysical,
           endPage: activeEndPhysical
@@ -1598,8 +1610,8 @@ async function runSliceExtract(jobId, projectId, bookTitle, slice, directoryItem
         let mdOutput = "";
         for (const page of pages) {
           const lines = (page.content || "").split("\n");
-          const formatted = filterAndFormatLines(lines, directoryItems);
-          mdOutput += formatted + "\n\n";
+          const formattedLines = filterAndFormatLines(lines, directoryItems);
+          mdOutput += formattedLines;
           if (page.images && page.images.length > 0) {
             mdOutput += "\n\n";
             for (const img of page.images) {
@@ -1610,9 +1622,7 @@ async function runSliceExtract(jobId, projectId, bookTitle, slice, directoryItem
           }
           mdOutput += "\n\n";
         }
-        if (slice.coveredChapters) {
-          mdOutput = trimExtractedContent(mdOutput, slice.coveredChapters, directoryItems);
-        }
+        mdOutput = trimExtractedContent(mdOutput, covered, directoryItems);
         extractedContent = mdOutput.trim();
         if (!extractedContent) {
           throw new Error("PDF \u63D0\u53D6\u5185\u5BB9\u4E3A\u7A7A\uFF08\u8FC7\u6EE4/\u88C1\u526A\u540E\uFF09");
@@ -1651,7 +1661,7 @@ async function runSliceScript(jobId, projectId, bookTitle, slice, extractedConte
     const result = await internalPost("/api/generate-script", {
       bookTitle,
       chapterTitle: slice.title,
-      chapterIndex: slice.sliceId || slice.coveredChapters || "",
+      chapterIndex: slice.chapterIndex || slice.sliceId || "",
       coveredChapters: slice.coveredChapters || "",
       summary: slice.summary,
       infoDensity: slice.infoDensity,
@@ -1712,7 +1722,7 @@ async function runSliceAppCode(jobId, projectId, bookTitle, slice, scriptMarkdow
     const appPrompt = await getSavedPrompt("app-code");
     const result = await internalPost("/api/generate-app-code", {
       bookTitle,
-      chapterTitle: slice.title,
+      chapterTitle: `${slice.chapterIndex || ""} \xB7 ${slice.title}`,
       coveredChapters: slice.coveredChapters || "",
       scriptMarkdown: finalMarkdown,
       model,
@@ -1830,6 +1840,9 @@ async function runJobLoop(jobId, projectId, bookTitle, slices, directoryItems, h
     if (current.status === "paused") return "paused";
     return "continue";
   };
+  const projectForExtract = await getProject(projectId);
+  const { getExtractedContents: queryExtractedForLoop } = await Promise.resolve().then(() => (init_database(), database_exports));
+  const allExistingExtracts = await queryExtractedForLoop(projectId);
   for (const slice of slices) {
     const status = await checkStatus();
     if (status === "cancelled") break;
@@ -1837,12 +1850,10 @@ async function runJobLoop(jobId, projectId, bookTitle, slices, directoryItems, h
       emit(jobId, { event: "job_progress", data: { jobId, completed, total: slices.length, status: "paused" } });
       return;
     }
-    const { getExtractedContents: queryExtracted } = await Promise.resolve().then(() => (init_database(), database_exports));
-    const existingExtracts = await queryExtracted(projectId);
-    const matchedExtract = existingExtracts.find((e) => e.moduleId === slice.id);
+    const matchedExtract = allExistingExtracts.find((e) => e.moduleId === slice.id);
     emit(jobId, { event: "slice_start", data: { jobId, moduleId: slice.id, sliceId: slice.sliceId, title: slice.title, stage: "extract" } });
     try {
-      const { extracted, content } = await runSliceExtract(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model);
+      const { extracted, content } = await runSliceExtract(jobId, projectId, bookTitle, slice, directoryItems, hasPdf, model, projectForExtract, allExistingExtracts);
       if (extracted) {
         succeededExtract.push({ slice, content: content || matchedExtract?.content || "" });
       } else {

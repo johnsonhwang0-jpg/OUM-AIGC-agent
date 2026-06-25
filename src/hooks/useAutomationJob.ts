@@ -31,6 +31,8 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
   const [error, setError] = useState<string | null>(null);
   const [parseBookDone, setParseBookDone] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  // 防抖 fetchSnapshot 标记：SSE 事件引用前端未持有的 taskId 时合并为一次拉取
+  const pendingSnapshotRef = useRef(false);
 
   // 拉取初始快照
   const fetchSnapshot = useCallback(async (id: string) => {
@@ -44,6 +46,16 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
       /* ignore */
     }
   }, []);
+
+  // 防抖 fetchSnapshot：N 个事件引用未知 taskId 时只拉一次，避免 setTasks 风暴 → 灰屏
+  const scheduleSnapshot = useCallback((id: string) => {
+    if (pendingSnapshotRef.current) return;
+    pendingSnapshotRef.current = true;
+    setTimeout(() => {
+      pendingSnapshotRef.current = false;
+      fetchSnapshot(id);
+    }, 300);
+  }, [fetchSnapshot]);
 
   // SSE 连接
   useEffect(() => {
@@ -109,8 +121,8 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
             copy[idx] = { ...copy[idx], status: data.status, attempts: data.attempt ?? copy[idx].attempts };
             return copy;
           }
-          // 新任务，拉取完整快照
-          fetchSnapshot(jobId);
+          // 新任务：防抖合并拉取一次快照，避免每个事件都触发 fetchSnapshot
+          scheduleSnapshot(jobId);
           return prev;
         });
       } catch { /* */ }
@@ -126,7 +138,7 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
             copy[idx] = { ...copy[idx], status: data.status, finishedAt: new Date().toISOString(), error: null };
             return copy;
           }
-          fetchSnapshot(jobId);
+          scheduleSnapshot(jobId);
           return prev;
         });
       } catch { /* */ }
@@ -142,7 +154,7 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
             copy[idx] = { ...copy[idx], status: "failed", error: data.error, attempts: data.attempt ?? copy[idx].attempts };
             return copy;
           }
-          fetchSnapshot(jobId);
+          scheduleSnapshot(jobId);
           return prev;
         });
       } catch { /* */ }
@@ -169,7 +181,7 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
       eventSourceRef.current = null;
       setConnected(false);
     };
-  }, [jobId, fetchSnapshot]);
+  }, [jobId, fetchSnapshot, scheduleSnapshot]);
 
   // 控制操作
   const start = useCallback(async (projectId: string, opts?: { concurrency?: number; model?: string }): Promise<string> => {

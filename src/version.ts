@@ -7,8 +7,8 @@
  *  - 同时更新 VERSION_HISTORY，记录本次变更内容
  */
 
-export const APP_VERSION = "1.2.5";
-export const VERSION_UPDATED_AT = "2026-06-25 17:30:00";
+export const APP_VERSION = "1.2.6";
+export const VERSION_UPDATED_AT = "2026-06-25 19:20:00";
 
 export interface VersionEntry {
   version: string;
@@ -27,6 +27,21 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.6",
+    updatedAt: "2026-06-25 19:20:00",
+    gitCommit: "", // 本次会话改动，尚未 commit
+    changes: [
+      "修复自动模式 extract 结果错误：orchestrator runSliceExtract 正则从 /P\\.?(\\d+).../i 改为 /P\\.(\\d+)(?:-(\\d+))?/（与前端完全一致），避免 P15-30 等格式前后端算出不同页码",
+      "修复自动模式 extract 拼接格式与前端不一致：filterAndFormatLines 拼接从 += formatted + \\n\\n 改为 += formattedLines（与前端一致），trimExtractedContent 从条件调用改为总是调用",
+      "修复自动模式 extract 默认 endPrinted=10 与前端不一致：改为 endPrinted=startPrinted（与前端一致）",
+      "修复自动模式 script/app-code 字段不一致：SliceMeta 新增 chapterIndex 字段，script chapterIndex 从 slice.sliceId||coveredChapters 改为 slice.chapterIndex||slice.sliceId（与前端 mod.chapterIndex 一致），app-code chapterTitle 从 slice.title 改为 `${chapterIndex} · ${title}`（与前端一致）",
+      "修复自动模式崩溃灰屏：orchestrator 断点续传分支 emit task_complete 缺 taskId，导致前端 useAutomationJob 每个事件都触发 fetchSnapshot 风暴（N 切片 × 3 阶段 × 2 事件 = 6N 次 fetchSnapshot），React 渲染队列积压崩溃；修复为先查找/创建 task 再 emit 带 taskId",
+      "修复前端 useAutomationJob task 事件找不到 taskId 时立即 fetchSnapshot：改为 scheduleSnapshot 防抖（300ms 合并），避免 fetchSnapshot 风暴",
+      "优化性能：runJobLoop 阶段 1 提前查一次 project + extracted_contents 传给 runSliceExtract 复用，避免每个切片重复 DB 查询（N 切片从 2N 次降到 2 次）",
+      "通过端到端对比测试验证：3 个 module × 3 阶段（extract/script/app-code）= 9 项对比全部一致",
+    ],
+  },
   {
     version: "1.2.5",
     updatedAt: "2026-06-25 17:30:00",
