@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import { execSync } from "child_process";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
@@ -31,6 +32,8 @@ import {
   createPromptVersion,
   updatePromptVersion,
   deletePromptVersion,
+  getAllVersionNotes,
+  setVersionNote,
   getAllModelConfigs,
   getModelConfig,
   createModelConfig,
@@ -2582,6 +2585,55 @@ async function startServer() {
       res.json({ success: true, seeded: true, template });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Version Notes API routes
+  // 用户在 SystemSettings 版本说明 tab 里对每个版本追加的额外备注，
+  // 独立于 version.ts 的 VERSION_HISTORY.changes（后者由代码发版时维护）。
+  app.get("/api/version-notes", async (req, res) => {
+    try {
+      const notes = await getAllVersionNotes();
+      res.json(notes);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/version-notes/:version", async (req, res) => {
+    try {
+      const { version } = req.params;
+      const { note } = req.body;
+      if (typeof note !== "string") {
+        return res.status(400).json({ error: "note (string) is required" });
+      }
+      const saved = await setVersionNote(version, note);
+      res.json(saved);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Git info API：返回当前 HEAD commit hash + 是否有未提交更改
+  // 用于 VersionTab 显示「当前 git 状态」，配合 VERSION_HISTORY.gitCommit 可回滚到指定版本
+  app.get("/api/git-info", (req, res) => {
+    try {
+      // ESM 模式下 __dirname 不存在，用 process.cwd() 定位项目根目录
+      const projectRoot = process.cwd();
+      const opts = { cwd: projectRoot, encoding: "utf-8" as const, timeout: 3000 };
+      const headHash = execSync("git rev-parse --short HEAD", opts).trim();
+      let dirty = false;
+      try {
+        const status = execSync("git status --porcelain", opts).trim();
+        dirty = status.length > 0;
+      } catch {
+        // 非 git 仓库或 git 不可用时，dirty 保持 false
+      }
+      const branch = execSync("git rev-parse --abbrev-ref HEAD", opts).trim();
+      res.json({ headHash, dirty, branch });
+    } catch (error: any) {
+      // git 命令不可用或不在 git 仓库
+      res.json({ headHash: "", dirty: false, branch: "", error: error.message });
     }
   });
 

@@ -28,6 +28,15 @@ import {
   type AutomationTask,
   type AutomationTaskStage,
 } from "./database.js";
+// 共享纯函数层：extract 的页码计算、页眉页脚过滤、内容裁剪等逻辑
+// 前端 src/utils/textbookMatcher.ts 和本文件共用同一份实现，
+// 确保自动模式与手动模式提取结果完全一致
+import {
+  calculatePageRange,
+  filterAndFormatLines,
+  trimExtractedContent,
+  type PageRef,
+} from "./shared/textbookMatcher.js";
 
 // ==================== 类型 ====================
 
@@ -89,6 +98,46 @@ async function internalPost(path: string, body: any): Promise<any> {
   return json;
 }
 
+async function internalGet(path: string): Promise<any> {
+  const port = process.env.PORT ? parseInt(process.env.PORT) : 8080;
+  const url = `http://localhost:${port}${path}`;
+  const res = await fetch(url);
+  const text = await res.text();
+  let json: any;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = { error: text };
+  }
+  if (!res.ok) {
+    throw new Error(json.error || `Internal GET ${path} failed: ${res.status}`);
+  }
+  return json;
+}
+
+/**
+ * 从 prompt 管理中读取指定 aiEntry 的 systemPrompt / userPromptTemplate。
+ * 自动模式必须与手动模式保持一致：使用用户在 prompt 管理中配置的模板，
+ * 否则 server 端会回退到默认中文 prompt，导致返回结果语言不一致。
+ */
+async function getSavedPrompt(
+  aiEntry: "smart-split" | "script-gen" | "app-code"
+): Promise<{ systemPrompt?: string; userPromptTemplate?: string }> {
+  try {
+    const data = await internalGet(`/api/prompt-templates?aiEntry=${aiEntry}`);
+    if (Array.isArray(data) && data.length > 0) {
+      const active = data.find((p: any) => p.isActive) || data[0];
+      return {
+        systemPrompt: active.systemPrompt || undefined,
+        userPromptTemplate: active.userPromptTemplate || undefined,
+      };
+    }
+  } catch (e) {
+    console.warn(`[orchestrator] getSavedPrompt(${aiEntry}) failed, using defaults:`, e);
+  }
+  return {};
+}
+
 // ==================== 页码范围计算 ====================
 
 interface SimpleDirItem {
@@ -97,63 +146,8 @@ interface SimpleDirItem {
   level: number;
 }
 
-/**
- * 从 coveredChapters 与目录条目推算切片的 PDF 起止页码。
- * coveredChapters 形如 "1.1-1.3" / "1.1.1-1.1.5" / "3.5"。
- */
-function computePageRange(
-  coveredChapters: string,
-  directoryItems: SimpleDirItem[]
-): { startPage: number; endPage: number } {
-  if (!coveredChapters || directoryItems.length === 0) {
-    return { startPage: 1, endPage: 10 };
-  }
-
-  // 解析 coveredChapters 得到起始与结束章节 token
-  const parts = coveredChapters.split(/[-–—/]/).map(s => s.trim()).filter(Boolean);
-  if (parts.length === 0) return { startPage: 1, endPage: 10 };
-
-  const startToken = parts[0];
-  const endToken = parts[parts.length - 1];
-
-  // 在目录中查找匹配的条目页码
-  const findPage = (token: string): number | null => {
-    for (const item of directoryItems) {
-      const title = item.title || "";
-      // 标题以章节编号开头，如 "1.1 星际介质..." 或 "1.1.1 xxx"
-      if (title.startsWith(token + " ") || title.startsWith(token + "：") || title.startsWith(token + ":") || title === token) {
-        const p = parseInt(item.page || "", 10);
-        if (!isNaN(p) && p > 0) return p;
-      }
-    }
-    return null;
-  };
-
-  const startPage = findPage(startToken);
-  if (startPage == null) return { startPage: 1, endPage: 10 };
-
-  // 结束页：优先用结束章节的下一章页码 - 1，否则用结束章节自身页 + 15
-  const endPageFound = findPage(endToken);
-  let endPage: number;
-  if (endPageFound != null && endToken !== startToken) {
-    // 找结束章节之后第一个同级或更高级条目的页码
-    const endIdx = directoryItems.findIndex(i => {
-      const t = i.title || "";
-      return t.startsWith(endToken + " ") || t.startsWith(endToken + "：") || t.startsWith(endToken + ":") || t === endToken;
-    });
-    if (endIdx >= 0 && endIdx + 1 < directoryItems.length) {
-      const nextItem = directoryItems[endIdx + 1];
-      const nextP = parseInt(nextItem.page || "", 10);
-      endPage = !isNaN(nextP) && nextP > endPageFound ? nextP - 1 : endPageFound + 14;
-    } else {
-      endPage = endPageFound + 14;
-    }
-  } else {
-    endPage = startPage + 14;
-  }
-
-  return { startPage: Math.max(1, startPage), endPage: Math.max(startPage, endPage) };
-}
+// SimpleDirItem 满足 shared 的 PageRef 接口（{ title: string; page?: string }），
+// 可直接传入共享的 calculatePageRange / trimExtractedContent / filterAndFormatLines。
 
 // ==================== 模块辅助 ====================
 
@@ -293,35 +287,72 @@ async function runSliceExtract(
       const extractTask = existingExtractTasks.find(t => t.stage === "extract") || null;
 
       await runTaskWithRetry(jobId, projectId, slice, "extract", extractTask, async () => {
-      // 优先使用模块 pageRange，否则按 coveredChapters 推算
-      let startPage = 1;
-      let endPage = 10;
-      if (slice.pageRange) {
-        const m = slice.pageRange.match(/(\d+)\s*[-–—]\s*(\d+)/);
-        if (m) {
-          startPage = parseInt(m[1], 10);
-          endPage = parseInt(m[2], 10);
+        // ===== 复刻前端 getExtractedTextForModuleAsync 的 6 步流程 =====
+        // 1. calculatePageRange：用 coveredChapters + directoryItems 算页码（与前端同源 shared）
+        let startPrinted = 1;
+        let endPrinted = 10;
+
+        if (slice.pageRange) {
+          // 优先使用模块 pageRange（如 "P.15-30"）
+          const m = slice.pageRange.match(/P\.?(\d+)(?:\s*[-–—]\s*P?\.?(\d+))?/i) || slice.pageRange.match(/(\d+)\s*[-–—]\s*(\d+)/);
+          if (m) {
+            startPrinted = parseInt(m[1], 10);
+            endPrinted = m[2] ? parseInt(m[2], 10) : startPrinted;
+          }
+        } else if (slice.coveredChapters) {
+          // 无 pageRange 时按 coveredChapters 推算（与前端 calculatePageRange 同源）
+          const range = calculatePageRange(slice.coveredChapters, directoryItems as PageRef[]);
+          if (range.found && range.startPage) {
+            startPrinted = parseInt(range.startPage, 10) || 1;
+            endPrinted = range.endPage ? (parseInt(range.endPage, 10) || startPrinted) : startPrinted;
+          }
         }
-      } else if (slice.coveredChapters) {
-        const range = computePageRange(slice.coveredChapters, directoryItems);
-        startPage = range.startPage;
-        endPage = range.endPage;
-      }
 
-      const result = await internalPost(`/api/projects/${projectId}/extract-pages`, {
-        startPage,
-        endPage,
-      });
+        // 2. 应用 pdfPageOffset（印刷页 → 物理页偏移，从 DB 读取）
+        const pdfPageOffset = project?.pdfPageOffset ?? 0;
+        const activeStartPhysical = Math.max(1, startPrinted + pdfPageOffset);
+        const activeEndPhysical = Math.max(activeStartPhysical, endPrinted + pdfPageOffset);
 
-      // 拼接所有页面内容
-      const pages = result.pages || [];
-      extractedContent = pages.map((p: any) => p.content || "").filter(Boolean).join("\n\n");
+        // 3. 调 /api/extract-pages（与前端同一路由）
+        const result = await internalPost(`/api/projects/${projectId}/extract-pages`, {
+          startPage: activeStartPhysical,
+          endPage: activeEndPhysical,
+        });
 
-      if (!extractedContent) {
-        throw new Error("PDF 提取内容为空");
-      }
+        const pages = result.pages || [];
+        if (!pages || pages.length === 0) {
+          throw new Error("PDF 提取内容为空");
+        }
 
-      await saveExtractedContent(projectId, slice.id, extractedContent);
+        // 4. filterAndFormatLines：过滤页眉页脚 + 格式化（与前端同源 shared）
+        // 5. 收集图片内嵌成 markdown（与前端逻辑一致）
+        let mdOutput = "";
+        for (const page of pages) {
+          const lines = (page.content || "").split("\n");
+          const formatted = filterAndFormatLines(lines, directoryItems as PageRef[]);
+          mdOutput += formatted + "\n\n";
+
+          if (page.images && page.images.length > 0) {
+            mdOutput += "\n\n";
+            for (const img of page.images) {
+              mdOutput += `![${img.filename || ""}](${img.url || ""})\n\n`;
+            }
+          }
+
+          mdOutput += "\n\n";
+        }
+
+        // 6. trimExtractedContent：裁剪范围外的冗余内容（与前端同源 shared）
+        if (slice.coveredChapters) {
+          mdOutput = trimExtractedContent(mdOutput, slice.coveredChapters, directoryItems as PageRef[]);
+        }
+
+        extractedContent = mdOutput.trim();
+        if (!extractedContent) {
+          throw new Error("PDF 提取内容为空（过滤/裁剪后）");
+        }
+
+        await saveExtractedContent(projectId, slice.id, extractedContent);
       });
     }
   } else {
@@ -361,6 +392,8 @@ async function runSliceScript(
   const scriptTask = existingScriptTasks.find(t => t.stage === "script") || null;
 
   await runTaskWithRetry(jobId, projectId, slice, "script", scriptTask, async () => {
+    // 与手动模式一致：从 prompt 管理读取 script-gen 的 prompt 模板
+    const scriptPrompt = await getSavedPrompt("script-gen");
     const result = await internalPost("/api/generate-script", {
       bookTitle,
       chapterTitle: slice.title,
@@ -371,6 +404,8 @@ async function runSliceScript(
       cohesionDetail: slice.cohesionDetail,
       designRationale: slice.designRationale,
       extractedContent: contentForScript.substring(0, 8000),
+      systemPrompt: scriptPrompt.systemPrompt,
+      userPromptTemplate: scriptPrompt.userPromptTemplate,
     });
 
     scriptMarkdown = result.markdown || "";
@@ -435,12 +470,16 @@ async function runSliceAppCode(
   const appTask = existingAppTasks.find(t => t.stage === "app-code") || null;
 
   await runTaskWithRetry(jobId, projectId, slice, "app-code", appTask, async () => {
+    // 与手动模式一致：从 prompt 管理读取 app-code 的 prompt 模板
+    const appPrompt = await getSavedPrompt("app-code");
     const result = await internalPost("/api/generate-app-code", {
       bookTitle,
       chapterTitle: slice.title,
       coveredChapters: slice.coveredChapters || "",
       scriptMarkdown: finalMarkdown,
       model,
+      systemPrompt: appPrompt.systemPrompt,
+      userPromptTemplate: appPrompt.userPromptTemplate,
     });
 
     const code = result.code || "";
@@ -515,11 +554,16 @@ async function ensureModulesGenerated(
 
   emit(jobId, { event: "parse_book_start", data: { projectId, status: "running" } });
 
+  // 与手动模式一致：从 prompt 管理读取 smart-split 的 prompt 模板
+  const smartSplitPrompt = await getSavedPrompt("smart-split");
+
   // 调用 parse-book 生成切片
   const result = await internalPost("/api/parse-book", {
     title: project.bookTitle || project.name || "未命名教材",
     fullText: project.bookContentText || "",
     directoryStructure: directoryItems,
+    systemPrompt: smartSplitPrompt.systemPrompt,
+    userPromptTemplate: smartSplitPrompt.userPromptTemplate,
   });
 
   // 检查是否降级

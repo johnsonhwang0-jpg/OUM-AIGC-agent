@@ -7,13 +7,20 @@
  *  - 同时更新 VERSION_HISTORY，记录本次变更内容
  */
 
-export const APP_VERSION = "1.2.1";
-export const VERSION_UPDATED_AT = "2026-06-25 13:05:00";
+export const APP_VERSION = "1.2.4";
+export const VERSION_UPDATED_AT = "2026-06-25 16:49:50";
 
 export interface VersionEntry {
   version: string;
   updatedAt: string;
   changes: string[];
+  /**
+   * 该版本对应的 git commit short hash（7 位）。
+   * - 已提交版本：回填对应 commit 的 short hash
+   * - 未提交版本：留空字符串，前端显示「未提交」
+   * 回滚方式：git reset --hard <hash> 或 git checkout <hash>
+   */
+  gitCommit?: string;
 }
 
 /**
@@ -21,8 +28,43 @@ export interface VersionEntry {
  */
 export const VERSION_HISTORY: VersionEntry[] = [
   {
+    version: "1.2.4",
+    updatedAt: "2026-06-25 16:49:50",
+    gitCommit: "", // 本次会话改动，尚未 commit
+    changes: [
+      "VersionEntry 新增 gitCommit 字段，回填历史版本对应的 commit short hash（1.2.1→f532eb5、1.2.0→2355b27、1.1.x→fc416b1）",
+      "新增 /api/git-info 路由，通过 child_process execSync 读取当前 HEAD hash + 是否有未提交更改 + 分支名",
+      "VersionTab UI 显示 git 状态：顶部「Git HEAD」栏显示当前 HEAD + dirty/clean 状态；每个版本卡片右侧显示 commit hash 按钮，点击复制 git reset --hard <hash> 回滚命令",
+      "当前 HEAD 对应的版本卡片高亮显示「当前」标识，未提交版本显示「未提交」标签",
+    ],
+  },
+  {
+    version: "1.2.3",
+    updatedAt: "2026-06-25 16:39:53",
+    gitCommit: "", // 本次会话改动，尚未 commit
+    changes: [
+      "新增「版本备注」功能：SystemSettings 版本说明 tab 下每个版本增加可编辑备注框，失焦自动保存到 DB（version_notes 表）",
+      "数据库迁移 v5：新增 version_notes 表（version PRIMARY KEY, note, updatedAt）",
+      "新增 /api/version-notes GET/PUT 路由，支持读取全部备注与保存单个版本备注",
+      "VersionTab UI 区分代码变更列表（version.ts 维护）与用户备注（DB 持久化），两者独立",
+    ],
+  },
+  {
+    version: "1.2.2",
+    updatedAt: "2026-06-25 16:33:38",
+    gitCommit: "", // 本次会话改动，尚未 commit
+    changes: [
+      "新增 shared/textbookMatcher.ts 共享纯函数层：抽离 calculatePageRange / filterAndFormatLines / trimExtractedContent / calculateAutoPageOffset，新增 PageRef 最小接口，前后端共用同一份 extract 逻辑",
+      "数据库迁移 v4：projects 表新增 pdfPageOffset 字段，持久化印刷页→物理页偏移量，确保自动模式能读取前端计算的页码偏差",
+      "前端 App.tsx：新建项目 / 重新提取 PDF 时将 pdfPageOffset 持久化到 DB；loadProject 时从 DB 恢复",
+      "orchestrator 删除 computePageRange 复刻实现，import shared 纯函数；runSliceExtract 复刻手动模式 6 步流程（页码计算→offset 应用→extract-pages→filterAndFormatLines→图片嵌入→trimExtractedContent）",
+      "orchestrator 新增 getSavedPrompt 复用 /api/prompt-templates，确保自动模式 AI 返回语言与手动模式一致",
+    ],
+  },
+  {
     version: "1.2.1",
     updatedAt: "2026-06-25 13:05:00",
+    gitCommit: "f532eb5",
     changes: [
       "TaskManager 左栏流程阶段文案改为「创建项目 / 目录提取 / 智能切片 / 内容提取 / 脚本生成 / 游戏生成」6 步并支持中英双语切换",
       "左栏点击对应阶段时，右栏展示该阶段的汇总信息（项目信息、目录列表、切片统计、各阶段进度）",
@@ -35,6 +77,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.0",
     updatedAt: "2026-06-25 12:30:00",
+    gitCommit: "2355b27",
     changes: [
       "新增「新建项目」弹窗：上传 PDF + 自动提取名称 + 选择自动/校验模式",
       "自动模式新增「任务管理器」三栏界面（流程时间线 + 切片列表 + 详情面板）",
@@ -46,6 +89,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.1.2",
     updatedAt: "2026-06-25 11:48:15",
+    gitCommit: "fc416b1",
     changes: [
       "版本历史记录的更新时间精确到 hh:mm:ss",
     ],
@@ -53,6 +97,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.1.1",
     updatedAt: "2026-06-25 11:45:30",
+    gitCommit: "fc416b1",
     changes: [
       "新增「自动模式」和「校验模式」双模式架构",
       "模式选择入口提前到第一阶段（上传 PDF + 目录提取完成后）",

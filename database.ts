@@ -7,7 +7,7 @@ const DB_PATH = path.join(process.cwd(), "booktogame.db");
 const DB_BACKUP_DIR = path.join(process.cwd(), ".db-backups");
 
 // 数据库 schema 版本号，每次修改 schema 时递增
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 
 /**
  * 在修改数据库 schema 前创建备份
@@ -85,6 +85,7 @@ export interface Project {
   aiMeta: string; // AI调用元数据 JSON
   rawBlueprintData: string; // AI返回的原始切片数据 JSON
   executionMode?: "auto" | "manual"; // 项目级执行模式偏好
+  pdfPageOffset?: number; // 印刷页→物理页偏移量（前端 calculateAutoPageOffset 算出后存 DB）
   createdAt: string;
   updatedAt: string;
 }
@@ -389,6 +390,30 @@ async function initDatabase(): Promise<Database> {
     setSchemaVersion(database, 3);
   }
 
+  // v3 → v4: 保存 pdfPageOffset（印刷页→物理页偏移量）
+  // 前端在解析 PDF 时通过 calculateAutoPageOffset 算出偏移量，
+  // 之前只存在内存 state 里，后端 orchestrator 读不到，
+  // 导致自动模式 extract 页码对不齐。此字段持久化到 DB。
+  if (currentVersion < 4) {
+    safeAlter(database, `ALTER TABLE projects ADD COLUMN pdfPageOffset INTEGER DEFAULT 0`, "projects.pdfPageOffset");
+    setSchemaVersion(database, 4);
+  }
+
+  // v4 → v5: 版本备注表
+  // VERSION_HISTORY（version.ts）只记录发版时的代码变更，
+  // 用户希望对每个版本追加额外的备注（独立于 changes），
+  // 这些备注由用户在前端 SystemSettings 编辑，需持久化到 DB。
+  if (currentVersion < 5) {
+    database.run(`
+      CREATE TABLE IF NOT EXISTS version_notes (
+        version TEXT PRIMARY KEY,
+        note TEXT NOT NULL DEFAULT '',
+        updatedAt TEXT NOT NULL
+      )
+    `);
+    setSchemaVersion(database, 5);
+  }
+
   saveDatabase(database);
   return database;
 }
@@ -460,7 +485,7 @@ export async function createProject(
 
 export async function updateProject(
   id: string,
-  updates: Partial<Pick<Project, "name" | "bookTitle" | "bookContentText" | "directoryItems" | "modules" | "pdfFileName" | "pdfData" | "aiMeta" | "rawBlueprintData" | "executionMode">>
+  updates: Partial<Pick<Project, "name" | "bookTitle" | "bookContentText" | "directoryItems" | "modules" | "pdfFileName" | "pdfData" | "aiMeta" | "rawBlueprintData" | "executionMode" | "pdfPageOffset">>
 ): Promise<void> {
   const database = await getDatabase();
   const now = new Date().toISOString();
@@ -507,6 +532,10 @@ export async function updateProject(
   if (updates.executionMode !== undefined) {
     fields.push("executionMode = ?");
     values.push(updates.executionMode);
+  }
+  if (updates.pdfPageOffset !== undefined) {
+    fields.push("pdfPageOffset = ?");
+    values.push(updates.pdfPageOffset);
   }
 
   if (fields.length === 0) return;
@@ -563,6 +592,11 @@ export async function getProject(id: string): Promise<Project | null> {
       const val = idx >= 0 ? (matchingRow[idx] as string) : null;
       return val === "auto" ? "auto" : "manual";
     })(),
+    pdfPageOffset: ((): number => {
+      const idx = columns.indexOf("pdfPageOffset");
+      const val = idx >= 0 ? (matchingRow[idx] as number) : 0;
+      return typeof val === "number" ? val : 0;
+    })(),
     createdAt: matchingRow[columns.indexOf("createdAt")] as string,
     updatedAt: matchingRow[columns.indexOf("updatedAt")] as string
   };
@@ -595,6 +629,11 @@ export async function getAllProjects(): Promise<Project[]> {
       const idx = columns.indexOf("executionMode");
       const val = idx >= 0 ? (row[idx] as string) : null;
       return val === "auto" ? "auto" : "manual";
+    })(),
+    pdfPageOffset: ((): number => {
+      const idx = columns.indexOf("pdfPageOffset");
+      const val = idx >= 0 ? (row[idx] as number) : 0;
+      return typeof val === "number" ? val : 0;
     })(),
     createdAt: row[columns.indexOf("createdAt")] as string,
     updatedAt: row[columns.indexOf("updatedAt")] as string
@@ -932,6 +971,36 @@ export async function deletePromptVersion(id: string): Promise<boolean> {
   database.run(`DELETE FROM prompt_versions WHERE id = ?`, [id]);
   saveDatabase(database);
   return true;
+}
+
+// Version Note functions（用户对版本历史的额外备注，独立于 VERSION_HISTORY.changes）
+export interface VersionNote {
+  version: string;
+  note: string;
+  updatedAt: string;
+}
+
+export async function getAllVersionNotes(): Promise<VersionNote[]> {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT version, note, updatedAt FROM version_notes ORDER BY version DESC`);
+  if (result.length === 0) return [];
+  return result[0].values.map((row) => ({
+    version: row[0] as string,
+    note: row[1] as string,
+    updatedAt: row[2] as string,
+  }));
+}
+
+export async function setVersionNote(version: string, note: string): Promise<VersionNote> {
+  const database = await getDatabase();
+  const updatedAt = new Date().toISOString();
+  database.run(
+    `INSERT INTO version_notes (version, note, updatedAt) VALUES (?, ?, ?)
+     ON CONFLICT(version) DO UPDATE SET note = excluded.note, updatedAt = excluded.updatedAt`,
+    [version, note, updatedAt]
+  );
+  saveDatabase(database);
+  return { version, note, updatedAt };
 }
 
 // Model Config functions

@@ -549,15 +549,19 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   };
 
   // Helper additions for chat history
+  // 模块级自增计数器，避免同毫秒生成的消息 id 重复（Date.now() 精度不足）
+  const messageSeqRef = useRef(0);
+  const nextMsgId = (prefix: "user" | "agent") => `${prefix}-${Date.now()}-${++messageSeqRef.current}`;
+
   const addUserMessage = (text: string) => {
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const userMsg: Message = { id: `user-${Date.now()}`, sender: "user", text, timestamp };
+    const userMsg: Message = { id: nextMsgId("user"), sender: "user", text, timestamp };
     setMessages(prev => [...prev, userMsg]);
   };
 
   const addAgentMessage = (text: string, type: 'text' | 'blueprint_ready' | 'script_ready' = 'text', metadata?: any) => {
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const agentMsg: Message = { id: `agent-${Date.now()}`, sender: "agent", text, timestamp, type, metadata };
+    const agentMsg: Message = { id: nextMsgId("agent"), sender: "agent", text, timestamp, type, metadata };
     setMessages(prev => [...prev, agentMsg]);
   };
 
@@ -592,6 +596,8 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       setPdfData(project.pdfData || null);
       setExecutionMode(project.executionMode === "auto" ? "auto" : "manual");
       setViewMode(project.executionMode === "auto" ? "task-manager" : "steps");
+      // 从 DB 恢复 pdfPageOffset，确保自动模式与手动模式页码对齐一致
+      setPdfPageOffset(typeof project.pdfPageOffset === "number" ? project.pdfPageOffset : 0);
       setProjectInfo({
         id: project.id,
         name: project.name || "",
@@ -792,6 +798,15 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
     });
     setActiveStep(2); // 目录提取步骤
     await loadProjectList();
+
+    // 持久化 pdfPageOffset 到 DB，后端 orchestrator 读取后用于自动模式 extract 页码对齐
+    if (result.projectId && typeof result.pdfPageOffset === "number") {
+      fetch(`/api/projects/${result.projectId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdfPageOffset: result.pdfPageOffset }),
+      }).catch(err => console.error("Failed to save pdfPageOffset:", err));
+    }
 
     if (result.mode === "auto") {
       // 自动模式：切换到任务管理器视图
@@ -1063,7 +1078,7 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
             const base64Pdf = dataUrl.split(",")[1];
             setPdfData(base64Pdf);
             
-            await createNewProject(
+            const newProject = await createNewProject(
               projectName,
               file.name,
               base64Pdf,
@@ -1072,6 +1087,14 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
               parsedOutline,
               []
             );
+            // 持久化 pdfPageOffset，后端 orchestrator 自动模式 extract 需要
+            if (newProject?.id) {
+              fetch(`/api/projects/${newProject.id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ pdfPageOffset: autoOffset }),
+              }).catch(err => console.error("Failed to save pdfPageOffset:", err));
+            }
             setShowProjectList(true);
             addAgentMessage(language === "en"
               ? `📦 **Successfully received your uploaded textbook eBook:**\n《${file.name}》\n\nProject **"${projectName}"** has been created and saved to the database!\n\nI have successfully read the first **${pageLimit} pages** of text in the browser terminal (about ${extractedText.length} characters), and intelligently detected that the **offset between printed pages and PDF physical pages is \`${autoOffset >= 0 ? "+" : ""}${autoOffset}\` pages**.\n\nThe system has completed noise reduction alignment and directory extraction for textbook pages. I have opened the "My Projects" list on the left for you, where you can see the newly created project. Next, please click **"✨ Smart Textbook Content Slicing"** at the bottom of the right page, and we can complete intelligent content chunking!`
@@ -1629,6 +1652,15 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
         
         const autoOffset = calculateAutoPageOffset(parsedOutline, pagesTextList);
         setPdfPageOffset(autoOffset);
+
+        // 持久化到 DB，确保自动模式与手动模式 offset 一致
+        if (currentProjectId) {
+          fetch(`/api/projects/${currentProjectId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pdfPageOffset: autoOffset }),
+          }).catch(err => console.error("Failed to save pdfPageOffset:", err));
+        }
       }
       
       setPdfReaderLoading(false);
