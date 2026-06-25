@@ -30,7 +30,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.6",
     updatedAt: "2026-06-25 19:20:00",
-    gitCommit: "", // 本次会话改动，尚未 commit
+    gitCommit: "c226521",
     changes: [
       "修复自动模式 extract 结果错误：orchestrator runSliceExtract 正则从 /P\\.?(\\d+).../i 改为 /P\\.(\\d+)(?:-(\\d+))?/（与前端完全一致），避免 P15-30 等格式前后端算出不同页码",
       "修复自动模式 extract 拼接格式与前端不一致：filterAndFormatLines 拼接从 += formatted + \\n\\n 改为 += formattedLines（与前端一致），trimExtractedContent 从条件调用改为总是调用",
