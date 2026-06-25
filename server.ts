@@ -50,7 +50,7 @@ import {
 } from "./orchestrator.js";
 
 // Load environment variables
-const SERVER_VERSION = "v1.1.2-dual-mode";
+const SERVER_VERSION = "v1.2.0-task-manager";
 dotenv.config();
 
 const app = express();

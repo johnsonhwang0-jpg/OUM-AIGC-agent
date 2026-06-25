@@ -57,6 +57,8 @@ import SystemSettings from "./components/SystemSettings";
 import { APP_VERSION } from "./version";
 import ApiDebugDrawer from "./components/ApiDebugDrawer";
 import { AutomationPanel } from "./components/Automation";
+import { NewProjectModal, type NewProjectResult } from "./components/NewProjectModal";
+import { TaskManager } from "./components/TaskManager";
 
 // Extract valid HTML from AI response, stripping markdown fences and explanatory text
 function extractValidHtml(raw: string): string {
@@ -457,6 +459,8 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   const [showProjectList, setShowProjectList] = useState<boolean>(false);
   const [executionMode, setExecutionMode] = useState<"auto" | "manual">("manual");
   const [automationJobId, setAutomationJobId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"steps" | "task-manager">("steps");
+  const [showNewProjectModal, setShowNewProjectModal] = useState<boolean>(false);
 
   // Ref pointers for list scroll anchors
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -586,6 +590,7 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       setPdfFileName(project.pdfFileName || "");
       setPdfData(project.pdfData || null);
       setExecutionMode(project.executionMode === "auto" ? "auto" : "manual");
+      setViewMode(project.executionMode === "auto" ? "task-manager" : "steps");
 
       if (project.directoryItems) {
         try {
@@ -752,6 +757,31 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
     } catch (err) {
       console.error("❌ Failed to create project:", err);
       throw err;
+    }
+  }, [loadProjectList]);
+
+  // NewProjectModal 创建完成回调
+  const handleNewProjectCreated = useCallback(async (result: NewProjectResult) => {
+    setShowNewProjectModal(false);
+    setCurrentProjectId(result.projectId);
+    setBookTitle(result.bookTitle);
+    setBookContentText(result.bookContentText);
+    setDirectoryItems(result.directoryItems);
+    setPdfFileName(result.pdfFileName);
+    setPdfData(result.pdfData);
+    setPdfPagesText(result.pdfPagesText);
+    setPdfPageOffset(result.pdfPageOffset);
+    setModules([]); // 新建项目无切片
+    setExecutionMode(result.mode);
+    setActiveStep(2); // 目录提取步骤
+    await loadProjectList();
+
+    if (result.mode === "auto") {
+      // 自动模式：切换到任务管理器视图
+      setViewMode("task-manager");
+    } else {
+      // 校验模式：留在步骤视图
+      setViewMode("steps");
     }
   }, [loadProjectList]);
 
@@ -2337,7 +2367,8 @@ ${script.conclusion}
             <div className="flex items-center gap-2 text-slate-200">
               <Layers className="w-5 h-5 text-cyan-400" />
               <span className="font-semibold text-sm">
-                {activeStep === 1 ? (language === "en" ? "Phase 1: Analyze & Mount Textbook Data" : "第一阶段：分析并挂载教材数据源") : 
+                {viewMode === "task-manager" ? (language === "en" ? "Auto Mode: Task Manager" : "自动模式：任务管理器") :
+                 activeStep === 1 ? (language === "en" ? "Phase 1: Analyze & Mount Textbook Data" : "第一阶段：分析并挂载教材数据源") : 
                  activeStep === 2 ? (language === "en" ? "Phase 2: Teaching Outline Dashboard & Rule Editing" : "第二阶段：教学进度大纲大盘与规则编辑") : 
                  activeStep === 3 ? (language === "en" ? "Phase 3: Slice Text Proofreading & Mapping" : "第三阶段：切片原文校对与映射") :
                  (language === "en" ? "Phase 4: UI Theme Rendering & Game Code Export" : "第四阶段：UI主题渲染与独立游戏代码导出")}
@@ -2346,6 +2377,38 @@ ${script.conclusion}
             
             {/* Step navigation shortcut pins */}
             <div className="flex items-center gap-2">
+              {/* + 新建项目 */}
+              <button
+                type="button"
+                onClick={() => setShowNewProjectModal(true)}
+                className="text-xs px-3 py-1 rounded-md border transition cursor-pointer bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/30 text-cyan-300 font-semibold flex items-center gap-1 shrink-0"
+                title="新建项目"
+              >
+                <Plus className="w-3 h-3" /> 新建项目
+              </button>
+              {/* 切换视图（任务管理器 ↔ 步骤） */}
+              {currentProjectId && viewMode === "task-manager" && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode("steps")}
+                  className="text-xs px-2.5 py-1 rounded-md border bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-white transition cursor-pointer shrink-0"
+                  title="切换到校验模式步骤视图"
+                >
+                  步骤视图
+                </button>
+              )}
+              {currentProjectId && viewMode === "steps" && executionMode === "auto" && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode("task-manager")}
+                  className="text-xs px-2.5 py-1 rounded-md border bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/30 text-cyan-300 transition cursor-pointer shrink-0"
+                  title="切换到任务管理器"
+                >
+                  任务管理器
+                </button>
+              )}
+              {viewMode === "steps" && (
+              <>
               <button 
                 onClick={() => setActiveStep(1)}
                 className={`text-xs px-2.5 py-1 rounded-md border transition cursor-pointer ${
@@ -2424,11 +2487,33 @@ ${script.conclusion}
               >
                 {language === "en" ? "5. Build App" : "5. App 构建"}
               </button>
+              </>
+              )}
             </div>
           </div>
 
+          {/* 自动模式：任务管理器覆盖层 */}
+          {viewMode === "task-manager" && currentProjectId && (
+            <div className="absolute inset-0 z-30 animate-fadeIn">
+              <TaskManager
+                projectId={currentProjectId}
+                bookTitle={bookTitle}
+                modules={modules}
+                jobId={automationJobId}
+                onJobIdChange={setAutomationJobId}
+                onSwitchToManual={() => setViewMode("steps")}
+                onEditSlice={(moduleId) => {
+                  setActiveModuleId(moduleId);
+                  setViewMode("steps");
+                  setActiveStep(3);
+                }}
+                onBack={() => setViewMode("steps")}
+              />
+            </div>
+          )}
+
           {/* Step 1 View: Load Book and Uploading PDF */}
-          {activeStep === 1 && (
+          {viewMode === "steps" && activeStep === 1 && (
             <div className="flex-1 flex flex-col min-h-0 w-full animate-fadeIn z-10 overflow-hidden">
               {/* Scrollable Container */}
               <div className="flex-1 overflow-y-auto p-6">
@@ -2824,21 +2909,7 @@ ${script.conclusion}
                 </div>
               </div>
 
-              {/* 模式选择 + 自动化进度看板（目录提取完成后显示） */}
-              {currentProjectId && directoryItems.length > 0 && (
-                <AutomationPanel
-                  projectId={currentProjectId}
-                  modules={[]}
-                  executionMode={executionMode}
-                  onModeChange={setExecutionMode}
-                  onEditSlice={(moduleId) => {
-                    setActiveModuleId(moduleId);
-                  }}
-                  jobId={automationJobId}
-                  onJobIdChange={setAutomationJobId}
-                  compact
-                />
-              )}
+              {/* 模式选择已前置到「新建项目」弹窗，目录提取后自动进入后续流程 */}
 
             </div> {/* max-w-4xl */}
           </div> {/* flex-1 overflow-y-auto */}
@@ -4295,6 +4366,14 @@ API地址：https://api.deepseek.com/chat/completions`}
           </div>
 
         </div>
+      )}
+
+      {/* 新建项目弹窗 */}
+      {showNewProjectModal && (
+        <NewProjectModal
+          onClose={() => setShowNewProjectModal(false)}
+          onCreated={handleNewProjectCreated}
+        />
       )}
 
     </div>

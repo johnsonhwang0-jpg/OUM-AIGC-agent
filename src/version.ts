@@ -7,8 +7,8 @@
  *  - 同时更新 VERSION_HISTORY，记录本次变更内容
  */
 
-export const APP_VERSION = "1.1.2";
-export const VERSION_UPDATED_AT = "2026-06-25 11:48:15";
+export const APP_VERSION = "1.2.0";
+export const VERSION_UPDATED_AT = "2026-06-25 12:30:00";
 
 export interface VersionEntry {
   version: string;
@@ -20,6 +20,17 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.0",
+    updatedAt: "2026-06-25 12:30:00",
+    changes: [
+      "新增「新建项目」弹窗：上传 PDF + 自动提取名称 + 选择自动/校验模式",
+      "自动模式新增「任务管理器」三栏界面（流程时间线 + 切片列表 + 详情面板）",
+      "App.tsx 新增 viewMode 状态，自动模式渲染 TaskManager 覆盖层",
+      "顶部 Banner 新增「+ 新建项目」按钮和视图切换按钮",
+      "移除 Step 1 的 AutomationPanel（模式选择已前置到新建项目弹窗）",
+    ],
+  },
   {
     version: "1.1.2",
     updatedAt: "2026-06-25 11:48:15",
