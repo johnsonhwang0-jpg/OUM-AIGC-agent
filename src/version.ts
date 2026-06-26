@@ -30,7 +30,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.8",
     updatedAt: "2026-06-26 19:30:00",
-    gitCommit: "",
+    gitCommit: "19adb14",
     changes: [
       "TaskManager 最小化到后台执行：移除左上角 ArrowLeft 返回按钮，在「切换校验模式」后新增「最小化到后台」按钮（Minimize2 图标），点击后切回步骤视图，服务端任务继续后台运行",
       "顶栏新增全局后台任务指示器：最小化后仍显示脉冲圆点 + 进度计数（N/M）+ 「查看」按钮，点击重新进入对应项目的 TaskManager；通过 3s 轮询 /api/automation/:jobId/status 更新状态（进入 TaskManager 时由 SSE 接管，停止轮询）",
