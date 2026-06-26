@@ -38,8 +38,8 @@ export interface VersionEntry {
 export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.12",
-    updatedAt: "",
-    gitCommit: "",
+    updatedAt: "2026-06-26 18:40:30",
+    gitCommit: "cdde110",
     changes: [
       "修复暂停后 script 7/20 误显 completed：getStageStatus 改用 doneCount >= modules.length 判断完成（原 every() 在 task 数 < 切片数时误判）",
       "修复 pause/resume/cancel 反应慢：三个操作加乐观更新 setJob，UI 立即切换状态不等 SSE 回程（orchestrator 协作式中断，实际停止需等当前 AI 调用完成）",
