@@ -53,6 +53,7 @@ __export(database_exports, {
   getExtractedContents: () => getExtractedContents,
   getGeneratedAppCode: () => getGeneratedAppCode,
   getLatestAutomationJob: () => getLatestAutomationJob,
+  getLatestJobsForProjects: () => getLatestJobsForProjects,
   getModelConfig: () => getModelConfig,
   getModuleScripts: () => getModuleScripts,
   getPendingTasksForSlice: () => getPendingTasksForSlice,
@@ -993,6 +994,28 @@ async function getLatestAutomationJob(projectId) {
   const result = database.exec(`SELECT * FROM automation_jobs WHERE projectId = ? ORDER BY createdAt DESC LIMIT 1`, [projectId]);
   if (result.length === 0 || result[0].values.length === 0) return null;
   return rowToJob(result[0].values[0], result[0].columns);
+}
+async function getLatestJobsForProjects(projectIds) {
+  const result = {};
+  for (const id of projectIds) result[id] = null;
+  if (projectIds.length === 0) return result;
+  const database = await getDatabase();
+  const placeholders = projectIds.map(() => "?").join(",");
+  const rows = database.exec(
+    `SELECT * FROM (
+       SELECT *, ROW_NUMBER() OVER (PARTITION BY projectId ORDER BY createdAt DESC) AS rn FROM automation_jobs
+       WHERE projectId IN (${placeholders})
+     ) WHERE rn = 1`,
+    projectIds
+  );
+  if (rows.length > 0) {
+    const cols = rows[0].columns;
+    for (const v of rows[0].values) {
+      const job = rowToJob(v, cols);
+      result[job.projectId] = job;
+    }
+  }
+  return result;
 }
 async function updateAutomationJob(jobId, updates) {
   const database = await getDatabase();
@@ -2301,6 +2324,7 @@ app.get("/api/projects", async (req, res) => {
   try {
     const projects = await getAllProjects();
     const stats = await getProjectCountStats(projects.map((p) => p.id));
+    const latestJobs = await getLatestJobsForProjects(projects.map((p) => p.id));
     const enriched = projects.map((p) => {
       let sliceCount = 0;
       try {
@@ -2311,11 +2335,20 @@ app.get("/api/projects", async (req, res) => {
       } catch {
       }
       const s = stats[p.id] || { scriptCount: 0, appCount: 0 };
+      const job = latestJobs[p.id];
+      const automationStatus = job ? {
+        status: job.status,
+        jobId: job.id,
+        completedSlices: job.completedSlices ?? 0,
+        failedSlices: job.failedSlices ?? 0,
+        totalSlices: job.totalSlices ?? 0
+      } : null;
       return {
         ...p,
         sliceCount,
         scriptCount: s.scriptCount,
-        appCount: s.appCount
+        appCount: s.appCount,
+        automationStatus
       };
     });
     console.log("\u{1F4CB} GET /api/projects returning:", enriched.length, "projects");

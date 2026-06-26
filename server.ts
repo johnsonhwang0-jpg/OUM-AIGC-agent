@@ -39,7 +39,8 @@ import {
   getModelConfig,
   createModelConfig,
   updateModelConfig,
-  deleteModelConfig
+  deleteModelConfig,
+  getLatestJobsForProjects
 } from "./database.js";
 import {
   startAutomationJob,
@@ -394,6 +395,8 @@ app.get("/api/projects", async (req, res) => {
     const projects = await getAllProjects();
     // 为每个项目附加 slice/script/app 计数，用于首页项目列表展示完成进度
     const stats = await getProjectCountStats(projects.map(p => p.id));
+    // 批量查询每个项目最近的 automation job，用于首页展示自动处理状态
+    const latestJobs = await getLatestJobsForProjects(projects.map(p => p.id));
     const enriched = projects.map(p => {
       let sliceCount = 0;
       try {
@@ -403,11 +406,22 @@ app.get("/api/projects", async (req, res) => {
         }
       } catch { /* modules 不是合法 JSON 时保持 0 */ }
       const s = stats[p.id] || { scriptCount: 0, appCount: 0 };
+      const job = latestJobs[p.id];
+      const automationStatus = job
+        ? {
+            status: job.status,
+            jobId: job.id,
+            completedSlices: job.completedSlices ?? 0,
+            failedSlices: job.failedSlices ?? 0,
+            totalSlices: job.totalSlices ?? 0,
+          }
+        : null;
       return {
         ...p,
         sliceCount,
         scriptCount: s.scriptCount,
         appCount: s.appCount,
+        automationStatus,
       };
     });
     console.log("📋 GET /api/projects returning:", enriched.length, "projects");

@@ -7,8 +7,8 @@
  *  - 同时更新 VERSION_HISTORY，记录本次变更内容
  */
 
-export const APP_VERSION = "1.2.7";
-export const VERSION_UPDATED_AT = "2026-06-26 12:47:33";
+export const APP_VERSION = "1.2.8";
+export const VERSION_UPDATED_AT = "2026-06-26 19:30:00";
 
 export interface VersionEntry {
   version: string;
@@ -27,6 +27,18 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.8",
+    updatedAt: "2026-06-26 19:30:00",
+    gitCommit: "",
+    changes: [
+      "TaskManager 最小化到后台执行：移除左上角 ArrowLeft 返回按钮，在「切换校验模式」后新增「最小化到后台」按钮（Minimize2 图标），点击后切回步骤视图，服务端任务继续后台运行",
+      "顶栏新增全局后台任务指示器：最小化后仍显示脉冲圆点 + 进度计数（N/M）+ 「查看」按钮，点击重新进入对应项目的 TaskManager；通过 3s 轮询 /api/automation/:jobId/status 更新状态（进入 TaskManager 时由 SSE 接管，停止轮询）",
+      "My Projects 项目列表展示自动处理状态：running 显示「自动处理中 N/M」脉冲徽章，paused 显示「已暂停」徽章；后端 /api/projects 附加 automationStatus 字段（批量查询 getLatestJobsForProjects 避免 N+1）",
+      "自动模式 Extract 步骤不再显示「自动模式/校验模式」切换面板和「开始自动生成」按钮：AutomationPanel 渲染条件增加 executionMode==='manual'，自动模式由后端 orchestrator 处理 extract，避免前端重复触发",
+      "修复 changePdfPageOffset 使用 PATCH 与后端 PUT 路由不匹配导致「Failed to save pdfPageOffset」错误",
+    ],
+  },
   {
     version: "1.2.7",
     updatedAt: "2026-06-26 12:47:33",

@@ -44,7 +44,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError
 import { TEMPLATE_BOOKS } from "./data";
 import {
   BookModule, BookBlueprint, GameScript, Message, GameSessionState, GameChallenge, GameType, DirectoryItem,
-  SummaryInfo, InfoDensity, CohesionDetail, ExtractedImage, SimulationBlueprintScript, ProjectInfo
+  SummaryInfo, InfoDensity, CohesionDetail, ExtractedImage, SimulationBlueprintScript, ProjectInfo, AutomationJob
 } from "./types";
 import { parseTextToDirectory, serializeDirectoryToText } from "./utils/directoryParser";
 import { getExtractedTextForModule, getExtractedTextForModuleAsync, calculateAutoPageOffset } from "./utils/textbookMatcher";
@@ -464,7 +464,7 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
     setPdfPageOffset(newOffset);
     if (currentProjectId) {
       fetch(`/api/projects/${currentProjectId}`, {
-        method: "PATCH",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pdfPageOffset: newOffset }),
       }).catch(err => console.error("Failed to save pdfPageOffset:", err));
@@ -476,6 +476,8 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   const [viewMode, setViewMode] = useState<"steps" | "task-manager">("steps");
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
   const [showNewProjectModal, setShowNewProjectModal] = useState<boolean>(false);
+  // 后台自动化任务状态：当用户最小化 TaskManager 后，轮询 job 状态用于全局指示器展示
+  const [backgroundJob, setBackgroundJob] = useState<AutomationJob | null>(null);
 
   // Ref pointers for list scroll anchors
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -488,6 +490,30 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   // 进入第三步时，自动批量提取所有切片的原文内容（有缓存，不重复提取）
   // 注意：自动模式下由 orchestrator 负责 extract，前端跳过，避免双重提取导致冲突与灰屏
   const batchExtractingRef = useRef(false);
+
+  // 后台任务轮询：当不在 TaskManager 视图时，轮询 automation job 状态用于全局指示器
+  useEffect(() => {
+    if (!automationJobId) {
+      setBackgroundJob(null);
+      return;
+    }
+    // 在 TaskManager 视图时由 SSE 实时更新，无需轮询
+    if (viewMode === "task-manager" && currentProjectId) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/automation/${automationJobId}/status`);
+        if (!res.ok) return;
+        const snap = await res.json();
+        if (cancelled) return;
+        if (snap.job) setBackgroundJob(snap.job);
+      } catch { /* ignore transient errors */ }
+    };
+    poll();
+    const timer = setInterval(poll, 3000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [automationJobId, viewMode, currentProjectId]);
 
   useEffect(() => {
     if (executionMode === "auto") return; // 自动模式由后端 orchestrator 处理 extract
@@ -633,6 +659,7 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
         sliceCount: typeof p.sliceCount === "number" ? p.sliceCount : sliceCount,
         scriptCount: typeof p.scriptCount === "number" ? p.scriptCount : 0,
         appCount: typeof p.appCount === "number" ? p.appCount : 0,
+        automationStatus: p.automationStatus ?? null,
       };
     });
   }, [projectList]);
@@ -853,7 +880,8 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       createdAt: new Date().toISOString(),
       executionMode: result.mode,
     });
-    setActiveStep(2); // 目录提取步骤
+    setActiveStep(1); // Preview 步骤：创建后停在预览页，由用户点"下一步"触发后续流程
+    setViewMode("steps");
     await loadProjectList();
 
     // 持久化 pdfPageOffset 到 DB，后端 orchestrator 读取后用于自动模式 extract 页码对齐
@@ -863,14 +891,6 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pdfPageOffset: result.pdfPageOffset }),
       }).catch(err => console.error("Failed to save pdfPageOffset:", err));
-    }
-
-    if (result.mode === "auto") {
-      // 自动模式：切换到任务管理器视图
-      setViewMode("task-manager");
-    } else {
-      // 校验模式：留在步骤视图
-      setViewMode("steps");
     }
   }, [loadProjectList]);
 
@@ -2493,6 +2513,37 @@ ${script.conclusion}
               </span>
             </div>
 
+            {/* 后台任务全局指示器：最小化 TaskManager 后仍展示自动化进度 */}
+            {backgroundJob && (backgroundJob.status === "running" || backgroundJob.status === "paused") && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (backgroundJob.projectId) {
+                    loadProject(backgroundJob.projectId);
+                    setViewMode("task-manager");
+                  }
+                }}
+                className="flex items-center gap-2 px-3 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 transition cursor-pointer shrink-0"
+                title={language === "en" ? "Background task running, click to view" : "后台任务运行中，点击查看"}
+              >
+                <span className="relative flex h-2 w-2">
+                  {backgroundJob.status === "running" && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+                  )}
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${backgroundJob.status === "running" ? "bg-cyan-400" : "bg-amber-400"}`} />
+                </span>
+                <span className="text-[10px] font-semibold whitespace-nowrap">
+                  {language === "en" ? "Background" : "后台运行中"}
+                </span>
+                {backgroundJob.totalSlices > 0 && (
+                  <span className="text-[10px] font-mono text-slate-400 tabular-nums">
+                    {backgroundJob.completedSlices + backgroundJob.failedSlices}/{backgroundJob.totalSlices}
+                  </span>
+                )}
+                <span className="text-[10px] text-cyan-400 font-semibold">{language === "en" ? "View" : "查看"}</span>
+              </button>
+            )}
+
             {/* Step navigation shortcut pins */}
             <div className="flex items-center gap-2">
               {currentProjectId && (
@@ -2644,7 +2695,10 @@ ${script.conclusion}
                   setViewMode("steps");
                   setActiveStep(3);
                 }}
-                onBack={() => setViewMode("steps")}
+                onMinimize={() => {
+                  // 最小化到后台：切回步骤视图（与原返回按钮效果一致），服务端任务继续运行
+                  setViewMode("steps");
+                }}
                 onRefreshProject={() => {
                   if (currentProjectId) loadProject(currentProjectId);
                 }}
@@ -3396,8 +3450,8 @@ API地址：https://api.deepseek.com/chat/completions`}
               <div className="flex-1 overflow-y-auto p-6">
                 <div className="w-full space-y-6">
 
-              {/* 自动化模式面板 */}
-              {currentProjectId && modules.length > 0 && (
+              {/* 自动化模式面板：仅在手工模式下显示，自动模式由后端 orchestrator 处理 extract */}
+              {currentProjectId && modules.length > 0 && executionMode === "manual" && (
                 <AutomationPanel
                   projectId={currentProjectId}
                   modules={modules}

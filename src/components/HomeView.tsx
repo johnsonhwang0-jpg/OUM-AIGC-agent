@@ -1,8 +1,16 @@
 import { useMemo, useState } from "react";
 import {
-  BookOpen, Upload, Scissors, FileText, FileCode, Rocket,
+  BookOpen, Scissors, FileText, FileCode, Rocket,
   Plus, Trash2, RefreshCw,
 } from "lucide-react";
+
+export interface HomeAutomationStatus {
+  status: string;
+  jobId: string;
+  completedSlices: number;
+  failedSlices: number;
+  totalSlices: number;
+}
 
 export interface HomeProject {
   id: string;
@@ -15,6 +23,7 @@ export interface HomeProject {
   sliceCount: number;
   scriptCount: number;
   appCount: number;
+  automationStatus?: HomeAutomationStatus | null;
 }
 
 interface HomeViewProps {
@@ -28,7 +37,7 @@ interface HomeViewProps {
   onRefresh: () => void;
 }
 
-const StepIcon = ({ icon: Icon }: { icon: typeof Upload }) => (
+const StepIcon = ({ icon: Icon }: { icon: typeof BookOpen }) => (
   <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
     <Icon className="w-5 h-5" />
   </div>
@@ -58,7 +67,7 @@ export function HomeView({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const steps = useMemo(() => ([
-    { icon: Upload,    label: isEn ? "Import"    : "导入教材",   desc: isEn ? "Upload PDF" : "上传PDF" },
+    { icon: BookOpen,  label: isEn ? "Preview"  : "预览目录",   desc: isEn ? "TOC view"  : "目录预览" },
     { icon: Scissors,  label: isEn ? "Slice"     : "智能切片",   desc: isEn ? "AI split"  : "AI拆分" },
     { icon: FileText,  label: isEn ? "Extract"   : "提炼内容",   desc: isEn ? "Key points": "知识点" },
     { icon: FileCode,  label: isEn ? "Script"    : "互动脚本",   desc: isEn ? "Scenario" : "场景设计" },
@@ -259,6 +268,26 @@ export function HomeView({
                               }`}>
                                 {project.executionMode === "auto" ? (isEn ? "AUTO" : "自动") : (isEn ? "MANUAL" : "手工")}
                               </span>
+                              {project.automationStatus && (project.automationStatus.status === "running" || project.automationStatus.status === "paused") && (
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border shrink-0 flex items-center gap-1 ${
+                                  project.automationStatus.status === "running"
+                                    ? "text-cyan-300 bg-cyan-500/15 border-cyan-500/30"
+                                    : "text-amber-300 bg-amber-500/15 border-amber-500/30"
+                                }`}>
+                                  <span className="relative flex h-1.5 w-1.5">
+                                    {project.automationStatus.status === "running" && (
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+                                    )}
+                                    <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${project.automationStatus.status === "running" ? "bg-cyan-400" : "bg-amber-400"}`} />
+                                  </span>
+                                  {project.automationStatus.status === "running" ? (isEn ? "Running" : "自动处理中") : (isEn ? "Paused" : "已暂停")}
+                                  {project.automationStatus.totalSlices > 0 && (
+                                    <span className="font-mono tabular-nums">
+                                      {project.automationStatus.completedSlices + project.automationStatus.failedSlices}/{project.automationStatus.totalSlices}
+                                    </span>
+                                  )}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>

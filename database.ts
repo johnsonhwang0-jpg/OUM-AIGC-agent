@@ -1286,6 +1286,31 @@ export async function getLatestAutomationJob(projectId: string): Promise<Automat
   return rowToJob(result[0].values[0], result[0].columns);
 }
 
+// 批量查询多个项目的最近 automation job，避免 N+1
+export async function getLatestJobsForProjects(projectIds: string[]): Promise<Record<string, AutomationJob | null>> {
+  const result: Record<string, AutomationJob | null> = {};
+  for (const id of projectIds) result[id] = null;
+  if (projectIds.length === 0) return result;
+  const database = await getDatabase();
+  const placeholders = projectIds.map(() => "?").join(",");
+  // 取每个项目 createdAt 最大的一条：用窗口函数或子查询。sql.js 支持 ROW_NUMBER
+  const rows = database.exec(
+    `SELECT * FROM (
+       SELECT *, ROW_NUMBER() OVER (PARTITION BY projectId ORDER BY createdAt DESC) AS rn FROM automation_jobs
+       WHERE projectId IN (${placeholders})
+     ) WHERE rn = 1`,
+    projectIds
+  );
+  if (rows.length > 0) {
+    const cols = rows[0].columns;
+    for (const v of rows[0].values) {
+      const job = rowToJob(v, cols);
+      result[job.projectId] = job;
+    }
+  }
+  return result;
+}
+
 export async function updateAutomationJob(jobId: string, updates: Partial<AutomationJob>): Promise<void> {
   const database = await getDatabase();
   const now = new Date().toISOString();

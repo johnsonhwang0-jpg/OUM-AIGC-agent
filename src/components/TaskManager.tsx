@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Play, Pause, X, RefreshCw, Download, ChevronRight, AlertCircle,
   CheckCircle2, Clock, Loader, FileText, Scissors, FileCode, Rocket,
-  Layers, Eye, Edit3, ArrowLeft, Settings as SettingsIcon, Calendar,
-  BookOpen, Database, Cpu
+  Layers, Eye, Edit3, Settings as SettingsIcon, Calendar,
+  BookOpen, Database, Cpu, Minimize2
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useAutomationJob } from "../hooks/useAutomationJob";
@@ -22,7 +22,7 @@ interface TaskManagerProps {
   onJobIdChange: (id: string | null) => void;
   onSwitchToManual: () => void;
   onEditSlice: (moduleId: string) => void;
-  onBack: () => void;
+  onMinimize: () => void;
   onRefreshProject: () => void;
 }
 
@@ -50,7 +50,7 @@ export function TaskManager({
   onJobIdChange,
   onSwitchToManual,
   onEditSlice,
-  onBack,
+  onMinimize,
   onRefreshProject,
 }: TaskManagerProps) {
   const { t, language } = useLanguage();
@@ -178,14 +178,6 @@ export function TaskManager({
       {/* ============ 顶部工具栏 ============ */}
       <div className="shrink-0 bg-[#07070a] border-b border-white/10 px-5 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <button
-            type="button"
-            onClick={onBack}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition cursor-pointer shrink-0"
-            title={t("tmBackToHome")}
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
           <div className="min-w-0">
             <h2 className="text-sm font-bold text-white truncate flex items-center gap-2">
               <Rocket className="w-4 h-4 text-cyan-400 shrink-0" />
@@ -246,6 +238,14 @@ export function TaskManager({
             title={t("tmSwitchManualHint")}
           >
             <SettingsIcon className="w-3 h-3" /> {t("tmSwitchManual")}
+          </button>
+          <button
+            type="button"
+            onClick={onMinimize}
+            className="px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1"
+            title={language === "en" ? "Minimize to background (task keeps running)" : "最小化到后台执行（任务继续运行）"}
+          >
+            <Minimize2 className="w-3 h-3" /> {language === "en" ? "Minimize" : "最小化到后台"}
           </button>
         </div>
       </div>
