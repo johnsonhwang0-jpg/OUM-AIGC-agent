@@ -236,6 +236,18 @@ async function initDatabase(): Promise<Database> {
   `);
 
   database.run(`CREATE INDEX IF NOT EXISTS idx_scripts_project ON module_scripts(projectId)`);
+  // 加唯一索引前清理存量重复行：每个 (projectId, moduleId) 只保留最新一行
+  // 此前 saveModuleScript 每次生成新 id + INSERT OR REPLACE 不触发替换 → 重复行累积
+  database.run(`
+    DELETE FROM module_scripts WHERE id NOT IN (
+      SELECT id FROM module_scripts s1
+      WHERE s1.createdAt = (
+        SELECT MAX(s2.createdAt) FROM module_scripts s2
+        WHERE s2.projectId = s1.projectId AND s2.moduleId = s1.moduleId
+      )
+    )
+  `);
+  database.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_scripts_project_module ON module_scripts(projectId, moduleId)`);
 
   database.run(`
     CREATE TABLE IF NOT EXISTS extracted_content (
@@ -262,6 +274,17 @@ async function initDatabase(): Promise<Database> {
   `);
 
   database.run(`CREATE INDEX IF NOT EXISTS idx_app_code_project ON generated_app_code(projectId)`);
+  // 加唯一索引前清理存量重复行（同 module_scripts）
+  database.run(`
+    DELETE FROM generated_app_code WHERE id NOT IN (
+      SELECT id FROM generated_app_code a1
+      WHERE a1.createdAt = (
+        SELECT MAX(a2.createdAt) FROM generated_app_code a2
+        WHERE a2.projectId = a1.projectId AND a2.moduleId = a1.moduleId
+      )
+    )
+  `);
+  database.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_code_project_module ON generated_app_code(projectId, moduleId)`);
 
   database.run(`
     CREATE TABLE IF NOT EXISTS prompt_templates (
@@ -651,12 +674,15 @@ export async function deleteProject(id: string): Promise<void> {
 
 export async function saveModuleScript(projectId: string, moduleId: string, script: object): Promise<void> {
   const database = await getDatabase();
-  const id = `script-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  // 用 (projectId, moduleId) 派生固定 id，配合唯一索引实现真正的 UPSERT
+  // 此前用 Date.now()+random 生成 id，INSERT OR REPLACE 永不冲突 → 重复行累积
+  const id = `script-${projectId}-${moduleId}`;
   const now = new Date().toISOString();
 
   database.run(
-    `INSERT OR REPLACE INTO module_scripts (id, projectId, moduleId, script, createdAt)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO module_scripts (id, projectId, moduleId, script, createdAt)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(projectId, moduleId) DO UPDATE SET script = excluded.script, createdAt = excluded.createdAt`,
     [id, projectId, moduleId, JSON.stringify(script), now]
   );
   saveDatabase(database);
@@ -727,8 +753,9 @@ export async function saveGeneratedAppCode(projectId: string, moduleId: string, 
   const now = new Date().toISOString();
 
   database.run(
-    `INSERT OR REPLACE INTO generated_app_code (id, projectId, moduleId, code, createdAt)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO generated_app_code (id, projectId, moduleId, code, createdAt)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(projectId, moduleId) DO UPDATE SET code = excluded.code, createdAt = excluded.createdAt`,
     [id, projectId, moduleId, code, now]
   );
   saveDatabase(database);
@@ -755,9 +782,9 @@ export async function getProjectCountStats(projectIds: string[]): Promise<Record
     result[id] = { scriptCount: 0, appCount: 0 };
   }
 
-  // 统计每个项目的脚本数
+  // 统计每个项目的脚本数（按 moduleId 去重，避免历史重复行干扰）
   const scriptsResult = database.exec(
-    `SELECT projectId, COUNT(*) as cnt FROM module_scripts WHERE projectId IN (${projectIds.map(() => '?').join(',')}) GROUP BY projectId`,
+    `SELECT projectId, COUNT(DISTINCT moduleId) as cnt FROM module_scripts WHERE projectId IN (${projectIds.map(() => '?').join(',')}) GROUP BY projectId`,
     projectIds
   );
   if (scriptsResult.length > 0) {
@@ -769,9 +796,9 @@ export async function getProjectCountStats(projectIds: string[]): Promise<Record
     }
   }
 
-  // 统计每个项目的 app 数
+  // 统计每个项目的 app 数（按 moduleId 去重，避免历史重复行干扰）
   const appResult = database.exec(
-    `SELECT projectId, COUNT(*) as cnt FROM generated_app_code WHERE projectId IN (${projectIds.map(() => '?').join(',')}) GROUP BY projectId`,
+    `SELECT projectId, COUNT(DISTINCT moduleId) as cnt FROM generated_app_code WHERE projectId IN (${projectIds.map(() => '?').join(',')}) GROUP BY projectId`,
     projectIds
   );
   if (appResult.length > 0) {

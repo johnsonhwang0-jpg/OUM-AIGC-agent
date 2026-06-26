@@ -262,13 +262,6 @@ export function HomeView({
                               <span className="text-[10px] text-slate-500 truncate">
                                 {project.bookTitle || (isEn ? "No textbook" : "未指定教材")}
                               </span>
-                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border shrink-0 ${
-                                project.executionMode === "auto"
-                                  ? "text-amber-400 bg-amber-500/10 border-amber-500/20"
-                                  : "text-cyan-400 bg-cyan-500/10 border-cyan-500/20"
-                              }`}>
-                                {project.executionMode === "auto" ? (isEn ? "AUTO" : "自动") : (isEn ? "MANUAL" : "手工")}
-                              </span>
                               {project.automationStatus && (project.automationStatus.status === "running" || project.automationStatus.status === "paused") && (
                                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border shrink-0 flex items-center gap-1 ${
                                   project.automationStatus.status === "running"

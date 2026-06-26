@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.2.12";
+export const APP_VERSION = "1.2.13";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,17 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.13",
+    updatedAt: "",
+    gitCommit: "",
+    changes: [
+      "修复 script/app 计数虚高（68/22、29/20）：module_scripts 和 generated_app_code 表加 (projectId, moduleId) 唯一索引，saveModuleScript/saveGeneratedAppCode 改 ON CONFLICT UPSERT（原随机 id + INSERT OR REPLACE 永不冲突导致重复行累积）",
+      "getProjectCountStats 计数改 COUNT(DISTINCT moduleId)（双保险，即使有历史重复行也不会虚高）",
+      "schema 初始化时自动清理存量重复行：每个 (projectId, moduleId) 只保留 MAX(createdAt) 那行",
+      "My Projects 列表移除手工/自动模式标签，只保留自动任务运行状态标记（自动处理中/已暂停）",
+    ],
+  },
   {
     version: "1.2.12",
     updatedAt: "2026-06-26 18:40:30",
