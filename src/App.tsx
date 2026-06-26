@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, Component, ErrorInfo, ReactNode } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, Component, ErrorInfo, ReactNode } from "react";
 import { 
   Upload, BookOpen, Sparkles, Play, Check, Plus, Trash2, Edit3, Layers, 
   MessageSquare, Send, RefreshCw, FileText, Settings, ArrowRight, Gamepad2, 
@@ -59,6 +59,7 @@ import ApiDebugDrawer from "./components/ApiDebugDrawer";
 import { AutomationPanel } from "./components/Automation";
 import { NewProjectModal, type NewProjectResult } from "./components/NewProjectModal";
 import { TaskManager } from "./components/TaskManager";
+import { HomeView, type HomeProject } from "./components/HomeView";
 
 // Extract valid HTML from AI response, stripping markdown fences and explanatory text
 function extractValidHtml(raw: string): string {
@@ -594,6 +595,47 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
     }
     return [];
   }, []);
+
+  // 返回首页：清空当前项目，回到 HomeView
+  const handleBackHome = useCallback(() => {
+    setCurrentProjectId(null);
+    setViewMode("steps");
+    setActiveStep(1);
+    // 清空当前项目的临时状态，避免下次进入时残留
+    setBookTitle("");
+    setPdfFileName("");
+    setPdfData(null);
+    setBookContentText("");
+    setDirectoryItems([]);
+    setModules([]);
+    setExtractedModules({});
+    setMessages([]);
+  }, []);
+
+  // 把 projectList 映射为 HomeView 所需的结构（带 slice/script/app 计数）
+  const homeProjects: HomeProject[] = useMemo(() => {
+    return projectList.map(p => {
+      let sliceCount = 0;
+      try {
+        if (p.modules) {
+          const parsed = JSON.parse(p.modules);
+          if (Array.isArray(parsed)) sliceCount = parsed.length;
+        }
+      } catch { /* ignore */ }
+      return {
+        id: p.id,
+        name: p.name || "",
+        bookTitle: p.bookTitle,
+        pdfFileName: p.pdfFileName,
+        executionMode: p.executionMode === "auto" ? "auto" : "manual",
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+        sliceCount: typeof p.sliceCount === "number" ? p.sliceCount : sliceCount,
+        scriptCount: typeof p.scriptCount === "number" ? p.scriptCount : 0,
+        appCount: typeof p.appCount === "number" ? p.appCount : 0,
+      };
+    });
+  }, [projectList]);
 
   // Load a specific project
   const loadProject = useCallback(async (projectId: string) => {
@@ -2265,7 +2307,7 @@ ${script.conclusion}
 
   return (
     <div className="flex flex-col h-screen bg-[#050508] text-slate-200 font-sans overflow-hidden relative z-10">
-      
+
       {/* Toast Notification */}
       {copyToast.visible && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-emerald-500/90 backdrop-blur-sm text-white px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 text-sm font-semibold animate-bounce">
@@ -2428,78 +2470,76 @@ ${script.conclusion}
           
           {/* Active Title Banner */}
           <div className="bg-[#050508]/80 backdrop-blur-md border-b border-white/10 px-6 py-3 shrink-0 flex items-center justify-between z-10">
-            <div className="flex items-center gap-2 text-slate-200">
-              <Layers className="w-5 h-5 text-cyan-400" />
-              <span className="font-semibold text-sm">
-                {viewMode === "task-manager" ? (language === "en" ? "Auto Mode: Task Manager" : "自动模式：任务管理器") :
-                 activeStep === 1 ? (language === "en" ? "Phase 1: Analyze & Mount Textbook Data" : "第一阶段：分析并挂载教材数据源") : 
-                 activeStep === 2 ? (language === "en" ? "Phase 2: Teaching Outline Dashboard & Rule Editing" : "第二阶段：教学进度大纲大盘与规则编辑") : 
-                 activeStep === 3 ? (language === "en" ? "Phase 3: Slice Text Proofreading & Mapping" : "第三阶段：切片原文校对与映射") :
-                 (language === "en" ? "Phase 4: UI Theme Rendering & Game Code Export" : "第四阶段：UI主题渲染与独立游戏代码导出")}
+            <div className="flex items-center gap-2 text-slate-200 min-w-0">
+              {currentProjectId && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleBackHome}
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition cursor-pointer shrink-0"
+                    title={language === "en" ? "Back to project list" : "返回项目列表"}
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none">
+                      <path d="M10 3l-5 5 5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    {language === "en" ? "back" : "返回"}
+                  </button>
+                  <div className="w-px h-5 bg-white/10 shrink-0" />
+                </>
+              )}
+              <Layers className="w-5 h-5 text-cyan-400 shrink-0" />
+              <span className="font-semibold text-sm truncate">
+                {!currentProjectId ? (language === "en" ? "Book to Game · Home" : "Book to Game · 首页") : (projectInfo?.name || "")}
               </span>
             </div>
-            
+
             {/* Step navigation shortcut pins */}
             <div className="flex items-center gap-2">
-              {/* + 新建项目 */}
-              <button
-                type="button"
-                onClick={() => setShowNewProjectModal(true)}
-                className="text-xs px-3 py-1 rounded-md border transition cursor-pointer bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/30 text-cyan-300 font-semibold flex items-center gap-1 shrink-0"
-                title="新建项目"
-              >
-                <Plus className="w-3 h-3" /> 新建项目
-              </button>
-              {/* 切换视图（任务管理器 ↔ 步骤） */}
-              {currentProjectId && viewMode === "task-manager" && (
-                <button
-                  type="button"
-                  onClick={() => setViewMode("steps")}
-                  className="text-xs px-2.5 py-1 rounded-md border bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-white transition cursor-pointer shrink-0"
-                  title="切换到校验模式步骤视图"
-                >
-                  步骤视图
-                </button>
-              )}
-              {currentProjectId && viewMode === "steps" && executionMode === "auto" && (
-                <button
-                  type="button"
-                  onClick={() => setViewMode("task-manager")}
-                  className="text-xs px-2.5 py-1 rounded-md border bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/30 text-cyan-300 transition cursor-pointer shrink-0"
-                  title="切换到任务管理器"
-                >
-                  任务管理器
-                </button>
-              )}
-              {viewMode === "steps" && (
+              {currentProjectId && (
               <>
-              <button 
-                onClick={() => setActiveStep(1)}
+              {/* 任务管理器：独立按钮，样式与步骤按钮区分 */}
+              <button
+                onClick={() => setViewMode("task-manager")}
+                className={`text-xs px-2.5 py-1 rounded-lg border transition cursor-pointer flex items-center gap-1 shrink-0 font-semibold ${
+                  viewMode === "task-manager"
+                    ? 'bg-amber-500 border-amber-500 text-white shadow-[0_0_15px_rgba(245,158,11,0.4)]'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
+                }`}
+                title={language === "en" ? "Task Manager" : "任务管理器"}
+              >
+                <Layers className="w-3 h-3" />
+                {language === "en" ? "TaskManager" : "任务管理器"}
+              </button>
+              <div className="w-px h-5 bg-white/10 shrink-0" />
+              {/* 步骤导航：Preview → Slice → Extract → Script → Build App */}
+              <button
+                onClick={() => { setViewMode("steps"); setActiveStep(1); }}
                 className={`text-xs px-2.5 py-1 rounded-md border transition cursor-pointer ${
-                  activeStep === 1 
-                    ? 'bg-cyan-500 border-cyan-500 text-white font-semibold shadow-[0_0_15px_rgba(6,182,212,0.4)]' 
+                  viewMode === "steps" && activeStep === 1
+                    ? 'bg-cyan-500 border-cyan-500 text-white font-semibold shadow-[0_0_15px_rgba(6,182,212,0.4)]'
                     : 'bg-white/5 border-white/10 text-slate-450 text-slate-400 hover:bg-white/10 hover:text-white'
                 }`}
               >
-                {language === "en" ? "1. Import" : "1. 导入课件"}
+                {language === "en" ? "1. Preview" : "1. 预览目录"}
               </button>
-              <button 
-                onClick={() => modules.length > 0 && setActiveStep(2)}
+              <button
+                onClick={() => modules.length > 0 && (setViewMode("steps"), setActiveStep(2))}
                 disabled={modules.length === 0}
                 className={`text-xs px-2.5 py-1 rounded-md border transition cursor-pointer ${
                   modules.length === 0 ? 'opacity-30 cursor-not-allowed' : ''
                 } ${
-                  activeStep === 2 
-                    ? 'bg-cyan-500 border-cyan-500 text-white font-semibold shadow-[0_0_15px_rgba(6,182,212,0.4)]' 
+                  viewMode === "steps" && activeStep === 2
+                    ? 'bg-cyan-500 border-cyan-500 text-white font-semibold shadow-[0_0_15px_rgba(6,182,212,0.4)]'
                     : 'bg-white/5 border-white/10 text-slate-450 text-slate-400 hover:bg-white/10 hover:text-white'
                 }`}
               >
                 {language === "en" ? "2. Slice" : "2. 课程切片"}
               </button>
-              <button 
+              <button
                 onClick={async () => {
                   if (modules.length === 0) return;
                   await reExtractPdfText();
+                  setViewMode("steps");
                   setActiveStep(3);
                   setActiveTab('original');
                   if (modules.length > 0) {
@@ -2510,20 +2550,21 @@ ${script.conclusion}
                 className={`text-xs px-2.5 py-1 rounded-md border transition cursor-pointer ${
                   modules.length === 0 ? 'opacity-30 cursor-not-allowed' : ''
                 } ${
-                  activeStep === 3 
-                    ? 'bg-cyan-500 border-cyan-500 text-white font-semibold shadow-[0_0_15px_rgba(6,182,212,0.4)]' 
+                  viewMode === "steps" && activeStep === 3
+                    ? 'bg-cyan-500 border-cyan-500 text-white font-semibold shadow-[0_0_15px_rgba(6,182,212,0.4)]'
                     : 'bg-white/5 border-white/10 text-slate-450 text-slate-400 hover:bg-white/10 hover:text-white'
                 }`}
               >
                 {language === "en" ? "3. Extract" : "3. 切片内容提取"}
               </button>
-              <button 
+              <button
                 onClick={async () => {
                   if (modules.length === 0) return;
                   await reExtractPdfText();
                   if (!activeModuleId || !modules.some(m => m.id === activeModuleId)) {
                     setActiveModuleId(modules[0].id);
                   }
+                  setViewMode("steps");
                   setActiveTab('simulator');
                   setActiveStep(4);
                 }}
@@ -2531,21 +2572,21 @@ ${script.conclusion}
                 className={`text-xs px-2.5 py-1 rounded-md border transition cursor-pointer ${
                   modules.length === 0 ? 'opacity-30 cursor-not-allowed' : ''
                 } ${
-                  activeStep === 4 
-                    ? 'bg-cyan-500 border-cyan-500 text-white font-semibold shadow-[0_0_15px_rgba(6,182,212,0.4)]' 
+                  viewMode === "steps" && activeStep === 4
+                    ? 'bg-cyan-500 border-cyan-500 text-white font-semibold shadow-[0_0_15px_rgba(6,182,212,0.4)]'
                     : 'bg-white/5 border-white/10 text-slate-450 text-slate-400 hover:bg-white/10 hover:text-white'
                 }`}
               >
                 {language === "en" ? "4. Script" : "4. 互动脚本生成"}
               </button>
-              <button 
-                onClick={() => modules.some(m => m.scriptStatus === 'completed') && setActiveStep(5)}
+              <button
+                onClick={() => modules.some(m => m.scriptStatus === 'completed') && (setViewMode("steps"), setActiveStep(5))}
                 disabled={!modules.some(m => m.scriptStatus === 'completed')}
                 className={`text-xs px-2.5 py-1 rounded-md border transition cursor-pointer ${
                   !modules.some(m => m.scriptStatus === 'completed') ? 'opacity-30 cursor-not-allowed' : ''
                 } ${
-                  activeStep === 5 
-                    ? 'bg-cyan-500 border-cyan-500 text-white font-semibold shadow-[0_0_15px_rgba(6,182,212,0.4)]' 
+                  viewMode === "steps" && activeStep === 5
+                    ? 'bg-cyan-500 border-cyan-500 text-white font-semibold shadow-[0_0_15px_rgba(6,182,212,0.4)]'
                     : 'bg-white/5 border-white/10 text-slate-450 text-slate-400 hover:bg-white/10 hover:text-white'
                 }`}
               >
@@ -2555,6 +2596,36 @@ ${script.conclusion}
               )}
             </div>
           </div>
+
+          {/* 首页：未选择项目时显示使用说明 + 项目列表 */}
+          {!currentProjectId && (
+            <HomeView
+              projects={homeProjects}
+              language={language}
+              onSelectProject={loadProject}
+              onDeleteProject={handleDeleteProject}
+              onBatchDelete={async (ids) => {
+                if (ids.length === 0) return;
+                if (!confirm(language === "en" ? `Are you sure you want to delete the selected ${ids.length} projects? This cannot be undone.` : `确定要删除选中的 ${ids.length} 个项目吗？此操作不可撤销。`)) return;
+                try {
+                  await Promise.all(ids.map(id => fetch(`/api/projects/${id}`, { method: "DELETE" })));
+                  if (currentProjectId && ids.includes(currentProjectId)) {
+                    setCurrentProjectId(null);
+                    setModules([]);
+                    setBookTitle("");
+                    setBookContentText("");
+                    setDirectoryItems([]);
+                    setSavedScripts({});
+                  }
+                  await loadProjectList();
+                } catch (err) {
+                  console.error("Failed to batch delete projects:", err);
+                }
+              }}
+              onNewProject={() => setShowNewProjectModal(true)}
+              onRefresh={loadProjectList}
+            />
+          )}
 
           {/* 自动模式：任务管理器覆盖层 */}
           {viewMode === "task-manager" && currentProjectId && (
@@ -2582,225 +2653,11 @@ ${script.conclusion}
           )}
 
           {/* Step 1 View: Load Book and Uploading PDF */}
-          {viewMode === "steps" && activeStep === 1 && (
+          {viewMode === "steps" && activeStep === 1 && currentProjectId && (
             <div className="flex-1 flex flex-col min-h-0 w-full animate-fadeIn z-10 overflow-hidden">
               {/* Scrollable Container */}
               <div className="flex-1 overflow-y-auto p-6">
                 <div className="max-w-4xl mx-auto space-y-6">
-                  
-                  {/* Introduction Call-out Section */}
-                  <div className="bg-gradient-to-br from-cyan-950/40 to-blue-950/40 border border-cyan-500/30 rounded-2xl p-6 shadow-lg">
-                    <div className="flex items-center gap-2 mb-4">
-                      <div className="p-2.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-xl shrink-0">
-                        <BookOpen className="w-5 h-5" />
-                      </div>
-                      <h3 className="font-semibold text-base font-display text-white">
-                        {language === "en" ? "5 Steps: Textbook → Interactive Games" : "5步：教材变互动游戏"}
-                      </h3>
-                    </div>
-                    <div className="flex items-center justify-between gap-1">
-                      {[
-                        { icon: Upload, label: language === "en" ? "Import" : "导入教材", desc: language === "en" ? "Upload PDF" : "上传PDF" },
-                        { icon: Scissors, label: language === "en" ? "Slice" : "智能切片", desc: language === "en" ? "AI split" : "AI拆分" },
-                        { icon: FileText, label: language === "en" ? "Extract" : "提炼内容", desc: language === "en" ? "Key points" : "知识点" },
-                        { icon: FileCode, label: language === "en" ? "Script" : "互动脚本", desc: language === "en" ? "Scenario" : "场景设计" },
-                        { icon: Rocket, label: language === "en" ? "Build App" : "生成游戏", desc: language === "en" ? "HTML game" : "HTML游戏" },
-                      ].map((step, i) => (
-                        <div key={i} className="flex items-center flex-1">
-                          <div className="flex flex-col items-center gap-1.5 flex-1">
-                            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
-                              <step.icon className="w-5 h-5" />
-                            </div>
-                            <span className="text-xs font-semibold text-white text-center">{step.label}</span>
-                            <span className="text-[10px] text-slate-500 text-center">{step.desc}</span>
-                          </div>
-                          {i < 4 && (
-                            <div className="flex items-center text-cyan-500/30 shrink-0 px-1">
-                              <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
-                                <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                              </svg>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Project List Panel */}
-                  {showProjectList && (
-                    <div className="bg-gradient-to-br from-cyan-950/40 to-blue-950/40 border border-cyan-500/30 rounded-2xl p-6 shadow-lg backdrop-blur-sm">
-                      <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-semibold text-cyan-400 flex items-center gap-2">
-                          <FileText className="w-4 h-4" />
-                          {language === "en" ? "My Projects" : "我的项目列表"}
-                        </h4>
-                        <div className="flex items-center gap-3">
-                          {selectedProjects.size > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-                                {language === "en" ? `Selected ${selectedProjects.size}` : `已选 ${selectedProjects.size} 项`}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={handleBatchDelete}
-                                className="text-[10px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 px-2 py-0.5 rounded-full border border-red-500/20 transition cursor-pointer flex items-center gap-1"
-                                title={t("batchDelete")}
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                {t("batchDelete")}
-                              </button>
-                            </div>
-                          )}
-                          <button
-                            type="button"
-                            onClick={selectAllProjects}
-                            className="text-[10px] font-bold text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded-full border border-white/10 transition cursor-pointer"
-                          >
-                            {selectedProjects.size === projectList.length ? (language === "en" ? "Deselect All" : "取消全选") : (language === "en" ? "Select All" : "全选")}
-                          </button>
-                          <span className="text-[10px] font-bold text-slate-500 bg-white/5 px-2 py-0.5 rounded-full border border-white/10">
-                            {projectList.length} {t("projectCount")}
-                          </span>
-                        </div>
-                      </div>
-                      {projectList.length === 0 ? (
-                        <p className="text-xs text-slate-400 text-center py-8">{t("noProjectsSaved")}</p>
-                      ) : (
-                        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                          {projectList.map(project => (
-                            <div
-                              key={project.id}
-                              className={`flex items-center justify-between p-3 border rounded-xl hover:bg-white/[0.07] active:scale-[0.99] transition-all duration-200 group cursor-pointer ${
-                                selectedProjects.has(project.id)
-                                  ? 'border-cyan-500/60 bg-cyan-500/10'
-                                  : 'border-white/10 bg-white/5 hover:border-cyan-500/40'
-                              }`}
-                              onClick={() => loadProject(project.id)}
-                            >
-                              <div className="flex items-center gap-3">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleProjectSelection(project.id);
-                                  }}
-                                  className={`w-5 h-5 rounded border-2 flex items-center justify-center transition cursor-pointer shrink-0 ${
-                                    selectedProjects.has(project.id)
-                                      ? 'border-cyan-500 bg-cyan-500 text-white'
-                                      : 'border-white/20 hover:border-white/40'
-                                  }`}
-                                >
-                                  {selectedProjects.has(project.id) && (
-                                    <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none">
-                                      <path d="M2 6L5 9L10 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                    </svg>
-                                  )}
-                                </button>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
-                                      <FileText className="w-3.5 h-3.5" />
-                                    </div>
-                                    <div>
-                                      <div className="flex items-center gap-2">
-                                        <p className="text-sm font-semibold text-white truncate leading-tight">{project.name}</p>
-                                        <span className="text-[9px] text-slate-600 font-mono bg-slate-800/50 px-1.5 py-0.5 rounded shrink-0" title={project.id}>
-                                          {project.id.split('-').slice(-2).join('-')}
-                                        </span>
-                                      </div>
-                                      <p className="text-[11px] text-slate-400 mt-0.5">
-                                        {project.bookTitle || (language === "en" ? "No textbook specified" : "未指定教材")}
-                                        {project.modules ? ` • ${JSON.parse(project.modules).length} ${language === "en" ? "slices" : "个切片"}` : ""}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <p className="text-[10px] text-slate-600 mt-1 ml-9">
-                                    {new Date(project.updatedAt).toLocaleString("zh-CN")}
-                                  </p>
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteProject(project.id);
-                                }}
-                                className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition opacity-0 group-hover:opacity-100"
-                                title={t("deleteProject")}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-              {/* Custom PDF File Upload box */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-                    <Upload className="w-4 h-4 text-cyan-400" />
-                    {language === "en" ? "Upload Local PDF for Custom Textbook" : "上传本地 PDF 开辟自定义教材"}
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => setShowProjectList(!showProjectList)}
-                    className="px-4 py-2 text-xs font-bold bg-cyan-500 hover:bg-cyan-400 active:scale-95 text-white shadow-[0_0_12px_rgba(6,182,212,0.4)] hover:shadow-[0_0_16px_rgba(6,182,212,0.6)] rounded-xl transition-all duration-200 flex items-center gap-1.5 cursor-pointer shrink-0"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    {language === "en" ? `My Projects (${projectList.length})` : `我的项目 (${projectList.length})`}
-                  </button>
-                </div>
-
-                <div className="border border-dashed border-white/20 rounded-2xl bg-white/5 p-8 flex flex-col items-center justify-center text-center relative hover:border-cyan-500 hover:bg-white/10 transition">
-                  <input 
-                    type="file"
-                    accept="application/pdf"
-                    onChange={handlePdfUpload}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
-                  />
-                  
-                  <div className="p-3 bg-white/5 rounded-full text-slate-300 mb-3 border border-white/10">
-                    <FileText className="w-8 h-8" />
-                  </div>
-
-                  {pdfFileName ? (
-                    <div className="space-y-1.5">
-                      <span className="text-sm font-medium text-emerald-400 flex items-center gap-1.5 justify-center">
-                        <Check className="w-4 h-4" /> {t("boundDocument")}：{pdfFileName}
-                      </span>
-                      <p className="text-xs text-slate-500">{t("clickOrDragReplace")}</p>
-                    </div>
-                  ) : pdfData ? (
-                    <div className="space-y-1.5">
-                      <span className="text-sm font-medium text-cyan-400 flex items-center gap-1.5 justify-center">
-                        <Check className="w-4 h-4" /> {t("loadedFromProject")}
-                      </span>
-                      <p className="text-xs text-slate-500">{t("pdfRestoredReplace")}</p>
-                    </div>
-                  ) : (
-                    <div>
-                      <p className="text-sm font-semibold text-white">
-                        {language === "en" ? "Drag PDF here or click to upload" : "将 PDF 电子书拖拽至此，或点此浏览上传"}
-                      </p>
-                      <p className="text-xs text-slate-550 text-slate-500 mt-1">
-                        {language === "en" ? "Supports any PDF format, client-side auto-extraction" : "支持任意格式 PDF 发掘内容，客户端自动抽取最核心物理内容发送大模型"}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Extract loading indicator */}
-                  {pdfReaderLoading && (
-                    <div className="mt-4 p-3 bg-cyan-950/40 border border-cyan-500/30 rounded-xl flex items-center gap-2.5 max-w-md mx-auto">
-                      <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />
-                      <span className="text-xs text-cyan-200 font-medium">{pdfExtractionProgress}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
               {/* Text Input edit fallback box */}
               <div className="space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">

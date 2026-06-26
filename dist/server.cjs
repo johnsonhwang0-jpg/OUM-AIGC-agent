@@ -57,6 +57,7 @@ __export(database_exports, {
   getModuleScripts: () => getModuleScripts,
   getPendingTasksForSlice: () => getPendingTasksForSlice,
   getProject: () => getProject,
+  getProjectCountStats: () => getProjectCountStats,
   getPromptTemplate: () => getPromptTemplate,
   getPromptVersions: () => getPromptVersions,
   saveExtractedContent: () => saveExtractedContent,
@@ -566,6 +567,39 @@ async function getGeneratedAppCode(projectId, moduleId) {
     return null;
   }
   return result[0].values[0][0];
+}
+async function getProjectCountStats(projectIds) {
+  if (projectIds.length === 0) return {};
+  const database = await getDatabase();
+  const result = {};
+  for (const id of projectIds) {
+    result[id] = { scriptCount: 0, appCount: 0 };
+  }
+  const scriptsResult = database.exec(
+    `SELECT projectId, COUNT(*) as cnt FROM module_scripts WHERE projectId IN (${projectIds.map(() => "?").join(",")}) GROUP BY projectId`,
+    projectIds
+  );
+  if (scriptsResult.length > 0) {
+    const cols = scriptsResult[0].columns;
+    for (const row of scriptsResult[0].values) {
+      const pid = row[cols.indexOf("projectId")];
+      const cnt = row[cols.indexOf("cnt")];
+      if (result[pid]) result[pid].scriptCount = cnt;
+    }
+  }
+  const appResult = database.exec(
+    `SELECT projectId, COUNT(*) as cnt FROM generated_app_code WHERE projectId IN (${projectIds.map(() => "?").join(",")}) GROUP BY projectId`,
+    projectIds
+  );
+  if (appResult.length > 0) {
+    const cols = appResult[0].columns;
+    for (const row of appResult[0].values) {
+      const pid = row[cols.indexOf("projectId")];
+      const cnt = row[cols.indexOf("cnt")];
+      if (result[pid]) result[pid].appCount = cnt;
+    }
+  }
+  return result;
 }
 async function getAllPromptTemplates(aiEntry) {
   const database = await getDatabase();
@@ -2266,8 +2300,26 @@ app.get("/api/health", (req, res) => {
 app.get("/api/projects", async (req, res) => {
   try {
     const projects = await getAllProjects();
-    console.log("\u{1F4CB} GET /api/projects returning:", projects.length, "projects");
-    res.json(projects);
+    const stats = await getProjectCountStats(projects.map((p) => p.id));
+    const enriched = projects.map((p) => {
+      let sliceCount = 0;
+      try {
+        if (p.modules) {
+          const parsed = JSON.parse(p.modules);
+          if (Array.isArray(parsed)) sliceCount = parsed.length;
+        }
+      } catch {
+      }
+      const s = stats[p.id] || { scriptCount: 0, appCount: 0 };
+      return {
+        ...p,
+        sliceCount,
+        scriptCount: s.scriptCount,
+        appCount: s.appCount
+      };
+    });
+    console.log("\u{1F4CB} GET /api/projects returning:", enriched.length, "projects");
+    res.json(enriched);
   } catch (error) {
     console.error("\u274C Failed to get projects:", error);
     res.status(500).json({ error: "Failed to get projects" });

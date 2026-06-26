@@ -745,6 +745,47 @@ export async function getGeneratedAppCode(projectId: string, moduleId: string): 
   return result[0].values[0][0] as string;
 }
 
+// 批量统计：用于首页项目列表展示 slice/script/app 完成进度
+// 单次 GROUP BY 查询避免 N+1 问题
+export async function getProjectCountStats(projectIds: string[]): Promise<Record<string, { scriptCount: number; appCount: number }>> {
+  if (projectIds.length === 0) return {};
+  const database = await getDatabase();
+  const result: Record<string, { scriptCount: number; appCount: number }> = {};
+  for (const id of projectIds) {
+    result[id] = { scriptCount: 0, appCount: 0 };
+  }
+
+  // 统计每个项目的脚本数
+  const scriptsResult = database.exec(
+    `SELECT projectId, COUNT(*) as cnt FROM module_scripts WHERE projectId IN (${projectIds.map(() => '?').join(',')}) GROUP BY projectId`,
+    projectIds
+  );
+  if (scriptsResult.length > 0) {
+    const cols = scriptsResult[0].columns;
+    for (const row of scriptsResult[0].values) {
+      const pid = row[cols.indexOf("projectId")] as string;
+      const cnt = row[cols.indexOf("cnt")] as number;
+      if (result[pid]) result[pid].scriptCount = cnt;
+    }
+  }
+
+  // 统计每个项目的 app 数
+  const appResult = database.exec(
+    `SELECT projectId, COUNT(*) as cnt FROM generated_app_code WHERE projectId IN (${projectIds.map(() => '?').join(',')}) GROUP BY projectId`,
+    projectIds
+  );
+  if (appResult.length > 0) {
+    const cols = appResult[0].columns;
+    for (const row of appResult[0].values) {
+      const pid = row[cols.indexOf("projectId")] as string;
+      const cnt = row[cols.indexOf("cnt")] as number;
+      if (result[pid]) result[pid].appCount = cnt;
+    }
+  }
+
+  return result;
+}
+
 // Prompt Template functions
 export async function getAllPromptTemplates(aiEntry?: string): Promise<PromptTemplate[]> {
   const database = await getDatabase();
