@@ -30,6 +30,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.9",
     updatedAt: "2026-06-26 21:00:00",
+    gitCommit: "fa9f101",
     changes: [
       "修复自动模式 extract 页码偏移量（pdfPageOffset）始终为 0 的严重 bug：根因是 server.ts PUT /api/projects/:id 路由解构遗漏 pdfPageOffset 字段，导致前端写入请求被丢弃，DB 永远保持默认值 0，后端 orchestrator 读取不到正确 offset；手工流程因用 React state 不受影响，自动流程后端读 DB 一直错误",
       "修复进入有活跃任务的 TaskManager 仍显示「开始自动生成」按钮的问题：loadProject 不恢复 automationJobId，现 /api/projects/:id 附加 latestJob 字段，loadProject 检测到 running/paused 自动恢复 automationJobId，进入即显示进度",
