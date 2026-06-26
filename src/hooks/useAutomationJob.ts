@@ -202,16 +202,20 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
 
   const pause = useCallback(async () => {
     if (!jobId) return;
+    // 乐观更新：立即反映到 UI，不等 SSE 回程（此前要等 orchestrator 当前 task 跑完才响应）
+    setJob(prev => prev ? { ...prev, status: "paused" } : prev);
     await fetch(`/api/automation/${jobId}/pause`, { method: "POST" });
   }, [jobId]);
 
   const resume = useCallback(async () => {
     if (!jobId) return;
+    setJob(prev => prev ? { ...prev, status: "running" } : prev);
     await fetch(`/api/automation/${jobId}/resume`, { method: "POST" });
   }, [jobId]);
 
   const cancel = useCallback(async () => {
     if (!jobId) return;
+    setJob(prev => prev ? { ...prev, status: "cancelled" } : prev);
     await fetch(`/api/automation/${jobId}/cancel`, { method: "POST" });
   }, [jobId]);
 

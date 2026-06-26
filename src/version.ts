@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.2.11";
+export const APP_VERSION = "1.2.12";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,16 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.12",
+    updatedAt: "",
+    gitCommit: "",
+    changes: [
+      "修复暂停后 script 7/20 误显 completed：getStageStatus 改用 doneCount >= modules.length 判断完成（原 every() 在 task 数 < 切片数时误判）",
+      "修复 pause/resume/cancel 反应慢：三个操作加乐观更新 setJob，UI 立即切换状态不等 SSE 回程（orchestrator 协作式中断，实际停止需等当前 AI 调用完成）",
+      "修复 cancel 后重启清空已有 script/app-code：runSliceScript 开头查 getModuleScripts 有则 skipped，runSliceAppCode 开头查 getGeneratedAppCode 有则 skipped（与 extract 断点续传逻辑一致）",
+    ],
+  },
   {
     version: "1.2.11",
     updatedAt: "2026-06-26 17:36:28",

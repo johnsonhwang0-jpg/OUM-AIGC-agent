@@ -134,10 +134,13 @@ export function TaskManager({
     // extract / script / app-code（build 阶段对应 app-code 任务）
     const taskStage = stageKey === "build" ? "app-code" : stageKey;
     const stageTasks = tasks.filter(t => t.stage === taskStage);
-    if (stageTasks.length === 0) return "pending";
-    if (stageTasks.every(t => t.status === "completed" || t.status === "skipped")) return "completed";
+    const doneCount = stageTasks.filter(t => t.status === "completed" || t.status === "skipped").length;
+    // 只有所有切片都完成才算 completed（此前用 every() 在 task 数 < 切片数时会误判）
+    if (modules.length > 0 && doneCount >= modules.length) return "completed";
     if (stageTasks.some(t => t.status === "failed")) return "failed";
     if (stageTasks.some(t => t.status === "running")) return "running";
+    // job 运行中且已有部分完成 → 进行中；否则 → 等待中（含暂停时部分完成）
+    if (isRunning && doneCount > 0) return "running";
     return "pending";
   };
 

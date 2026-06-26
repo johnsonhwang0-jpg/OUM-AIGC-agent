@@ -409,10 +409,32 @@ async function runSliceScript(
   // ---- 阶段 2: script ----
   // 读取已保存的提取内容（可能来自本任务或之前手动提取）
   let scriptMarkdown = "";
-  const { getExtractedContents } = await import("./database.js");
+  const { getExtractedContents, getModuleScripts } = await import("./database.js");
   const extractedRows = await getExtractedContents(projectId);
   const matchedExtract = extractedRows.find(e => e.moduleId === slice.id);
   const contentForScript = matchedExtract?.content || extractedContent || `General academic curriculum rules relative to ${slice.title}`;
+
+  // 断点续传：检查是否已有该切片的脚本（cancel 后重启不重新生成）
+  const existingScripts = await getModuleScripts(projectId);
+  const matchedScript = existingScripts.find(s => s.moduleId === slice.id);
+  if (matchedScript) {
+    try {
+      const parsed = JSON.parse(matchedScript.script);
+      scriptMarkdown = parsed.markdown || matchedScript.script;
+    } catch {
+      scriptMarkdown = matchedScript.script;
+    }
+    const existingScriptTasks = await getTasksForSlice(jobId, slice.id);
+    let skipTask = existingScriptTasks.find(t => t.stage === "script") || null;
+    if (!skipTask) {
+      skipTask = await createAutomationTask({
+        jobId, projectId, moduleId: slice.id, sliceId: slice.sliceId || null, sliceTitle: slice.title, stage: "script",
+      });
+    }
+    await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: new Date().toISOString() });
+    emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "script", status: "skipped" } });
+    return { scripted: true, markdown: scriptMarkdown };
+  }
 
   const existingScriptTasks = await getTasksForSlice(jobId, slice.id);
   const scriptTask = existingScriptTasks.find(t => t.stage === "script") || null;
@@ -468,8 +490,23 @@ async function runSliceAppCode(
   }
 
   // ---- 阶段 3: app-code ----
+  // 断点续传：检查是否已有该切片的 app-code（cancel 后重启不重新生成）
+  const { getModuleScripts, getGeneratedAppCode } = await import("./database.js");
+  const existingAppCode = await getGeneratedAppCode(projectId, slice.id);
+  if (existingAppCode) {
+    const existingAppTasks = await getTasksForSlice(jobId, slice.id);
+    let skipTask = existingAppTasks.find(t => t.stage === "app-code") || null;
+    if (!skipTask) {
+      skipTask = await createAutomationTask({
+        jobId, projectId, moduleId: slice.id, sliceId: slice.sliceId || null, sliceTitle: slice.title, stage: "app-code",
+      });
+    }
+    await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: new Date().toISOString() });
+    emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "app-code", status: "skipped" } });
+    return { built: true };
+  }
+
   // 读取已保存的脚本（可能来自本任务或之前手动生成）
-  const { getModuleScripts } = await import("./database.js");
   const scripts = await getModuleScripts(projectId);
   const matchedScript = scripts.find(s => s.moduleId === slice.id);
   let finalMarkdown = scriptMarkdown;
