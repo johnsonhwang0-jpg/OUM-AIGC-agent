@@ -38,8 +38,8 @@ export interface VersionEntry {
 export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.13",
-    updatedAt: "",
-    gitCommit: "",
+    updatedAt: "2026-06-26 22:24:02",
+    gitCommit: "a09733b",
     changes: [
       "修复 script/app 计数虚高（68/22、29/20）：module_scripts 和 generated_app_code 表加 (projectId, moduleId) 唯一索引，saveModuleScript/saveGeneratedAppCode 改 ON CONFLICT UPSERT（原随机 id + INSERT OR REPLACE 永不冲突导致重复行累积）",
       "getProjectCountStats 计数改 COUNT(DISTINCT moduleId)（双保险，即使有历史重复行也不会虚高）",
