@@ -38,8 +38,8 @@ export interface VersionEntry {
 export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.11",
-    updatedAt: "",
-    gitCommit: "",
+    updatedAt: "2026-06-26 17:36:28",
+    gitCommit: "e2a4317",
     changes: [
       "修复 MiniStage 误导性绿色：script 就绪在 build 阶段从绿色改为中性灰，只有当前阶段的 completed 才显示绿色完成标志（MiniStage 新增 isCurrent 参数）",
       "TaskManager 顶部 bar 重构为 4 种状态：未启用/已暂停/执行中/全部完成，按状态切换按钮组（启用/恢复/暂停/取消/查看详情/下载全部）；移除启动卡片，看板始终显示；移除冗余的「切换校验模式」按钮（功能与最小化重复）",
