@@ -52,3 +52,35 @@
   animation: slideInRight 0.3s ease-out;
 }
 
+/* TaskManager 进行中节点：亮带从顶部连续流向底部（与时间线向下方向一致） */
+@keyframes flowDown {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(300%);
+  }
+}
+
+.tm-stage-running {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.tm-stage-running::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  height: 50%;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(6, 182, 212, 0.22) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 0;
+  animation: flowDown 2.2s linear infinite;
+}
+

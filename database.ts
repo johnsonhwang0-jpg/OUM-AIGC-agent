@@ -1410,10 +1410,11 @@ export async function updateAutomationTask(taskId: string, updates: Partial<Auto
   saveDatabase(database);
 }
 
-// 获取某个切片在该 job 下处于 pending 的任务（用于断点续传）
-export async function getPendingTasksForSlice(jobId: string, moduleId: string): Promise<AutomationTask[]> {
+// 获取某个切片在该 job 下的所有任务（用于断点续传：resume 时需复用已存在 task，避免创建重复）
+// 此前只查 status='pending'，导致 resume 时查不到已完成/跳过的 task → 创建新 task → 计数虚高
+export async function getTasksForSlice(jobId: string, moduleId: string): Promise<AutomationTask[]> {
   const database = await getDatabase();
-  const result = database.exec(`SELECT * FROM automation_tasks WHERE jobId = ? AND moduleId = ? AND status = 'pending' ORDER BY createdAt ASC`, [jobId, moduleId]);
+  const result = database.exec(`SELECT * FROM automation_tasks WHERE jobId = ? AND moduleId = ? ORDER BY createdAt ASC`, [jobId, moduleId]);
   if (result.length === 0) return [];
   return result[0].values.map(row => rowToTask(row, result[0].columns));
 }

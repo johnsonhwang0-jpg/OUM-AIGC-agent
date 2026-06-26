@@ -20,7 +20,7 @@ import {
   getAutomationTasksByJob,
   getAutomationTask,
   updateAutomationTask,
-  getPendingTasksForSlice,
+  getTasksForSlice,
   saveExtractedContent,
   saveModuleScript,
   saveGeneratedAppCode,
@@ -288,7 +288,7 @@ async function runSliceExtract(
       // 断点续传：查找或创建 task 标记为 skipped，emit 时必须带 taskId
       // 否则前端 useAutomationJob 的 task_complete 监听器 findIndex 找不到（taskId=undefined）
       // 会触发 fetchSnapshot，N 个切片 × 多阶段 = fetchSnapshot 风暴 → React 崩溃灰屏
-      const existingExtractTasks = await getPendingTasksForSlice(jobId, slice.id);
+      const existingExtractTasks = await getTasksForSlice(jobId, slice.id);
       let skipTask = existingExtractTasks.find(t => t.stage === "extract") || null;
       if (!skipTask) {
         skipTask = await createAutomationTask({
@@ -298,7 +298,7 @@ async function runSliceExtract(
       await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: new Date().toISOString() });
       emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "extract", status: "skipped" } });
     } else {
-      const existingExtractTasks = await getPendingTasksForSlice(jobId, slice.id);
+      const existingExtractTasks = await getTasksForSlice(jobId, slice.id);
       const extractTask = existingExtractTasks.find(t => t.stage === "extract") || null;
 
       await runTaskWithRetry(jobId, projectId, slice, "extract", extractTask, async () => {
@@ -414,7 +414,7 @@ async function runSliceScript(
   const matchedExtract = extractedRows.find(e => e.moduleId === slice.id);
   const contentForScript = matchedExtract?.content || extractedContent || `General academic curriculum rules relative to ${slice.title}`;
 
-  const existingScriptTasks = await getPendingTasksForSlice(jobId, slice.id);
+  const existingScriptTasks = await getTasksForSlice(jobId, slice.id);
   const scriptTask = existingScriptTasks.find(t => t.stage === "script") || null;
 
   await runTaskWithRetry(jobId, projectId, slice, "script", scriptTask, async () => {
@@ -492,7 +492,7 @@ async function runSliceAppCode(
     return { built: false };
   }
 
-  const existingAppTasks = await getPendingTasksForSlice(jobId, slice.id);
+  const existingAppTasks = await getTasksForSlice(jobId, slice.id);
   const appTask = existingAppTasks.find(t => t.stage === "app-code") || null;
 
   await runTaskWithRetry(jobId, projectId, slice, "app-code", appTask, async () => {

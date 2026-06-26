@@ -2720,11 +2720,16 @@ ${script.conclusion}
                 projectInfo={projectInfo}
                 jobId={automationJobId}
                 onJobIdChange={setAutomationJobId}
-                onSwitchToManual={() => setViewMode("steps")}
                 onEditSlice={(moduleId) => {
                   setActiveModuleId(moduleId);
                   setViewMode("steps");
                   setActiveStep(3);
+                }}
+                appCount={Object.keys(moduleAppCodes).length}
+                onViewBuild={() => {
+                  // 查看详情：进入 steps 视图的 build app 步骤（activeStep=5）
+                  setViewMode("steps");
+                  setActiveStep(5);
                 }}
                 onMinimize={async () => {
                   // 最小化到后台：刷新项目数据（让 steps 视图显示已完成的切片/脚本/app），服务端任务继续运行

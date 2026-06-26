@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.2.10";
+export const APP_VERSION = "1.2.11";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,21 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.11",
+    updatedAt: "",
+    gitCommit: "",
+    changes: [
+      "修复 MiniStage 误导性绿色：script 就绪在 build 阶段从绿色改为中性灰，只有当前阶段的 completed 才显示绿色完成标志（MiniStage 新增 isCurrent 参数）",
+      "TaskManager 顶部 bar 重构为 4 种状态：未启用/已暂停/执行中/全部完成，按状态切换按钮组（启用/恢复/暂停/取消/查看详情/下载全部）；移除启动卡片，看板始终显示；移除冗余的「切换校验模式」按钮（功能与最小化重复）",
+      "顶部进度条改为状态 alert：自动模式提示约 30 分钟生成全部互动 HTML 可最小化，手工模式提示可最小化或开启自动化；状态点移至最右，模式标签加粗闪动",
+      "左侧时间线改为竖向 stepper：节点用圆点+竖向连接线（completed 实心 emerald/running 实心 cyan 脉冲/failed red/pending 空心灰），6 个节点撑满容器高度，进行中节点显示 N/总数计数",
+      "运行中节点按钮新增从上到下流动渐变动效（tm-stage-running 伪元素 translateY 动画，方向与时间线节点向下排列一致）",
+      "skipped 状态展示为 completed 绿色样式 + 「from history」小标签区分断点续传复用（统一状态视觉，tmFromHistory 翻译键）",
+      "修复 build 阶段不显示进行中状态：getStageStatus 未处理 build→app-code 映射，stageKey='build' 查 t.stage==='build' 永远为空返回 pending",
+      "修复 resume 后 task 计数虚高（66/22、24/22）：getPendingTasksForSlice 只查 status='pending' 导致 resume 时查不到已完成 task → 创建重复 task；重命名为 getTasksForSlice 去掉 status 过滤，复用已存在 task",
+    ],
+  },
   {
     version: "1.2.10",
     updatedAt: "2026-06-26 15:30:00",

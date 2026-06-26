@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Play, Pause, X, RefreshCw, Download, ChevronRight, AlertCircle,
+  Play, Pause, X, RefreshCw, Download, AlertCircle,
   CheckCircle2, Clock, Loader, FileText, Scissors, FileCode, Rocket,
-  Layers, Eye, Edit3, Settings as SettingsIcon, Calendar,
+  Layers, Eye, Edit3, Calendar,
   BookOpen, Database, Cpu, Minimize2, CornerDownRight
 } from "lucide-react";
-import { motion } from "motion/react";
 import { useAutomationJob } from "../hooks/useAutomationJob";
 import { useLanguage, type TranslationKey } from "../i18n/LanguageContext";
 import type { BookModule, AutomationTask, ProjectInfo } from "../types";
@@ -20,10 +19,11 @@ interface TaskManagerProps {
   projectInfo: ProjectInfo | null;
   jobId: string | null;
   onJobIdChange: (id: string | null) => void;
-  onSwitchToManual: () => void;
   onEditSlice: (moduleId: string) => void;
   onMinimize: () => void;
   onRefreshProject: () => void;
+  appCount: number;
+  onViewBuild: () => void;
 }
 
 type StageKey = "project" | "directory" | "slice" | "extract" | "script" | "build";
@@ -48,10 +48,11 @@ export function TaskManager({
   projectInfo,
   jobId,
   onJobIdChange,
-  onSwitchToManual,
   onEditSlice,
   onMinimize,
   onRefreshProject,
+  appCount,
+  onViewBuild,
 }: TaskManagerProps) {
   const { t, language } = useLanguage();
   const { job, tasks, connected, error, start, pause, resume, cancel, retryTask, retryAll, refresh, parseBookDone } = useAutomationJob(jobId);
@@ -84,15 +85,8 @@ export function TaskManager({
   }, [projectId, start, onJobIdChange]);
 
   const isRunning = job?.status === "running";
-  const isPaused = job?.status === "paused";
-  const isActive = isRunning || isPaused;
-  const isFinished = job && ["completed", "partial", "cancelled", "failed"].includes(job.status);
-  const hasNoJob = !job;
 
-  const completed = job?.completedSlices ?? 0;
   const failed = job?.failedSlices ?? 0;
-  const total = job?.totalSlices ?? modules.length;
-  const progressPct = total > 0 ? Math.round(((completed + failed) / total) * 100) : 0;
 
   // 统计数据
   const extractCount = tasks.filter(t => t.stage === "extract" && (t.status === "completed" || t.status === "skipped")).length;
@@ -137,8 +131,9 @@ export function TaskManager({
     if (stageKey === "slice") {
       return modules.length > 0 ? "completed" : (isRunning ? "running" : "pending");
     }
-    // extract / script / app-code
-    const stageTasks = tasks.filter(t => t.stage === stageKey);
+    // extract / script / app-code（build 阶段对应 app-code 任务）
+    const taskStage = stageKey === "build" ? "app-code" : stageKey;
+    const stageTasks = tasks.filter(t => t.stage === taskStage);
     if (stageTasks.length === 0) return "pending";
     if (stageTasks.every(t => t.status === "completed" || t.status === "skipped")) return "completed";
     if (stageTasks.some(t => t.status === "failed")) return "failed";
@@ -155,23 +150,20 @@ export function TaskManager({
     }
   };
 
-  const jobStatusText = (status?: string): string => {
-    switch (status) {
-      case "completed": return t("tmStatusAllDone");
-      case "running": return t("tmStatusGenerating");
-      case "paused": return t("tmStatusPaused");
-      case "partial": return t("tmStatusPartial");
-      case "failed": return t("tmStatusFailedJob");
-      case "cancelled": return t("tmStatusCancelled");
-      default: return t("tmStatusWaiting");
-    }
-  };
-
   const selectedModule = modules.find(m => m.id === selectedModuleId);
   const selectedTasks = selectedModuleId ? tasks.filter(t => t.moduleId === selectedModuleId) : [];
 
   // 当前阶段是否需要展示切片列表（slice/extract/script/build）
   const showSliceList = ["slice", "extract", "script", "build"].includes(activeStage);
+
+  // 顶部 bar 4 种状态判断（优先级：全部完成 > 执行中 > 已暂停 > 未启用）
+  // app 是最后一步，appCount >= modules.length 意味着所有任务已完成（无论自动还是手工）
+  const allCompleted = modules.length > 0 && appCount >= modules.length;
+  const tmStatus: "not-started" | "paused" | "running" | "all-done" = allCompleted
+    ? "all-done"
+    : job?.status === "running" ? "running"
+    : job?.status === "paused" ? "paused"
+    : "not-started";
 
   return (
     <div className="flex flex-col h-full bg-[#050508] overflow-hidden">
@@ -184,20 +176,17 @@ export function TaskManager({
               {bookTitle || t("tmTitle")}
             </h2>
             <div className="flex items-center gap-2 mt-0.5">
-              {job ? (
-                <span className={`text-[10px] font-bold ${
-                  job.status === "completed" ? "text-emerald-400" :
-                  job.status === "running" ? "text-cyan-300" :
-                  job.status === "paused" ? "text-amber-300" :
-                  job.status === "partial" ? "text-orange-400" :
-                  job.status === "failed" ? "text-red-400" :
-                  "text-slate-400"
-                }`}>
-                  {jobStatusText(job.status)}
-                </span>
-              ) : (
-                <span className="text-[10px] text-slate-500">{t("tmStatusNotStarted")}</span>
-              )}
+              <span className={`text-[10px] font-bold ${
+                tmStatus === "all-done" ? "text-emerald-400" :
+                tmStatus === "running" ? "text-cyan-300" :
+                tmStatus === "paused" ? "text-amber-300" :
+                "text-slate-500"
+              }`}>
+                {tmStatus === "all-done" ? t("tmStatusAllTasksDone") :
+                 tmStatus === "running" ? t("tmStatusGenerating") :
+                 tmStatus === "paused" ? t("tmStatusPaused") :
+                 t("tmStatusNotActive")}
+              </span>
               {connected && <span className="text-[9px] text-emerald-500/60">{t("tmConnected")}</span>}
               {error && <span className="text-[9px] text-red-400/70 truncate">{error}</span>}
             </div>
@@ -205,40 +194,52 @@ export function TaskManager({
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          {isRunning && (
-            <button type="button" onClick={pause} className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1">
-              <Pause className="w-3 h-3" /> {t("tmStatusPaused")}
+          {/* 状态1：未启用 → 启用自动模式 */}
+          {tmStatus === "not-started" && (
+            <button type="button" onClick={handleStart} disabled={starting} className="px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
+              {starting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+              {t("tmStartAutomation")}
             </button>
           )}
-          {isPaused && (
-            <button type="button" onClick={resume} className="px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1">
-              <Play className="w-3 h-3" /> {language === "en" ? "Resume" : "恢复"}
-            </button>
+          {/* 状态2：已暂停 → 恢复 / 取消 */}
+          {tmStatus === "paused" && (
+            <>
+              <button type="button" onClick={resume} className="px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1">
+                <Play className="w-3 h-3" /> {language === "en" ? "Resume" : "恢复"}
+              </button>
+              <button type="button" onClick={cancel} className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1">
+                <X className="w-3 h-3" /> {language === "en" ? "Cancel" : "取消"}
+              </button>
+            </>
           )}
-          {isActive && (
-            <button type="button" onClick={cancel} className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1">
-              <X className="w-3 h-3" /> {language === "en" ? "Cancel" : "取消"}
-            </button>
+          {/* 状态3：执行中 → 暂停 / 取消 */}
+          {tmStatus === "running" && (
+            <>
+              <button type="button" onClick={pause} className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1">
+                <Pause className="w-3 h-3" /> {language === "en" ? "Pause" : "暂停"}
+              </button>
+              <button type="button" onClick={cancel} className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1">
+                <X className="w-3 h-3" /> {language === "en" ? "Cancel" : "取消"}
+              </button>
+            </>
           )}
-          {job?.status === "partial" && failed > 0 && (
+          {/* 状态4：全部完成 → 查看详情（进入 build app 步骤） */}
+          {tmStatus === "all-done" && (
+            <>
+              <button type="button" onClick={onViewBuild} className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1">
+                <Rocket className="w-3 h-3" /> {t("tmViewBuildDetails")}
+              </button>
+              <button type="button" onClick={handleDownloadAll} className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1">
+                <Download className="w-3 h-3" /> {t("tmDownloadAll")}
+              </button>
+            </>
+          )}
+          {/* partial 状态：重试全部失败 */}
+          {job?.status === "partial" && failed > 0 && tmStatus !== "all-done" && (
             <button type="button" onClick={handleRetryAll} className="px-2.5 py-1 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1">
               <RefreshCw className="w-3 h-3" /> {t("tmRetryAllFailed")}
             </button>
           )}
-          {isFinished && completed > 0 && (
-            <button type="button" onClick={handleDownloadAll} className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1">
-              <Download className="w-3 h-3" /> {t("tmDownloadAll")}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onSwitchToManual}
-            disabled={isActive}
-            className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 text-xs font-semibold cursor-pointer transition flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
-            title={t("tmSwitchManualHint")}
-          >
-            <SettingsIcon className="w-3 h-3" /> {t("tmSwitchManual")}
-          </button>
           <button
             type="button"
             onClick={onMinimize}
@@ -250,99 +251,119 @@ export function TaskManager({
         </div>
       </div>
 
-      {/* 进度条 */}
-      {job && (
-        <div className="shrink-0 bg-[#07070a] border-b border-white/5 px-5 py-2 flex items-center gap-3">
-          <div className="flex-1 h-1.5 bg-black/40 rounded-full overflow-hidden">
-            <div className="h-full flex transition-all duration-500">
-              <div className="bg-emerald-500/60 h-full" style={{ width: `${(completed / Math.max(total, 1)) * 100}%` }} />
-              <div className="bg-red-500/60 h-full" style={{ width: `${(failed / Math.max(total, 1)) * 100}%` }} />
-            </div>
-          </div>
-          <span className="text-[10px] text-slate-400 font-mono whitespace-nowrap">
-            {completed + failed}/{total}
-            {failed > 0 && <span className="text-red-400"> ({failed} {language === "en" ? "failed" : "失败"})</span>}
-            <span className="text-slate-600 ml-1">({progressPct}%)</span>
-          </span>
-        </div>
-      )}
+      {/* 状态提示 alert（替代原进度条） */}
+      <div className={`shrink-0 border-b px-5 py-2 flex items-center gap-2.5 ${
+        tmStatus === "running" ? "bg-cyan-500/[0.04] border-cyan-500/15" :
+        tmStatus === "paused" ? "bg-amber-500/[0.04] border-amber-500/15" :
+        tmStatus === "all-done" ? "bg-emerald-500/[0.04] border-emerald-500/15" :
+        "bg-white/[0.02] border-white/5"
+      }`}>
+        <p className="text-[11px] text-slate-300 leading-snug flex-1 min-w-0 text-right">
+          {tmStatus === "running" && (language === "en"
+            ? <><span className="font-bold text-cyan-300 animate-pulse">Automation running</span> — generating all interactive HTML takes ~30 min. Feel free to minimize and come back to review when done.</>
+            : <><span className="font-bold text-cyan-300 animate-pulse">自动模式执行中</span>——生成全部互动 HTML 约需 30 分钟。你可以最小化看板去做别的事，完成后回来验收即可。</>)}
+          {tmStatus === "paused" && (language === "en"
+            ? <><span className="font-bold text-amber-300">Paused</span> — Click Resume to continue, or Cancel to stop the task.</>
+            : <><span className="font-bold text-amber-300">已暂停</span>——点击「恢复」继续执行，或「取消」结束任务。</>)}
+          {tmStatus === "all-done" && (language === "en"
+            ? <><span className="font-bold text-emerald-300">All tasks completed</span> — Click View Details to review each interactive HTML.</>
+            : <><span className="font-bold text-emerald-300">全部任务已完成</span>——点击「查看详情」开始验收每个互动 HTML。</>)}
+          {tmStatus === "not-started" && (projectInfo?.executionMode === "auto"
+            ? (language === "en"
+                ? <><span className="font-bold text-slate-200">Auto mode</span> — will generate all interactive HTML in ~30 min. Click Start Automation to begin — you can minimize and come back later.</>
+                : <><span className="font-bold text-slate-200">自动模式</span>——可一键生成全部互动 HTML，约 30 分钟。点击「启用自动模式」启动，期间可最小化去做别的事，完成后再回来验收。</>)
+            : (language === "en"
+                ? <><span className="font-bold text-slate-200">Manual mode</span> — You can minimize this board and continue in the manual editor, or start automation here and come back when it's done.</>
+                : <><span className="font-bold text-slate-200">手工模式</span>——你可以最小化当前看板返回操作界面继续手工操作，或直接在这里开启自动化流程，等执行完成后再来验收。</>))}
+        </p>
+        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+          tmStatus === "running" ? "bg-cyan-400 animate-pulse" :
+          tmStatus === "paused" ? "bg-amber-400" :
+          tmStatus === "all-done" ? "bg-emerald-400" :
+          "bg-slate-500"
+        }`} />
+      </div>
 
-      {/* ============ 启动卡片 ============ */}
-      {hasNoJob && (
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="max-w-md text-center space-y-4">
-            <div className="w-16 h-16 mx-auto rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center">
-              <Rocket className="w-8 h-8 text-cyan-400" />
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-white">{t("tmPrepareStart")}</h3>
-              <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                {t("tmPrepareDesc")}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleStart}
-              disabled={starting}
-              className="px-6 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold border border-cyan-400/30 shadow-[0_0_20px_rgba(6,182,212,0.4)] transition cursor-pointer flex items-center gap-2 mx-auto"
-            >
-              {starting ? (
-                <><RefreshCw className="w-4 h-4 animate-spin" /> {t("tmStarting")}</>
-              ) : (
-                <><Play className="w-4 h-4" /> {t("tmStartAuto")}</>
-              )}
-            </button>
-            {modules.length > 0 && (
-              <p className="text-[10px] text-slate-500">{t("tmHasSlicesReuse")}</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ============ 三栏布局 ============ */}
-      {job && (
-        <div className="flex-1 flex min-h-0">
-          {/* 左栏：流程时间线 */}
+      {/* ============ 三栏布局（始终显示，不管有无 job） ============ */}
+      <div className="flex-1 flex min-h-0">
+          {/* 左栏：流程时间线（竖向 stepper，节点+连接线占满高度） */}
           <div className="w-48 shrink-0 border-r border-white/5 bg-[#07070a]/50 overflow-y-auto p-3">
             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 px-1">{t("tmPipeline")}</div>
-            <div className="space-y-1">
+            <div className="flex flex-col h-[calc(100%-1.5rem)]">
               {PIPELINE_STAGES.map((stage, idx) => {
                 const status = getStageStatus(stage.key);
-                const Icon = stage.icon;
+                const isLast = idx === PIPELINE_STAGES.length - 1;
                 const active = activeStage === stage.key;
+
+                // 进行中节点的任务计数
+                let runningCount = "";
+                if (status === "running") {
+                  if (stage.key === "directory") {
+                    runningCount = directoryItems.length > 0 ? `✓ ${directoryItems.length}` : "";
+                  } else if (stage.key === "slice") {
+                    runningCount = modules.length > 0 ? `✓ ${modules.length}` : "";
+                  } else if (stage.key === "extract") {
+                    runningCount = `${extractCount}/${modules.length}`;
+                  } else if (stage.key === "script") {
+                    runningCount = `${scriptCount}/${modules.length}`;
+                  } else if (stage.key === "build") {
+                    runningCount = `${buildCount}/${modules.length}`;
+                  }
+                }
+
+                // 节点状态颜色
+                const dotColor = status === "completed"
+                  ? "bg-emerald-400 border-emerald-400"
+                  : status === "running"
+                  ? "bg-cyan-400 border-cyan-400 animate-pulse"
+                  : status === "failed"
+                  ? "bg-red-400 border-red-400"
+                  : "bg-[#07070a] border-slate-600";
+                // 连接线颜色（线在节点下方，颜色取该节点状态：completed/running 染色，其他灰）
+                const lineColor = status === "completed"
+                  ? "bg-emerald-400/40"
+                  : status === "running"
+                  ? "bg-gradient-to-b from-cyan-400/40 to-slate-700/40"
+                  : "bg-slate-700/40";
+
                 return (
                   <button
                     key={stage.key}
                     type="button"
                     onClick={() => { setActiveStage(stage.key); setSelectedModuleId(null); }}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition cursor-pointer ${
-                      active
-                        ? "bg-cyan-500/10 border border-cyan-500/20"
-                        : "hover:bg-white/5 border border-transparent"
+                    className={`flex-1 flex items-stretch gap-2.5 px-1.5 rounded-lg text-left transition cursor-pointer min-h-0 ${
+                      status === "running"
+                        ? "tm-stage-running"
+                        : active ? "bg-cyan-500/[0.06]" : "hover:bg-white/[0.03]"
                     }`}
                   >
-                    <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 border ${
-                      status === "completed" ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" :
-                      status === "running" ? "bg-cyan-500/15 text-cyan-300 border-cyan-500/30 animate-pulse" :
-                      status === "failed" ? "bg-red-500/15 text-red-400 border-red-500/30" :
-                      "bg-white/5 text-slate-500 border-white/10"
-                    }`}>
-                      <Icon className="w-3 h-3" />
+                    {/* 节点 + 连接线列 */}
+                    <div className="flex flex-col items-center pt-1.5 w-3 shrink-0">
+                      <div className={`w-3 h-3 rounded-full border-2 shrink-0 ${dotColor}`} />
+                      {!isLast && (
+                        <div className={`w-0.5 flex-1 mt-1 rounded-full ${lineColor}`} />
+                      )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[11px] font-semibold text-slate-200 truncate">{t(stage.labelKey)}</div>
-                      <div className={`text-[9px] ${
+                    {/* 标签 + 状态 */}
+                    <div className="flex-1 min-w-0 pt-1">
+                      <div className={`text-[11px] font-semibold truncate ${
+                        active ? "text-cyan-200" :
+                        status === "completed" ? "text-slate-200" :
+                        status === "running" ? "text-cyan-100" :
+                        status === "failed" ? "text-red-300" :
+                        "text-slate-400"
+                      }`}>{t(stage.labelKey)}</div>
+                      <div className={`text-[9px] mt-0.5 font-mono ${
                         status === "completed" ? "text-emerald-400" :
                         status === "running" ? "text-cyan-300" :
                         status === "failed" ? "text-red-400" :
                         "text-slate-600"
                       }`}>
-                        {stageStatusText(status)}
+                        {status === "running" && runningCount
+                          ? `${stageStatusText(status)} · ${runningCount}`
+                          : stageStatusText(status)}
                       </div>
                     </div>
-                    {idx < PIPELINE_STAGES.length - 1 && (
-                      <ChevronRight className="w-3 h-3 text-slate-700" />
-                    )}
                   </button>
                 );
               })}
@@ -373,6 +394,7 @@ export function TaskManager({
                       onSelect={() => setSelectedModuleId(mod.id)}
                       t={t}
                       language={language}
+                      activeStage={activeStage}
                     />
                   ))}
                 </div>
@@ -411,8 +433,7 @@ export function TaskManager({
             )}
           </div>
         </div>
-      )}
-    </div>
+      </div>
   );
 }
 
@@ -693,9 +714,10 @@ interface SliceCardProps {
   onSelect: () => void;
   t: (key: TranslationKey) => string;
   language: "zh" | "en";
+  activeStage: StageKey;
 }
 
-function SliceCard({ module, index, tasks, selected, onSelect, t, language }: SliceCardProps) {
+function SliceCard({ module, index, tasks, selected, onSelect, t, language, activeStage }: SliceCardProps) {
   const extractTask = tasks.find(t => t.stage === "extract");
   const scriptTask = tasks.find(t => t.stage === "script");
   const appTask = tasks.find(t => t.stage === "app-code");
@@ -710,6 +732,10 @@ function SliceCard({ module, index, tasks, selected, onSelect, t, language }: Sl
   const miniLabels = language === "en"
     ? { extract: "E", script: "S", build: "B" }
     : { extract: "提", script: "脚", build: "构" };
+
+  // 当前阶段对应的 task.stage：只有当前阶段的 completed 才显示绿色完成标志，
+  // 非当前阶段的 completed 用中性色（已就绪但不强调），避免 build 阶段 script 就绪变绿误导用户
+  const currentTaskStage = activeStage === "extract" ? "extract" : activeStage === "script" ? "script" : activeStage === "build" ? "app-code" : null;
 
   return (
     <button
@@ -728,19 +754,21 @@ function SliceCard({ module, index, tasks, selected, onSelect, t, language }: Sl
       </div>
       <div className="text-[10px] text-slate-500 truncate mt-0.5 ml-5">{module.title}</div>
       <div className="flex gap-1 mt-1 ml-5">
-        <MiniStage label={miniLabels.extract} task={extractTask} />
-        <MiniStage label={miniLabels.script} task={scriptTask} />
-        <MiniStage label={miniLabels.build} task={appTask} />
+        <MiniStage label={miniLabels.extract} task={extractTask} isCurrent={currentTaskStage === "extract"} />
+        <MiniStage label={miniLabels.script} task={scriptTask} isCurrent={currentTaskStage === "script"} />
+        <MiniStage label={miniLabels.build} task={appTask} isCurrent={currentTaskStage === "app-code"} />
       </div>
     </button>
   );
 }
 
-function MiniStage({ label, task }: { label: string; task?: AutomationTask }) {
+function MiniStage({ label, task, isCurrent }: { label: string; task?: AutomationTask; isCurrent: boolean }) {
   const color = !task
     ? "bg-slate-700/30 text-slate-600"
     : task.status === "completed" || task.status === "skipped"
-      ? "bg-emerald-500/15 text-emerald-400"
+      ? isCurrent
+        ? "bg-emerald-500/15 text-emerald-400"
+        : "bg-slate-600/20 text-slate-400"
       : task.status === "running"
         ? "bg-cyan-500/15 text-cyan-300 animate-pulse"
         : task.status === "failed"
@@ -833,9 +861,11 @@ function StageRow({
   language: "zh" | "en";
 }) {
   const status = task?.status || "pending";
+  // skipped 复用 completed 的样式，仅用 from history 小标签区分
+  const isFromHistory = status === "skipped";
   const statusConfig = {
     completed: { color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20", label: t("tmStatusCompleted"), Icon: CheckCircle2 },
-    skipped: { color: "text-slate-400", bg: "bg-slate-500/10 border-slate-500/20", label: t("tmStatusSkipped"), Icon: CheckCircle2 },
+    skipped: { color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20", label: t("tmStatusCompleted"), Icon: CheckCircle2 },
     running: { color: "text-cyan-300", bg: "bg-cyan-500/10 border-cyan-500/20", label: t("tmStatusRunning"), Icon: Loader },
     failed: { color: "text-red-400", bg: "bg-red-500/10 border-red-500/20", label: t("tmStatusFailed"), Icon: AlertCircle },
     pending: { color: "text-slate-500", bg: "bg-white/5 border-white/10", label: t("tmStatusPending"), Icon: Clock },
@@ -863,7 +893,14 @@ function StageRow({
             <div>{t("tmStartTime")}：{new Date(task.startedAt).toLocaleString(language === "en" ? "en-US" : "zh-CN")}</div>
           )}
           {task.finishedAt && (
-            <div>{t("tmFinishTime")}：{new Date(task.finishedAt).toLocaleString(language === "en" ? "en-US" : "zh-CN")}</div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span>{t("tmFinishTime")}：{new Date(task.finishedAt).toLocaleString(language === "en" ? "en-US" : "zh-CN")}</span>
+              {isFromHistory && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-slate-500/15 text-slate-400 border border-slate-500/20">
+                  <CheckCircle2 className="w-2.5 h-2.5" /> {t("tmFromHistory")}
+                </span>
+              )}
+            </div>
           )}
           {task.attempts > 0 && (
             <div>{t("tmAttempts")}：{task.attempts} / {task.maxAttempts}</div>
