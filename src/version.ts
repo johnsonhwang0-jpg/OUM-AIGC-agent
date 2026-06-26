@@ -7,8 +7,8 @@
  *  - 同时更新 VERSION_HISTORY，记录本次变更内容
  */
 
-export const APP_VERSION = "1.2.6";
-export const VERSION_UPDATED_AT = "2026-06-25 19:20:00";
+export const APP_VERSION = "1.2.7";
+export const VERSION_UPDATED_AT = "2026-06-26 12:47:33";
 
 export interface VersionEntry {
   version: string;
@@ -27,6 +27,20 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.7",
+    updatedAt: "2026-06-26 12:47:33",
+    gitCommit: "9f1222c",
+    changes: [
+      "首屏改造为 split view 内的项目列表：左侧保留 AI 聊天面板，右侧新增 HomeView 组件展示使用说明 + 项目列表，移除原全屏首屏路由",
+      "项目列表展示字段：项目名称、切片/脚本/app 完成进度条（ProgressPill 组件可视化 value/total），支持多选 checkbox + 批量删除",
+      "后端新增 getProjectCountStats 函数批量统计项目的 scriptCount/appCount，/api/projects 接口返回 sliceCount/scriptCount/appCount，避免 N+1 查询",
+      "顶部导航重构：移除原 5 步骤（Import/Slice/Extract/Script/Build App），改为 TaskManager 独立按钮（amber 样式 + Layers 图标）+ 5 步骤（Preview/Slice/Extract/Script/Build App）",
+      "step 1 由 Import 改为 Preview（PDF 已在 NewProjectModal 绑定，无需重复上传），删除 step 1 的 5 Steps 说明卡片和 PDF 上传卡片（与 HomeView 重复）",
+      "manual 模式也可切换 TaskManager 总览：去掉 executionMode==='auto' 限制，两种模式都能通过顶部按钮切换",
+      "返回按钮文案 Home/首页 改为 back/返回，标题只显示项目名称（去掉模式/阶段后缀），移除 banner 新建项目按钮（新建只在首页项目列表操作）",
+    ],
+  },
   {
     version: "1.2.6",
     updatedAt: "2026-06-25 19:20:00",
