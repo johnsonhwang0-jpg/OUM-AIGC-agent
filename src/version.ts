@@ -39,6 +39,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.10",
     updatedAt: "2026-06-26 15:30:00",
+    gitCommit: "bcc2da9",
     changes: [
       "自动模式创建项目后直接启动 orchestrator：handleNewProjectCreated 里 auto 模式 POST /api/automation/start 并 setAutomationJobId，进入 TaskManager 即显示看板，无需再点「开始自动生成」按钮",
       "修复最小化 TaskManager 后项目详情页进度不同步：onMinimize 从单纯 setViewMode 改为先 await loadProject 刷新 modules/savedScripts/directoryItems，再切 steps 视图，并 loadProjectList 刷新首页进度（根因：steps 用旧 state modules=[] 看不到已完成切片/脚本/app）",
