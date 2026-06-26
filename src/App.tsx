@@ -476,6 +476,8 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   const [viewMode, setViewMode] = useState<"steps" | "task-manager">("steps");
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
   const [showNewProjectModal, setShowNewProjectModal] = useState<boolean>(false);
+  // 编辑项目名称（复用 NewProjectModal 的编辑模式）
+  const [editingProject, setEditingProject] = useState<{ id: string; name: string } | null>(null);
   // 后台自动化任务状态：当用户最小化 TaskManager 后，轮询 job 状态用于全局指示器展示
   const [backgroundJob, setBackgroundJob] = useState<AutomationJob | null>(null);
 
@@ -674,6 +676,8 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       const project = await response.json();
 
       setCurrentProjectId(projectId);
+      // 切换项目时先清空旧 automation job 状态，避免残留上一个项目的任务引用
+      setAutomationJobId(null);
       setBookTitle(project.bookTitle || project.name || "");
       setBookContentText(project.bookContentText || "");
       setPdfFileName(project.pdfFileName || "");
@@ -690,6 +694,13 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
         createdAt: project.createdAt || "",
         executionMode: project.executionMode === "auto" ? "auto" : "manual",
       });
+
+      // 恢复活跃的 automation job：若该项目有 running/paused 任务，自动恢复 automationJobId
+      // 这样进入 TaskManager 时无需再点「开始自动生成」按钮，直接显示进度
+      const latestJob = project.latestJob;
+      if (latestJob && (latestJob.status === "running" || latestJob.status === "paused")) {
+        setAutomationJobId(latestJob.id);
+      }
 
       if (project.directoryItems) {
         try {
@@ -881,7 +892,8 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       executionMode: result.mode,
     });
     setActiveStep(1); // Preview 步骤：创建后停在预览页，由用户点"下一步"触发后续流程
-    setViewMode("steps");
+    // 自动模式直接进入任务管理器；手动模式进入 steps（TOC 目录页）
+    setViewMode(result.mode === "auto" ? "task-manager" : "steps");
     await loadProjectList();
 
     // 持久化 pdfPageOffset 到 DB，后端 orchestrator 读取后用于自动模式 extract 页码对齐
@@ -2513,54 +2525,54 @@ ${script.conclusion}
               </span>
             </div>
 
-            {/* 后台任务全局指示器：最小化 TaskManager 后仍展示自动化进度 */}
-            {backgroundJob && (backgroundJob.status === "running" || backgroundJob.status === "paused") && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (backgroundJob.projectId) {
-                    loadProject(backgroundJob.projectId);
-                    setViewMode("task-manager");
-                  }
-                }}
-                className="flex items-center gap-2 px-3 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 transition cursor-pointer shrink-0"
-                title={language === "en" ? "Background task running, click to view" : "后台任务运行中，点击查看"}
-              >
-                <span className="relative flex h-2 w-2">
-                  {backgroundJob.status === "running" && (
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
-                  )}
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${backgroundJob.status === "running" ? "bg-cyan-400" : "bg-amber-400"}`} />
-                </span>
-                <span className="text-[10px] font-semibold whitespace-nowrap">
-                  {language === "en" ? "Background" : "后台运行中"}
-                </span>
-                {backgroundJob.totalSlices > 0 && (
-                  <span className="text-[10px] font-mono text-slate-400 tabular-nums">
-                    {backgroundJob.completedSlices + backgroundJob.failedSlices}/{backgroundJob.totalSlices}
-                  </span>
-                )}
-                <span className="text-[10px] text-cyan-400 font-semibold">{language === "en" ? "View" : "查看"}</span>
-              </button>
-            )}
-
             {/* Step navigation shortcut pins */}
             <div className="flex items-center gap-2">
               {currentProjectId && (
               <>
-              {/* 任务管理器：独立按钮，样式与步骤按钮区分 */}
-              <button
-                onClick={() => setViewMode("task-manager")}
-                className={`text-xs px-2.5 py-1 rounded-lg border transition cursor-pointer flex items-center gap-1 shrink-0 font-semibold ${
-                  viewMode === "task-manager"
-                    ? 'bg-amber-500 border-amber-500 text-white shadow-[0_0_15px_rgba(245,158,11,0.4)]'
-                    : 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
-                }`}
-                title={language === "en" ? "Task Manager" : "任务管理器"}
-              >
-                <Layers className="w-3 h-3" />
-                {language === "en" ? "TaskManager" : "任务管理器"}
-              </button>
+              {/* 任务管理器：独立按钮，样式与步骤按钮区分。
+                  当存在后台活跃任务时，按钮内合并展示脉冲状态指示器 + 进度计数。 */}
+              {(() => {
+                const hasBg = !!(backgroundJob && (backgroundJob.status === "running" || backgroundJob.status === "paused"));
+                const isActive = viewMode === "task-manager";
+                return (
+                  <button
+                    onClick={() => {
+                      if (hasBg && backgroundJob.projectId && backgroundJob.projectId !== currentProjectId) {
+                        loadProject(backgroundJob.projectId);
+                      }
+                      setViewMode("task-manager");
+                    }}
+                    className={`text-xs px-2.5 py-1 rounded-lg border transition cursor-pointer flex items-center gap-1.5 shrink-0 font-semibold ${
+                      isActive
+                        ? 'bg-amber-500 border-amber-500 text-white shadow-[0_0_15px_rgba(245,158,11,0.4)]'
+                        : 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
+                    }`}
+                    title={hasBg
+                      ? (language === "en"
+                          ? `Task Manager · ${backgroundJob!.status === "running" ? "running" : "paused"} ${backgroundJob!.completedSlices + backgroundJob!.failedSlices}/${backgroundJob!.totalSlices}`
+                          : `任务管理器 · ${backgroundJob!.status === "running" ? "运行中" : "已暂停"} ${backgroundJob!.completedSlices + backgroundJob!.failedSlices}/${backgroundJob!.totalSlices}`)
+                      : (language === "en" ? "Task Manager" : "任务管理器")}
+                  >
+                    <Layers className="w-3 h-3" />
+                    {language === "en" ? "TaskManager" : "任务管理器"}
+                    {hasBg && (
+                      <>
+                        <span className="relative flex h-1.5 w-1.5 ml-0.5">
+                          {backgroundJob!.status === "running" && (
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-300 opacity-75" />
+                          )}
+                          <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${backgroundJob!.status === "running" ? "bg-cyan-300" : "bg-amber-300"}`} />
+                        </span>
+                        {backgroundJob!.totalSlices > 0 && (
+                          <span className={`text-[10px] font-mono tabular-nums ${isActive ? "text-amber-100" : "text-amber-400/80"}`}>
+                            {backgroundJob!.completedSlices + backgroundJob!.failedSlices}/{backgroundJob!.totalSlices}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </button>
+                );
+              })()}
               <div className="w-px h-5 bg-white/10 shrink-0" />
               {/* 步骤导航：Preview → Slice → Extract → Script → Build App */}
               <button
@@ -2655,6 +2667,7 @@ ${script.conclusion}
               language={language}
               onSelectProject={loadProject}
               onDeleteProject={handleDeleteProject}
+              onEditProject={(id, name) => setEditingProject({ id, name })}
               onBatchDelete={async (ids) => {
                 if (ids.length === 0) return;
                 if (!confirm(language === "en" ? `Are you sure you want to delete the selected ${ids.length} projects? This cannot be undone.` : `确定要删除选中的 ${ids.length} 个项目吗？此操作不可撤销。`)) return;
@@ -4353,6 +4366,18 @@ API地址：https://api.deepseek.com/chat/completions`}
         <NewProjectModal
           onClose={() => setShowNewProjectModal(false)}
           onCreated={handleNewProjectCreated}
+        />
+      )}
+
+      {/* 编辑项目弹窗（仅修改名称，复用 NewProjectModal 编辑模式） */}
+      {editingProject && (
+        <NewProjectModal
+          editProject={editingProject}
+          onClose={() => setEditingProject(null)}
+          onSaved={async () => {
+            await loadProjectList();
+            setEditingProject(null);
+          }}
         />
       )}
 

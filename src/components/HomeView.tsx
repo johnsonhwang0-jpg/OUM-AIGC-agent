@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   BookOpen, Scissors, FileText, FileCode, Rocket,
-  Plus, Trash2, RefreshCw,
+  Plus, Trash2, RefreshCw, Edit3,
 } from "lucide-react";
 
 export interface HomeAutomationStatus {
@@ -32,6 +32,7 @@ interface HomeViewProps {
   loading?: boolean;
   onSelectProject: (projectId: string) => void;
   onDeleteProject: (projectId: string) => void;
+  onEditProject: (projectId: string, projectName: string) => void;
   onBatchDelete: (projectIds: string[]) => Promise<void>;
   onNewProject: () => void;
   onRefresh: () => void;
@@ -61,7 +62,7 @@ const ProgressPill = ({ value, total, color }: { value: number; total: number; c
 // 作为右侧工作区内容渲染，不包含独立顶栏（左侧 AI 面板由 App.tsx 提供）
 export function HomeView({
   projects, language, loading,
-  onSelectProject, onDeleteProject, onBatchDelete, onNewProject, onRefresh,
+  onSelectProject, onDeleteProject, onEditProject, onBatchDelete, onNewProject, onRefresh,
 }: HomeViewProps) {
   const isEn = language === "en";
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -321,7 +322,18 @@ export function HomeView({
                       </div>
 
                       {/* 操作 */}
-                      <div className="w-8 flex justify-center">
+                      <div className="w-16 flex items-center justify-center gap-0.5">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditProject(project.id, project.name);
+                          }}
+                          className="p-1.5 text-slate-600 hover:text-cyan-400 hover:bg-cyan-500/10 rounded-lg transition opacity-0 group-hover:opacity-100"
+                          title={isEn ? "Edit" : "编辑"}
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           type="button"
                           onClick={(e) => {

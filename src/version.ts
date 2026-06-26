@@ -7,8 +7,8 @@
  *  - 同时更新 VERSION_HISTORY，记录本次变更内容
  */
 
-export const APP_VERSION = "1.2.8";
-export const VERSION_UPDATED_AT = "2026-06-26 19:30:00";
+export const APP_VERSION = "1.2.9";
+export const VERSION_UPDATED_AT = "2026-06-26 21:00:00";
 
 export interface VersionEntry {
   version: string;
@@ -27,6 +27,17 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.9",
+    updatedAt: "2026-06-26 21:00:00",
+    changes: [
+      "修复自动模式 extract 页码偏移量（pdfPageOffset）始终为 0 的严重 bug：根因是 server.ts PUT /api/projects/:id 路由解构遗漏 pdfPageOffset 字段，导致前端写入请求被丢弃，DB 永远保持默认值 0，后端 orchestrator 读取不到正确 offset；手工流程因用 React state 不受影响，自动流程后端读 DB 一直错误",
+      "修复进入有活跃任务的 TaskManager 仍显示「开始自动生成」按钮的问题：loadProject 不恢复 automationJobId，现 /api/projects/:id 附加 latestJob 字段，loadProject 检测到 running/paused 自动恢复 automationJobId，进入即显示进度",
+      "顶栏后台任务指示器合并进任务管理器按钮：删除独立的「后台运行中」指示器，状态（脉冲圆点 + 进度 N/M）直接展示在「任务管理器」按钮内，点击恢复对应项目",
+      "My Projects 项目列表新增编辑按钮：复用 NewProjectModal 编辑模式，仅修改项目名称，调用 PUT /api/projects/:id 持久化",
+      "自动模式创建项目后直接进入 TaskManager（不再先进 steps 再手动切换）",
+    ],
+  },
   {
     version: "1.2.8",
     updatedAt: "2026-06-26 19:30:00",

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { Upload, FileText, X, RefreshCw, Check, Sparkles, Rocket, Settings as SettingsIcon } from "lucide-react";
+import { FileText, X, RefreshCw, Check, Sparkles, Rocket, Settings as SettingsIcon } from "lucide-react";
 import { parseTextToDirectory } from "../utils/directoryParser";
 import { calculateAutoPageOffset } from "../utils/textbookMatcher";
 import type { ExecutionMode } from "../types";
@@ -19,16 +19,22 @@ export interface NewProjectResult {
 
 interface NewProjectModalProps {
   onClose: () => void;
-  onCreated: (result: NewProjectResult) => void;
+  onCreated?: (result: NewProjectResult) => void;
+  /** 编辑模式：传入则只允许修改项目名称 */
+  editProject?: { id: string; name: string };
+  /** 编辑模式保存成功回调 */
+  onSaved?: (id: string, name: string) => void;
 }
 
 /**
  * 新建项目弹窗
  * 流程：上传 PDF → 自动提取名称 → 选模式 → 创建并开始
+ * 编辑模式（传入 editProject）：仅修改项目名称
  */
-export function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
-  const [stage, setStage] = useState<"upload" | "configure">("upload");
-  const [projectName, setProjectName] = useState("");
+export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: NewProjectModalProps) {
+  const isEdit = !!editProject;
+  const [stage, setStage] = useState<"upload" | "configure">(isEdit ? "configure" : "upload");
+  const [projectName, setProjectName] = useState(isEdit ? editProject!.name : "");
   const [pdfFileName, setPdfFileName] = useState("");
   const [pdfData, setPdfData] = useState("");
   const [bookContentText, setBookContentText] = useState("");
@@ -133,6 +139,27 @@ export function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
       setError("请填写项目名称");
       return;
     }
+    // 编辑模式：仅更新项目名称
+    if (isEdit && editProject) {
+      setCreating(true);
+      setError("");
+      try {
+        const res = await fetch(`/api/projects/${editProject.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: projectName.trim() }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.error || "保存失败");
+        }
+        onSaved?.(editProject.id, projectName.trim());
+      } catch (err: any) {
+        setError(err?.message || String(err));
+        setCreating(false);
+      }
+      return;
+    }
     if (!pdfData || !bookContentText) {
       setError("PDF 数据缺失，请重新上传");
       return;
@@ -185,7 +212,7 @@ export function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
       setError(err?.message || String(err));
       setCreating(false);
     }
-  }, [projectName, pdfData, bookContentText, directoryItems, pdfFileName, pdfPagesText, pdfPageOffset, mode, onCreated]);
+  }, [projectName, pdfData, bookContentText, directoryItems, pdfFileName, pdfPagesText, pdfPageOffset, mode, onCreated, isEdit, editProject, onSaved]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -197,9 +224,9 @@ export function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-semibold text-white text-sm">新建项目</h3>
+              <h3 className="font-semibold text-white text-sm">{isEdit ? "编辑项目" : "新建项目"}</h3>
               <p className="text-[10px] text-slate-500">
-                {stage === "upload" ? "上传 PDF 教材，选择后续流程模式" : "确认项目信息并选择模式"}
+                {isEdit ? "修改项目名称" : stage === "upload" ? "上传 PDF 教材，选择后续流程模式" : "确认项目信息并选择模式"}
               </p>
             </div>
           </div>
@@ -215,7 +242,8 @@ export function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {/* 上传区域 */}
+          {/* 上传区域（编辑模式隐藏） */}
+          {!isEdit && (
           <div>
             <label className="block text-[11px] font-bold text-slate-400 mb-2">
               {stage === "upload" ? "① 上传 PDF 教材" : "① 已上传 PDF"}
@@ -251,18 +279,19 @@ export function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
                 </div>
               )}
             </div>
-            {error && (
+            {error && !isEdit && (
               <p className="text-[11px] text-red-400 mt-2 flex items-center gap-1">
                 <X className="w-3 h-3" /> {error}
               </p>
             )}
           </div>
+          )}
 
           {/* 项目名称 + 模式选择（仅在上传完成后显示） */}
           {stage === "configure" && (
             <>
               <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-2">② 项目名称</label>
+                <label className="block text-[11px] font-bold text-slate-400 mb-2">{isEdit ? "项目名称" : "② 项目名称"}</label>
                 <input
                   type="text"
                   value={projectName}
@@ -270,12 +299,21 @@ export function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
                   placeholder="输入项目名称"
                   className="w-full bg-[#0a0a0f] border border-white/10 focus:border-cyan-500 outline-none rounded-lg px-3.5 py-2 text-sm text-slate-100 transition"
                   disabled={creating}
+                  autoFocus
                 />
+                {!isEdit && (
                 <p className="text-[10px] text-slate-500 mt-1">
                   已识别 {directoryItems.length} 个目录章节
                 </p>
+                )}
+                {error && isEdit && (
+                  <p className="text-[11px] text-red-400 mt-2 flex items-center gap-1">
+                    <X className="w-3 h-3" /> {error}
+                  </p>
+                )}
               </div>
 
+              {!isEdit && (
               <div>
                 <label className="block text-[11px] font-bold text-slate-400 mb-2">③ 选择后续流程模式</label>
                 <div className="grid grid-cols-2 gap-3">
@@ -299,6 +337,7 @@ export function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
                   />
                 </div>
               </div>
+              )}
             </>
           )}
         </div>
@@ -306,7 +345,7 @@ export function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-6 py-3 border-t border-white/10 bg-black/30">
           <div className="text-[10px] text-slate-500">
-            {stage === "configure" ? "自动模式将进入任务管理器页面" : "上传后可选择模式"}
+            {isEdit ? "仅支持修改项目名称" : stage === "configure" ? "自动模式将进入任务管理器页面" : "上传后可选择模式"}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -326,11 +365,11 @@ export function NewProjectModal({ onClose, onCreated }: NewProjectModalProps) {
               >
                 {creating ? (
                   <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> 创建中...
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> {isEdit ? "保存中..." : "创建中..."}
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-3.5 h-3.5" /> 创建并开始
+                    <Sparkles className="w-3.5 h-3.5" /> {isEdit ? "保存" : "创建并开始"}
                   </>
                 )}
               </button>

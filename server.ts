@@ -440,7 +440,10 @@ app.get("/api/projects/:id", async (req, res) => {
     if (!project) {
       return res.status(404).json({ error: "Project not found" });
     }
-    res.json(project);
+    // 附加该项目最新的 automation job，供前端恢复任务管理器状态
+    const latestJobs = await getLatestJobsForProjects([req.params.id]);
+    const latestJob = latestJobs[req.params.id] || null;
+    res.json({ ...project, latestJob });
   } catch (error) {
     console.error("❌ Failed to get project:", error);
     res.status(500).json({ error: "Failed to get project" });
@@ -465,8 +468,8 @@ app.post("/api/projects", async (req, res) => {
 
 app.put("/api/projects/:id", async (req, res) => {
   try {
-    const { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData } = req.body;
-    await updateProject(req.params.id, { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData });
+    const { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData, pdfPageOffset, executionMode } = req.body;
+    await updateProject(req.params.id, { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData, pdfPageOffset, executionMode });
     res.json({ success: true });
   } catch (error) {
     console.error("Failed to update project:", error);
