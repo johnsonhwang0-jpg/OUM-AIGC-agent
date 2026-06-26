@@ -3,7 +3,7 @@ import {
   Play, Pause, X, RefreshCw, Download, ChevronRight, AlertCircle,
   CheckCircle2, Clock, Loader, FileText, Scissors, FileCode, Rocket,
   Layers, Eye, Edit3, Settings as SettingsIcon, Calendar,
-  BookOpen, Database, Cpu, Minimize2
+  BookOpen, Database, Cpu, Minimize2, CornerDownRight
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useAutomationJob } from "../hooks/useAutomationJob";
@@ -495,18 +495,45 @@ function StageDetail({
           {directoryItems.length === 0 ? (
             <p className="text-xs text-slate-500 py-4 text-center">{t("tmNoDirectory")}</p>
           ) : (
-            <div className="space-y-1 max-h-[60vh] overflow-y-auto">
-              {directoryItems.map((item, idx) => (
-                <div key={item.id || idx} className="text-xs px-2 py-1.5 rounded bg-white/[0.02] border border-white/5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-mono text-slate-600">{item.type === "chapter" ? "章" : "节"}</span>
-                    <span className="text-slate-200 truncate">{item.title}</span>
-                    {item.startPage && (
-                      <span className="text-[9px] text-slate-600 ml-auto">p.{item.startPage}{item.endPage ? `-${item.endPage}` : ""}</span>
+            <div className="space-y-1.5 max-h-[60vh] overflow-y-auto">
+              {directoryItems.map((item, idx) => {
+                const isCh = item.type === "chapter";
+                const isSec = item.type === "section";
+                const pageLabel = item.startPage
+                  ? `p.${item.startPage}${item.endPage ? `-${item.endPage}` : ""}`
+                  : item.page || "";
+                return (
+                  <div
+                    key={item.id || idx}
+                    className={`flex items-center gap-2.5 rounded-lg transition ${
+                      isCh
+                        ? "bg-cyan-500/5 border border-cyan-500/20 p-2.5 pl-3"
+                        : isSec
+                        ? "bg-white/[0.02] border border-white/10 border-dashed p-2 pl-3 ml-6 relative"
+                        : "bg-white/[0.01] border border-white/5 border-dashed p-2 pl-3 ml-12 relative"
+                    }`}
+                  >
+                    {!isCh && (
+                      <div className={`absolute -left-4 top-1/2 -translate-y-1/2 w-4 h-4 border-l-2 border-b-2 rounded-bl-lg pointer-events-none ${
+                        isSec ? "border-white/10" : "border-white/5"
+                      }`}></div>
+                    )}
+                    {isCh ? (
+                      <BookOpen className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                    ) : isSec ? (
+                      <CornerDownRight className="w-3 h-3 text-slate-500 shrink-0" />
+                    ) : (
+                      <CornerDownRight className="w-2.5 h-2.5 text-slate-600 shrink-0" />
+                    )}
+                    <span className={`truncate flex-1 ${
+                      isCh ? "text-sm font-bold text-slate-100" : isSec ? "text-xs text-slate-300" : "text-xs text-slate-400"
+                    }`}>{item.title}</span>
+                    {pageLabel && (
+                      <span className="text-[9px] font-mono text-slate-500 shrink-0">{pageLabel}</span>
                     )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

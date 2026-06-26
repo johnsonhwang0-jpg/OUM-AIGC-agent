@@ -892,9 +892,6 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       executionMode: result.mode,
     });
     setActiveStep(1); // Preview 步骤：创建后停在预览页，由用户点"下一步"触发后续流程
-    // 自动模式直接进入任务管理器；手动模式进入 steps（TOC 目录页）
-    setViewMode(result.mode === "auto" ? "task-manager" : "steps");
-    await loadProjectList();
 
     // 持久化 pdfPageOffset 到 DB，后端 orchestrator 读取后用于自动模式 extract 页码对齐
     if (result.projectId && typeof result.pdfPageOffset === "number") {
@@ -904,6 +901,27 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
         body: JSON.stringify({ pdfPageOffset: result.pdfPageOffset }),
       }).catch(err => console.error("Failed to save pdfPageOffset:", err));
     }
+
+    // 自动模式：直接启动 orchestrator，无需用户再点击「开始自动生成」按钮
+    if (result.mode === "auto" && result.projectId) {
+      try {
+        const startRes = await fetch("/api/automation/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: result.projectId }),
+        });
+        if (startRes.ok) {
+          const startData = await startRes.json();
+          if (startData.job?.id) setAutomationJobId(startData.job.id);
+        }
+      } catch (err) {
+        console.error("自动启动失败:", err);
+      }
+    }
+
+    // 自动模式进入 TaskManager（此时 automationJobId 已设置，直接显示看板）；手动模式进入 steps（TOC 目录页）
+    setViewMode(result.mode === "auto" ? "task-manager" : "steps");
+    await loadProjectList();
   }, [loadProjectList]);
 
   // Save current project state
@@ -2708,9 +2726,15 @@ ${script.conclusion}
                   setViewMode("steps");
                   setActiveStep(3);
                 }}
-                onMinimize={() => {
-                  // 最小化到后台：切回步骤视图（与原返回按钮效果一致），服务端任务继续运行
+                onMinimize={async () => {
+                  // 最小化到后台：刷新项目数据（让 steps 视图显示已完成的切片/脚本/app），服务端任务继续运行
+                  if (currentProjectId) {
+                    await loadProject(currentProjectId);
+                  }
+                  // loadProject 会按 executionMode 设视图（auto→task-manager），这里覆盖为 steps
                   setViewMode("steps");
+                  // 刷新首页项目列表进度（sliceCount/scriptCount/appCount）
+                  loadProjectList();
                 }}
                 onRefreshProject={() => {
                   if (currentProjectId) loadProject(currentProjectId);

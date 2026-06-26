@@ -5,10 +5,19 @@
  *  - 每次完成代码修改并通过验证后，递增 patch（最后一位 +1）
  *  - 用户指定版本号时，按指定版本号更新
  *  - 同时更新 VERSION_HISTORY，记录本次变更内容
+ *  - VERSION_UPDATED_AT 由 vite.config.ts 在构建/启动 dev server 时
+ *    通过 define 注入 __BUILD_TIME__ 自动生成，无需手动维护
  */
 
-export const APP_VERSION = "1.2.9";
-export const VERSION_UPDATED_AT = "2026-06-26 21:00:00";
+// 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
+declare const __BUILD_TIME__: string | undefined;
+
+export const APP_VERSION = "1.2.10";
+// 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
+export const VERSION_UPDATED_AT =
+  typeof __BUILD_TIME__ !== "undefined"
+    ? __BUILD_TIME__
+    : new Date().toISOString().replace("T", " ").substring(0, 19);
 
 export interface VersionEntry {
   version: string;
@@ -28,8 +37,18 @@ export interface VersionEntry {
  */
 export const VERSION_HISTORY: VersionEntry[] = [
   {
+    version: "1.2.10",
+    updatedAt: "2026-06-26 15:30:00",
+    changes: [
+      "自动模式创建项目后直接启动 orchestrator：handleNewProjectCreated 里 auto 模式 POST /api/automation/start 并 setAutomationJobId，进入 TaskManager 即显示看板，无需再点「开始自动生成」按钮",
+      "修复最小化 TaskManager 后项目详情页进度不同步：onMinimize 从单纯 setViewMode 改为先 await loadProject 刷新 modules/savedScripts/directoryItems，再切 steps 视图，并 loadProjectList 刷新首页进度（根因：steps 用旧 state modules=[] 看不到已完成切片/脚本/app）",
+      "TaskManager 目录提取结果展示分级结构：从平铺改为三级缩进（chapter 青色背景 + BookOpen 图标，section 白色虚线 + CornerDownRight + ml-6 缩进 + 左侧树形线，subsection 更浅 + ml-12），与 TOC 页面视觉一致",
+      "TaskManager 切片按钮文案「切换到校验模式编辑此切片」改为「查看详情」（tmEditThisSlice 翻译键，中英双语）",
+    ],
+  },
+  {
     version: "1.2.9",
-    updatedAt: "2026-06-26 21:00:00",
+    updatedAt: "2026-06-26 15:04:21",
     gitCommit: "fa9f101",
     changes: [
       "修复自动模式 extract 页码偏移量（pdfPageOffset）始终为 0 的严重 bug：根因是 server.ts PUT /api/projects/:id 路由解构遗漏 pdfPageOffset 字段，导致前端写入请求被丢弃，DB 永远保持默认值 0，后端 orchestrator 读取不到正确 offset；手工流程因用 React state 不受影响，自动流程后端读 DB 一直错误",
@@ -41,7 +60,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   },
   {
     version: "1.2.8",
-    updatedAt: "2026-06-26 19:30:00",
+    updatedAt: "2026-06-26 13:46:03",
     gitCommit: "19adb14",
     changes: [
       "TaskManager 最小化到后台执行：移除左上角 ArrowLeft 返回按钮，在「切换校验模式」后新增「最小化到后台」按钮（Minimize2 图标），点击后切回步骤视图，服务端任务继续后台运行",
