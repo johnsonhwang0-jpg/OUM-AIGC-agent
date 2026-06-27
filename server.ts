@@ -40,7 +40,8 @@ import {
   createModelConfig,
   updateModelConfig,
   deleteModelConfig,
-  getLatestJobsForProjects
+  getLatestJobsForProjects,
+  getActiveAutomationJob
 } from "./database.js";
 import {
   startAutomationJob,
@@ -450,6 +451,34 @@ app.get("/api/projects/:id", async (req, res) => {
   }
 });
 
+// ============================================================
+// 内容锁定中间件：自动化任务执行期间（running / paused）禁止手工写入
+// 前端禁用关键操作按钮 + 后端兜底返回 409，避免双入口并发写入冲突
+// 应用范围：updateProject / updateProjectPdf / saveModuleScript
+//           / saveExtractedContent / saveGeneratedAppCode / extract-pages
+// 不应用：execution-mode 切换（用户应能暂停/恢复/取消任务）
+//         automation 任务控制 / GET 读取 / 项目删除
+// ============================================================
+const projectWriteLock = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const projectId = req.params.id;
+    if (!projectId) return next();
+    const activeJob = await getActiveAutomationJob(projectId);
+    if (activeJob) {
+      return res.status(409).json({
+        error: "Project is locked by an active automation job",
+        jobId: activeJob.id,
+        jobStatus: activeJob.status,
+      });
+    }
+    next();
+  } catch (err) {
+    console.error("projectWriteLock check failed:", err);
+    // 锁检查失败不阻塞业务，但记录错误
+    next();
+  }
+};
+
 app.post("/api/projects", async (req, res) => {
   try {
     const { name, pdfFileName, pdfData, bookTitle, bookContentText, directoryItems, modules } = req.body;
@@ -466,7 +495,7 @@ app.post("/api/projects", async (req, res) => {
   }
 });
 
-app.put("/api/projects/:id", async (req, res) => {
+app.put("/api/projects/:id", projectWriteLock, async (req, res) => {
   try {
     const { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData, pdfPageOffset, executionMode } = req.body;
     await updateProject(req.params.id, { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData, pdfPageOffset, executionMode });
@@ -477,7 +506,7 @@ app.put("/api/projects/:id", async (req, res) => {
   }
 });
 
-app.put("/api/projects/:id/pdf", async (req, res) => {
+app.put("/api/projects/:id/pdf", projectWriteLock, async (req, res) => {
   try {
     const { pdfFileName, pdfData } = req.body;
     await updateProjectPdf(req.params.id, pdfFileName, pdfData);
@@ -508,7 +537,7 @@ app.get("/api/projects/:id/scripts", async (req, res) => {
   }
 });
 
-app.post("/api/projects/:id/scripts", async (req, res) => {
+app.post("/api/projects/:id/scripts", projectWriteLock, async (req, res) => {
   try {
     const { moduleId, script } = req.body;
     await saveModuleScript(req.params.id, moduleId, script);
@@ -531,7 +560,7 @@ app.get("/api/projects/:id/extracted", async (req, res) => {
 });
 
 // 保存提取的原文内容
-app.post("/api/projects/:id/extracted", async (req, res) => {
+app.post("/api/projects/:id/extracted", projectWriteLock, async (req, res) => {
   try {
     const { moduleId, content } = req.body;
     await saveExtractedContent(req.params.id, moduleId, content);
@@ -543,7 +572,7 @@ app.post("/api/projects/:id/extracted", async (req, res) => {
 });
 
 // 保存生成的App代码
-app.post("/api/projects/:id/app-code", async (req, res) => {
+app.post("/api/projects/:id/app-code", projectWriteLock, async (req, res) => {
   try {
     const { moduleId, code } = req.body;
     await saveGeneratedAppCode(req.params.id, moduleId, code);
@@ -566,7 +595,7 @@ app.get("/api/projects/:id/app-code/:moduleId", async (req, res) => {
 });
 
 // 后端结构化 PDF 提取（使用 PyMuPDF + pdf_oxide 两阶段处理）
-app.post("/api/projects/:id/extract-pages", async (req, res) => {
+app.post("/api/projects/:id/extract-pages", projectWriteLock, async (req, res) => {
   try {
     const { startPage, endPage } = req.body;
     const project = await getProject(req.params.id);

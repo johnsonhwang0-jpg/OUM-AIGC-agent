@@ -481,6 +481,11 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   // 后台自动化任务状态：当用户最小化 TaskManager 后，轮询 job 状态用于全局指示器展示
   const [backgroundJob, setBackgroundJob] = useState<AutomationJob | null>(null);
 
+  // 项目内容锁定：自动任务执行中（running / paused）时，前端禁用关键写操作
+  // 配合后端 projectWriteLock 中间件（409 兜底），避免双入口并发写入冲突
+  // 注：task-manager 视图不显示锁定提示（用户在看任务进度本身），但状态仍保留供切换视图时立即生效
+  const isProjectLocked = !!(backgroundJob && (backgroundJob.status === "running" || backgroundJob.status === "paused"));
+
   // Ref pointers for list scroll anchors
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -700,6 +705,11 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       const latestJob = project.latestJob;
       if (latestJob && (latestJob.status === "running" || latestJob.status === "paused")) {
         setAutomationJobId(latestJob.id);
+        // 同步初始化 backgroundJob，确保从 steps 视图进入时 isProjectLocked 立即生效
+        setBackgroundJob(latestJob);
+      } else {
+        // 项目无活跃任务：清空 backgroundJob，避免上个项目的状态残留导致误锁
+        setBackgroundJob(null);
       }
 
       if (project.directoryItems) {
@@ -2709,6 +2719,28 @@ ${script.conclusion}
             />
           )}
 
+          {/* 自动任务执行中：内容锁定提示 banner
+              仅在 steps 视图显示（task-manager 视图本身就是任务进度，无需重复提示）
+              采用 amber 色提示用户：当前内容只读，如需编辑请先暂停/取消任务 */}
+          {viewMode === "steps" && isProjectLocked && currentProjectId && (
+            <div className="bg-amber-500/10 border-b border-amber-500/30 px-6 py-2 shrink-0 flex items-center justify-between gap-3 z-20">
+              <div className="flex items-center gap-2 text-amber-300 min-w-0">
+                <Lock className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-xs font-semibold truncate">
+                  {language === "en"
+                    ? `Automation ${backgroundJob!.status === "running" ? "running" : "paused"} · content is read-only to avoid conflicts`
+                    : `自动任务${backgroundJob!.status === "running" ? "执行中" : "已暂停"} · 内容已锁定只读，避免与自动流程冲突`}
+                </span>
+              </div>
+              <button
+                onClick={() => setViewMode("task-manager")}
+                className="text-[11px] font-semibold text-amber-200 hover:text-white bg-amber-500/20 hover:bg-amber-500/40 border border-amber-500/40 px-2.5 py-1 rounded-md transition cursor-pointer shrink-0"
+              >
+                {language === "en" ? "Open TaskManager →" : "打开任务看板 →"}
+              </button>
+            </div>
+          )}
+
           {/* 自动模式：任务管理器覆盖层 */}
           {viewMode === "task-manager" && currentProjectId && (
             <div className="absolute inset-0 z-30 animate-fadeIn">
@@ -2726,6 +2758,8 @@ ${script.conclusion}
                   setActiveStep(3);
                 }}
                 appCount={Object.keys(moduleAppCodes).length}
+                savedScriptCount={Object.keys(savedScripts).length}
+                extractedCount={Object.keys(extractedModules).length}
                 onViewBuild={() => {
                   // 查看详情：进入 steps 视图的 build app 步骤（activeStep=5）
                   setViewMode("steps");
@@ -2817,7 +2851,8 @@ ${script.conclusion}
                           <button
                             type="button"
                             onClick={() => addDirectoryItem('chapter')}
-                            className="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-500/20 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                            disabled={isProjectLocked}
+                            className="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-500/20 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <Plus className="w-3 h-3" />
                             {language === "en" ? "Add Chapter" : "添加大章 (Chapter)"}
@@ -2825,7 +2860,8 @@ ${script.conclusion}
                           <button
                             type="button"
                             onClick={() => addDirectoryItem('section')}
-                            className="text-[10px] font-bold text-teal-400 bg-teal-500/10 hover:bg-teal-500/25 border border-teal-500/20 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                            disabled={isProjectLocked}
+                            className="text-[10px] font-bold text-teal-400 bg-teal-500/10 hover:bg-teal-500/25 border border-teal-500/20 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <Plus className="w-3 h-3" />
                             {language === "en" ? "Add Section" : "添加小节 (Section)"}
@@ -2876,8 +2912,9 @@ ${script.conclusion}
                                     type="text"
                                     value={item.title}
                                     onChange={(e) => updateDirectoryItemTitle(item.id, e.target.value)}
+                                    readOnly={isProjectLocked}
                                     placeholder={isCh ? t("chapterTitlePlaceholder") : isSec ? t("sectionTitlePlaceholder") : t("subSectionTitlePlaceholder")}
-                                    className={`w-full bg-transparent outline-none text-xs text-slate-200 border-b border-transparent focus:border-cyan-500/40 py-0.5 transition ${
+                                    className={`w-full bg-transparent outline-none text-xs text-slate-200 border-b border-transparent focus:border-cyan-500/40 py-0.5 transition read-only:cursor-not-allowed ${
                                       isCh ? 'font-bold text-slate-105 text-sm' : isSec ? 'text-slate-300' : 'text-slate-400'
                                     }`}
                                   />
@@ -2891,15 +2928,17 @@ ${script.conclusion}
                                       type="text"
                                       value={item.page || ""}
                                       onChange={(e) => updateDirectoryItemPage(item.id, e.target.value)}
+                                      readOnly={isProjectLocked}
                                       placeholder={t("pagePlaceholder")}
-                                      className="w-12 bg-transparent text-center font-mono text-[11px] font-bold text-cyan-400 outline-none border-none"
+                                      className="w-12 bg-transparent text-center font-mono text-[11px] font-bold text-cyan-400 outline-none border-none read-only:cursor-not-allowed"
                                     />
                                   </div>
 
                                   <button
                                     type="button"
                                     onClick={() => deleteDirectoryItem(item.id)}
-                                    className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition"
+                                    disabled={isProjectLocked}
+                                    className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-500"
                                     title={t("removeLevel")}
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -2917,14 +2956,15 @@ ${script.conclusion}
                         <label className="block text-[11px] font-bold text-slate-400">{t("textPreviewLabel")}</label>
                         <span className="text-[10px] text-slate-500">{t("textPreviewHint")}</span>
                       </div>
-                      <textarea 
+                      <textarea
                         value={bookContentText}
                         onChange={(e) => {
                           setBookContentText(e.target.value);
                           setDirectoryItems(parseTextToDirectory(e.target.value));
                         }}
+                        readOnly={isProjectLocked}
                         placeholder={t("textPreviewPlaceholder")}
-                        className="w-full h-48 bg-[#0a0a0f] focus:bg-[#050508] border border-white/10 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 rounded-lg p-3 text-xs font-mono text-slate-300 transition resize-y"
+                        className="w-full h-48 bg-[#0a0a0f] focus:bg-[#050508] border border-white/10 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 rounded-lg p-3 text-xs font-mono text-slate-300 transition resize-y read-only:cursor-not-allowed"
                       />
                     </div>
                   )}
@@ -3062,7 +3102,8 @@ ${script.conclusion}
                   <button
                     onClick={handleAddCustomModule}
                     type="button"
-                    className="bg-cyan-500 hover:bg-cyan-600 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 transition shadow-[0_0_15px_rgba(6,182,212,0.3)] border border-cyan-400/20 cursor-pointer"
+                    disabled={isProjectLocked}
+                    className="bg-cyan-500 hover:bg-cyan-600 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 transition shadow-[0_0_15px_rgba(6,182,212,0.3)] border border-cyan-400/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
                   >
                     <Plus className="w-4 h-4" />
                     {language === "en" ? "Manually Add New Level" : "手动增设新关卡"}
@@ -3070,7 +3111,8 @@ ${script.conclusion}
 
                   <button
                     onClick={() => setShowSliceSettings(true)}
-                    className="p-2.5 rounded-xl transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
+                    disabled={isProjectLocked}
+                    className="p-2.5 rounded-xl transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
                     title={language === "en" ? "Slice Settings" : "切片设置"}
                   >
                     <Settings className="w-4 h-4" />
@@ -3079,9 +3121,9 @@ ${script.conclusion}
                   <button
                     onClick={() => handleSplitBook(true)}
                     type="button"
-                    disabled={isParsing || !bookContentText.trim()}
+                    disabled={isParsing || !bookContentText.trim() || isProjectLocked}
                     className={`text-xs font-semibold px-4 py-2.5 rounded-xl flex items-center gap-2 transition border cursor-pointer ${
-                      isParsing || !bookContentText.trim()
+                      isParsing || !bookContentText.trim() || isProjectLocked
                         ? 'bg-slate-800/50 text-slate-500 border-slate-700/50 cursor-not-allowed'
                         : 'bg-gradient-to-r from-amber-500/10 to-orange-500/10 hover:from-amber-500/20 hover:to-orange-500/20 text-amber-400 border-amber-500/20 hover:border-amber-400/40 hover:shadow-[0_0_15px_rgba(245,158,11,0.2)]'
                     }`}
@@ -3235,7 +3277,8 @@ ${script.conclusion}
                             <button
                               type="button"
                               onClick={() => handleDeleteModule(mod.id)}
-                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition mt-1 cursor-pointer"
+                              disabled={isProjectLocked}
+                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition mt-1 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
                               title={language === "en" ? "Remove this module" : "移除此模块"}
                             >
                               <Trash2 className="w-4 h-4" />
@@ -3273,10 +3316,11 @@ ${script.conclusion}
                           </div>
                           
                           <div className="flex items-center gap-2">
-                            <button 
+                            <button
                               type="button"
                               onClick={() => handleDeleteModule(mod.id)}
-                              className="p-1 px-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                              disabled={isProjectLocked}
+                              className="p-1 px-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition text-[11px] font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                               {language === "en" ? "Remove" : "移除该章"}
@@ -3617,6 +3661,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                     {activeModule && pdfData && (
                       <button
                         type="button"
+                        disabled={isProjectLocked}
                         onClick={async () => {
                           if (!activeModule || !pdfData) return;
                           const modId = activeModule.id;
@@ -3654,7 +3699,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                             setExtractingModuleId(null);
                           }
                         }}
-                        className="flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 px-2 py-0.5 rounded-full transition text-[9px] font-semibold cursor-pointer"
+                        className="flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 px-2 py-0.5 rounded-full transition text-[9px] font-semibold cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-amber-500/10"
                         title={language === "en" ? "Re-extract this slice's original text" : "重新提取本切片原文"}
                       >
                         <RefreshCw className="w-3 h-3" />
@@ -3831,9 +3876,9 @@ API地址：https://api.deepseek.com/chat/completions`}
                       <Settings className="w-4 h-4" />
                     </button>
 
-                    <button 
+                    <button
                       onClick={() => activeModule && handleGenerateScript(activeModule.id)}
-                      disabled={!activeModule || activeModule.scriptStatus === 'generating'}
+                      disabled={!activeModule || activeModule.scriptStatus === 'generating' || isProjectLocked}
                       className="text-xs px-4 py-2 rounded-lg font-semibold transition flex items-center gap-1.5 cursor-pointer bg-gradient-to-r from-purple-500 to-cyan-500 hover:from-purple-600 hover:to-cyan-600 text-white shadow-[0_0_15px_rgba(168,85,247,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {activeModule.scriptStatus === 'generating' ? (
@@ -3880,9 +3925,10 @@ API地址：https://api.deepseek.com/chat/completions`}
                       <XCircle className="w-10 h-10 text-red-400 animate-pulse" />
                       <div className="font-semibold text-sm text-white">{language === "en" ? "Interactive script generation failed" : "游戏互动剧本合成失败"}</div>
                       <p className="text-xs text-slate-400">{language === "en" ? "The LLM encountered a slight delay. Please click the retry button to fetch the script." : "大模型通信遇到了一点延迟。请重试按钮拉取脚本。"}</p>
-                      <button 
+                      <button
                         onClick={() => handleGenerateScript(activeModule.id)}
-                        className="text-xs bg-cyan-500 text-white px-4 py-2 hover:bg-[#050508] border border-cyan-500/30 hover:text-cyan-400 rounded-lg font-bold cursor-pointer transition"
+                        disabled={isProjectLocked}
+                        className="text-xs bg-cyan-500 text-white px-4 py-2 hover:bg-[#050508] border border-cyan-500/30 hover:text-cyan-400 rounded-lg font-bold cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-cyan-500 disabled:hover:text-white"
                       >
                         {language === "en" ? "Retry Generation" : "重新连通生成"}
                       </button>
@@ -3936,7 +3982,8 @@ API地址：https://api.deepseek.com/chat/completions`}
                       <button
                         type="button"
                         onClick={() => handleGenerateScript(activeModule.id)}
-                        className="w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-1.5 transition text-xs shadow-[0_0_20px_rgba(6,182,212,0.15)] cursor-pointer bg-cyan-500 hover:bg-cyan-600 text-white border border-cyan-400/20 active:scale-95"
+                        disabled={isProjectLocked}
+                        className="w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-1.5 transition text-xs shadow-[0_0_20px_rgba(6,182,212,0.15)] cursor-pointer bg-cyan-500 hover:bg-cyan-600 text-white border border-cyan-400/20 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-cyan-500 disabled:active:scale-100"
                       >
                         <Sparkles className="w-3.5 h-3.5 text-white" />
                         {language === "en" ? "Generate Interactive Simulator Script for This Slice" : "生成本切片的互动模拟器脚本"}
@@ -3989,7 +4036,8 @@ API地址：https://api.deepseek.com/chat/completions`}
                         <textarea
                           value={getSimulationMarkdown(activeModule)}
                           onChange={(e) => handleUpdateSimulationMarkdown(activeModule.id, e.target.value)}
-                          className="flex-1 min-h-[480px] bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-2xl p-4 text-xs text-slate-200 transition resize-none leading-relaxed focus:ring-1 focus:ring-cyan-500 font-mono"
+                          readOnly={isProjectLocked}
+                          className="flex-1 min-h-[480px] bg-[#050508] border border-white/10 focus:border-cyan-500 outline-none rounded-2xl p-4 text-xs text-slate-200 transition resize-none leading-relaxed focus:ring-1 focus:ring-cyan-500 font-mono read-only:cursor-not-allowed"
                         />
                       ) : (
                         <div className="flex-1 bg-[#0a0a0f] border border-white/10 rounded-2xl overflow-y-auto p-6 max-h-[calc(100vh-250px)]">
@@ -4175,7 +4223,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                       <div className="flex items-center gap-2">
                         <button
                           onClick={handleGenerateFinalApp}
-                          disabled={isGeneratingApp || !selectedStep5ModuleId}
+                          disabled={isGeneratingApp || !selectedStep5ModuleId || isProjectLocked}
                           className="flex-1 py-4 rounded-xl flex items-center justify-center gap-2 font-bold transition text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-500 hover:bg-cyan-600 cursor-pointer"
                         >
                           {isGeneratingApp ? (

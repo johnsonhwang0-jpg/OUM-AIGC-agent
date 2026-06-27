@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.2.13";
+export const APP_VERSION = "1.2.14";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,17 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.14",
+    updatedAt: "2026-06-27 10:30:00",
+    gitCommit: "",
+    changes: [
+      "新增项目内容锁定功能：自动化任务执行中（running）或暂停（paused）时，禁止手工写操作，避免自动流程与手工修改并发导致数据不一致",
+      "后端新增 projectWriteLock 中间件 + getActiveAutomationJob 查询，对 /api/projects/:id 下的关键写接口（PUT 项目/PDF、POST scripts/extracted/app-code/extract-pages）返回 409 Conflict",
+      "前端 isProjectLocked 状态驱动 Step 1-5 所有关键写操作按钮/输入框禁用（添加章节、目录标题/页码/删除、raw text、模块新增/删除、AI 重新切片、重新提取、生成/重试脚本、脚本编辑框、开始构建），并显示锁定提示 banner",
+      "锁定触发条件仅依赖 backgroundJob.status，与项目初始选择的自动/手工模式解耦：用户可在无活跃任务时自由编辑，启动/暂停任务即锁定，取消/完成任务即解锁",
+    ],
+  },
   {
     version: "1.2.13",
     updatedAt: "2026-06-26 22:24:02",

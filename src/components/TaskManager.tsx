@@ -23,6 +23,8 @@ interface TaskManagerProps {
   onMinimize: () => void;
   onRefreshProject: () => void;
   appCount: number;
+  savedScriptCount: number;
+  extractedCount: number;
   onViewBuild: () => void;
 }
 
@@ -52,6 +54,8 @@ export function TaskManager({
   onMinimize,
   onRefreshProject,
   appCount,
+  savedScriptCount,
+  extractedCount,
   onViewBuild,
 }: TaskManagerProps) {
   const { t, language } = useLanguage();
@@ -121,24 +125,42 @@ export function TaskManager({
   // 计算流程阶段状态
   const getStageStatus = (stageKey: StageKey): "completed" | "running" | "pending" | "failed" => {
     if (!job) {
+      // 无 job 时：project/directory/slice 依据已有数据判断；extract/script/build 依据实际 task 数据判断
+      // 此前直接 return "pending" 导致 all-completed 状态下 extract/script/build 全显 pending
       if (stageKey === "project") return "completed";
       if (stageKey === "directory") return directoryItems.length > 0 ? "completed" : "pending";
       if (stageKey === "slice") return modules.length > 0 ? "completed" : "pending";
-      return "pending";
-    }
-    if (stageKey === "project") return "completed";
-    if (stageKey === "directory") return directoryItems.length > 0 ? "completed" : "running";
-    if (stageKey === "slice") {
-      return modules.length > 0 ? "completed" : (isRunning ? "running" : "pending");
+    } else {
+      if (stageKey === "project") return "completed";
+      if (stageKey === "directory") return directoryItems.length > 0 ? "completed" : "running";
+      if (stageKey === "slice") {
+        return modules.length > 0 ? "completed" : (isRunning ? "running" : "pending");
+      }
     }
     // extract / script / app-code（build 阶段对应 app-code 任务）
+    // 无论有无 job，都依据实际 task 数据判断（覆盖：job cancelled 后手工跑完、从未启动 job 等场景）
     const taskStage = stageKey === "build" ? "app-code" : stageKey;
     const stageTasks = tasks.filter(t => t.stage === taskStage);
     const doneCount = stageTasks.filter(t => t.status === "completed" || t.status === "skipped").length;
+    // 无 job 或 tasks 为空时，用实际已保存的数据回退判断（覆盖：job cancelled 后手工跑完、从未启动 job 等场景）
+    if (tasks.length === 0) {
+      if (stageKey === "build") {
+        return modules.length > 0 && appCount >= modules.length ? "completed" : "pending";
+      }
+      if (stageKey === "script") {
+        return modules.length > 0 && savedScriptCount >= modules.length ? "completed" : "pending";
+      }
+      if (stageKey === "extract") {
+        return modules.length > 0 && extractedCount >= modules.length ? "completed" : "pending";
+      }
+      return "pending";
+    }
     // 只有所有切片都完成才算 completed（此前用 every() 在 task 数 < 切片数时会误判）
     if (modules.length > 0 && doneCount >= modules.length) return "completed";
     if (stageTasks.some(t => t.status === "failed")) return "failed";
-    if (stageTasks.some(t => t.status === "running")) return "running";
+    // job 暂停时，DB 里 task.status 可能还是 running（orchestrator 协作式中断未更新）
+    // 此时不应显示 running，避免 pause 后节点还在"进行中"
+    if (stageTasks.some(t => t.status === "running") && isRunning) return "running";
     // job 运行中且已有部分完成 → 进行中；否则 → 等待中（含暂停时部分完成）
     if (isRunning && doneCount > 0) return "running";
     return "pending";

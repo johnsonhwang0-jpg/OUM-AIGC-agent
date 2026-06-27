@@ -1313,6 +1313,18 @@ export async function getLatestAutomationJob(projectId: string): Promise<Automat
   return rowToJob(result[0].values[0], result[0].columns);
 }
 
+// 查询项目是否有活跃的自动化任务（running / paused）
+// 用于内容锁定：自动任务执行期间禁止前端手工写入关键数据
+export async function getActiveAutomationJob(projectId: string): Promise<AutomationJob | null> {
+  const database = await getDatabase();
+  const result = database.exec(
+    `SELECT * FROM automation_jobs WHERE projectId = ? AND status IN ('running', 'paused') ORDER BY createdAt DESC LIMIT 1`,
+    [projectId]
+  );
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  return rowToJob(result[0].values[0], result[0].columns);
+}
+
 // 批量查询多个项目的最近 automation job，避免 N+1
 export async function getLatestJobsForProjects(projectIds: string[]): Promise<Record<string, AutomationJob | null>> {
   const result: Record<string, AutomationJob | null> = {};

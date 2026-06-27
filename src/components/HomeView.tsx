@@ -259,8 +259,8 @@ export function HomeView({
                               {project.name}
                             </p>
                             <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-[10px] text-slate-500 truncate">
-                                {project.bookTitle || (isEn ? "No textbook" : "未指定教材")}
+                              <span className="text-[10px] text-slate-500 truncate font-mono">
+                                {project.id}
                               </span>
                               {project.automationStatus && (project.automationStatus.status === "running" || project.automationStatus.status === "paused") && (
                                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border shrink-0 flex items-center gap-1 ${

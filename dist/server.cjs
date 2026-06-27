@@ -56,11 +56,11 @@ __export(database_exports, {
   getLatestJobsForProjects: () => getLatestJobsForProjects,
   getModelConfig: () => getModelConfig,
   getModuleScripts: () => getModuleScripts,
-  getPendingTasksForSlice: () => getPendingTasksForSlice,
   getProject: () => getProject,
   getProjectCountStats: () => getProjectCountStats,
   getPromptTemplate: () => getPromptTemplate,
   getPromptVersions: () => getPromptVersions,
+  getTasksForSlice: () => getTasksForSlice,
   saveExtractedContent: () => saveExtractedContent,
   saveGeneratedAppCode: () => saveGeneratedAppCode,
   saveModuleScript: () => saveModuleScript,
@@ -1095,9 +1095,9 @@ async function updateAutomationTask(taskId, updates) {
   database.run(`UPDATE automation_tasks SET ${fields.join(", ")} WHERE id = ?`, values);
   saveDatabase(database);
 }
-async function getPendingTasksForSlice(jobId, moduleId) {
+async function getTasksForSlice(jobId, moduleId) {
   const database = await getDatabase();
-  const result = database.exec(`SELECT * FROM automation_tasks WHERE jobId = ? AND moduleId = ? AND status = 'pending' ORDER BY createdAt ASC`, [jobId, moduleId]);
+  const result = database.exec(`SELECT * FROM automation_tasks WHERE jobId = ? AND moduleId = ? ORDER BY createdAt ASC`, [jobId, moduleId]);
   if (result.length === 0) return [];
   return result[0].values.map((row) => rowToTask(row, result[0].columns));
 }
@@ -1613,7 +1613,7 @@ async function runSliceExtract(jobId, projectId, bookTitle, slice, directoryItem
     const matchedExtract0 = allExtracts.find((e) => e.moduleId === slice.id);
     if (matchedExtract0?.content) {
       extractedContent = matchedExtract0.content;
-      const existingExtractTasks = await getPendingTasksForSlice(jobId, slice.id);
+      const existingExtractTasks = await getTasksForSlice(jobId, slice.id);
       let skipTask = existingExtractTasks.find((t) => t.stage === "extract") || null;
       if (!skipTask) {
         skipTask = await createAutomationTask({
@@ -1628,7 +1628,7 @@ async function runSliceExtract(jobId, projectId, bookTitle, slice, directoryItem
       await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: (/* @__PURE__ */ new Date()).toISOString() });
       emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "extract", status: "skipped" } });
     } else {
-      const existingExtractTasks = await getPendingTasksForSlice(jobId, slice.id);
+      const existingExtractTasks = await getTasksForSlice(jobId, slice.id);
       const extractTask = existingExtractTasks.find((t) => t.stage === "extract") || null;
       await runTaskWithRetry(jobId, projectId, slice, "extract", extractTask, async () => {
         const covered = (slice.coveredChapters || "").trim();
@@ -1711,7 +1711,7 @@ async function runSliceScript(jobId, projectId, bookTitle, slice, extractedConte
   const extractedRows = await getExtractedContents2(projectId);
   const matchedExtract = extractedRows.find((e) => e.moduleId === slice.id);
   const contentForScript = matchedExtract?.content || extractedContent || `General academic curriculum rules relative to ${slice.title}`;
-  const existingScriptTasks = await getPendingTasksForSlice(jobId, slice.id);
+  const existingScriptTasks = await getTasksForSlice(jobId, slice.id);
   const scriptTask = existingScriptTasks.find((t) => t.stage === "script") || null;
   await runTaskWithRetry(jobId, projectId, slice, "script", scriptTask, async () => {
     const scriptPrompt = await getSavedPrompt("script-gen");
@@ -1773,7 +1773,7 @@ async function runSliceAppCode(jobId, projectId, bookTitle, slice, scriptMarkdow
     emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "app-code", status: "skipped" } });
     return { built: false };
   }
-  const existingAppTasks = await getPendingTasksForSlice(jobId, slice.id);
+  const existingAppTasks = await getTasksForSlice(jobId, slice.id);
   const appTask = existingAppTasks.find((t) => t.stage === "app-code") || null;
   await runTaskWithRetry(jobId, projectId, slice, "app-code", appTask, async () => {
     const appPrompt = await getSavedPrompt("app-code");
@@ -2366,7 +2366,9 @@ app.get("/api/projects/:id", async (req, res) => {
     if (!project) {
       return res.status(404).json({ error: "Project not found" });
     }
-    res.json(project);
+    const latestJobs = await getLatestJobsForProjects([req.params.id]);
+    const latestJob = latestJobs[req.params.id] || null;
+    res.json({ ...project, latestJob });
   } catch (error) {
     console.error("\u274C Failed to get project:", error);
     res.status(500).json({ error: "Failed to get project" });
@@ -2389,8 +2391,8 @@ app.post("/api/projects", async (req, res) => {
 });
 app.put("/api/projects/:id", async (req, res) => {
   try {
-    const { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData } = req.body;
-    await updateProject(req.params.id, { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData });
+    const { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData, pdfPageOffset, executionMode } = req.body;
+    await updateProject(req.params.id, { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData, pdfPageOffset, executionMode });
     res.json({ success: true });
   } catch (error) {
     console.error("Failed to update project:", error);
