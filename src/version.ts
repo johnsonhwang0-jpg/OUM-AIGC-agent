@@ -39,7 +39,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.14",
     updatedAt: "2026-06-27 10:30:00",
-    gitCommit: "",
+    gitCommit: "c2f3168",
     changes: [
       "新增项目内容锁定功能：自动化任务执行中（running）或暂停（paused）时，禁止手工写操作，避免自动流程与手工修改并发导致数据不一致",
       "后端新增 projectWriteLock 中间件 + getActiveAutomationJob 查询，对 /api/projects/:id 下的关键写接口（PUT 项目/PDF、POST scripts/extracted/app-code/extract-pages）返回 409 Conflict",
