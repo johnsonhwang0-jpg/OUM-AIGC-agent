@@ -73,3 +73,11 @@
 - 2026-06-25：**工作约定（状态修改需同步 DB）**：所有需要后端读取的状态修改（如 pdfPageOffset）必须同步保存到 DB，不能只更新 React state。否则后端 orchestrator 从 DB 读到旧值导致行为不一致。
 - 2026-06-25：**工作约定（两个入口一套逻辑）**：自动模式（orchestrator）和手动模式（前端 App.tsx）在 extract/script/app-code 三阶段必须使用同一套 shared 函数（calculatePageRange / filterAndFormatLines / trimExtractedContent）和相同的正则/默认值/拼接逻辑，不能各自实现。修改任一端时必须同步另一端，并通过端到端对比测试验证。
 - 2026-06-25：**工作约定（SSE 事件 emit 规范）**：所有 SSE 事件 emit 时必须包含 taskId（如 task_update/task_complete/task_failed），否则前端 useAutomationJob 的监听器 findIndex 找不到会触发 fetchSnapshot 风暴。断点续传分支也必须先创建/查找 task 再 emit。
+- 2026-06-27：版本升级 v1.2.14：新增项目内容锁定功能。后端 `projectWriteLock` 中间件 + `getActiveAutomationJob` 查询，对关键写接口返回 409；前端 `isProjectLocked` 状态（依赖 `backgroundJob.status`）驱动 Step 1-5 写操作按钮禁用 + 锁定 banner。锁定触发条件仅依赖活跃任务状态（running/paused），与项目初始 executionMode 解耦。
+- 2026-06-27：版本升级 v1.2.15：弱化 executionMode 概念 + 建立重构测试安全网。
+  - **executionMode 弱化**：NewProjectModal 新建项目不再强制选模式；AutomationPanel 移除 ModeToggle；App.tsx 移除 executionMode state，视图切换由是否有活跃 automation job 决定（有活跃 job→task-manager，否则→steps）。projects.executionMode 字段仍保留（DB 兼容），但前端不再依赖它做视图分支。Step 2「智能切片」按钮和 Step 3 AutomationPanel 不再受 manual 模式条件限制，随时可用。
+  - **调试脚本清理**：根目录约 40 个 test_*.py/check_*.py 一次性调试脚本迁移至 tests/scratch/，根目录只保留生产文件（pdf_extractor_oxide.py 等生产脚本保留）。
+  - **测试安全网建立**：新增 `npm test` 脚本（`tsx --test tests/*.test.ts`）。新增 tests/textbook-matcher.test.ts（21 测试，覆盖 shared/textbookMatcher.ts 的 extract 核心纯函数）；新增 tests/project-lock.test.ts（5 测试，覆盖锁定中间件）。全部 33 测试通过。**约定：测试用 node:test + tsx，characterization 风格（先记录现有真实行为，重构后行为不变即通过）**。
+  - **projectWriteLock 提取**：从 server.ts 内联定义提取到 middleware/projectLock.ts，采用工厂模式 `createProjectWriteLock(getActiveJob)` 支持依赖注入，默认导出 `projectWriteLock`（用 database.js 的 getActiveAutomationJob）。server.ts 改为 import 引用。此为 server.ts 路由拆分的第一步，也是测试可注入的前提。
+- 2026-06-27：**工作约定（测试先行于重构）**：对无测试安全网的大重构（如 server.ts 拆分），先为核心纯函数和中间件建立 characterization 测试，再做重构。测试反映当前真实行为（而非理想行为），重构后测试仍通过即验证行为不变。
+- 2026-06-27：**待办（todo.MD）**：3 项 UX 改进已记录到 todo.MD 待处理——①锁定 banner 增加「暂停以编辑」快捷动作；②缺「快速重跑单切片」入口；③三栏布局响应式适配（iPad 小屏）。后续 server.ts 路由拆分（projects/ai/automation/prompts）+ shared service 提取（替代 internalPost 自调用）也已排期，需在测试安全网扩充后进行。

@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.2.14";
+export const APP_VERSION = "1.2.15";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,17 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.15",
+    updatedAt: "2026-06-27 14:00:00",
+    gitCommit: "",
+    changes: [
+      "弱化 executionMode 概念：NewProjectModal 新建项目不再强制选择自动/校验模式，直接进入 Step 1；AutomationPanel 移除 ModeToggle 模式切换组件，「开始自动生成」按钮始终显示；App.tsx 移除 executionMode state，视图切换由是否有活跃 automation job 自然表达（有活跃 job 进 task-manager，否则进 steps）",
+      "清理根目录约 40 个 test_*.py/check_*.py 一次性调试脚本至 tests/scratch/，根目录只保留生产文件",
+      "建立重构测试安全网：新增 tests/textbook-matcher.test.ts（21 个测试，覆盖 calculatePageRange/trimExtractedContent/filterAndFormatLines/calculateAutoPageOffset/findNextSibling/buildHeadingPattern 等 extract 核心纯函数）；新增 tests/project-lock.test.ts（5 个测试，覆盖锁定中间件 409/放行/容错/paused 锁定场景）；package.json 新增 test 脚本（tsx --test tests/*.test.ts），全部 33 测试通过",
+      "提取 projectWriteLock 中间件到独立模块 middleware/projectLock.ts（工厂模式支持依赖注入，便于测试），server.ts 改为 import 引用，为后续 server.ts 路由拆分做准备",
+    ],
+  },
   {
     version: "1.2.14",
     updatedAt: "2026-06-27 10:30:00",

@@ -471,7 +471,6 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
     }
   }, [currentProjectId]);
   const [showProjectList, setShowProjectList] = useState<boolean>(false);
-  const [executionMode, setExecutionMode] = useState<"auto" | "manual">("manual");
   const [automationJobId, setAutomationJobId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"steps" | "task-manager">("steps");
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
@@ -523,7 +522,8 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   }, [automationJobId, viewMode, currentProjectId]);
 
   useEffect(() => {
-    if (executionMode === "auto") return; // 自动模式由后端 orchestrator 处理 extract
+    // 有活跃自动化任务时由后端 orchestrator 处理 extract，前端跳过避免并发
+    if (automationJobId) return;
     if (activeStep !== 3 || !pdfData || modules.length === 0 || batchExtractingRef.current) return;
 
     const extractAll = async () => {
@@ -567,7 +567,7 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
     };
 
     extractAll();
-  }, [activeStep, pdfData, modules, currentProjectId, executionMode]);
+  }, [activeStep, pdfData, modules, currentProjectId, automationJobId]);
 
   // 当切换选中模块时，从缓存中读取原文内容和图片
   useEffect(() => {
@@ -687,9 +687,7 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       setBookContentText(project.bookContentText || "");
       setPdfFileName(project.pdfFileName || "");
       setPdfData(project.pdfData || null);
-      setExecutionMode(project.executionMode === "auto" ? "auto" : "manual");
-      setViewMode(project.executionMode === "auto" ? "task-manager" : "steps");
-      // 从 DB 恢复 pdfPageOffset，确保自动模式与手动模式页码对齐一致
+      // 视图不再按 executionMode 决定：默认进 steps，若有活跃 job 则进 task-manager
       setPdfPageOffset(typeof project.pdfPageOffset === "number" ? project.pdfPageOffset : 0);
       setProjectInfo({
         id: project.id,
@@ -707,9 +705,12 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
         setAutomationJobId(latestJob.id);
         // 同步初始化 backgroundJob，确保从 steps 视图进入时 isProjectLocked 立即生效
         setBackgroundJob(latestJob);
+        // 有活跃任务直接进任务看板
+        setViewMode("task-manager");
       } else {
         // 项目无活跃任务：清空 backgroundJob，避免上个项目的状态残留导致误锁
         setBackgroundJob(null);
+        setViewMode("steps");
       }
 
       if (project.directoryItems) {
@@ -892,14 +893,13 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
     setPdfPagesText(result.pdfPagesText);
     setPdfPageOffset(result.pdfPageOffset);
     setModules([]); // 新建项目无切片
-    setExecutionMode(result.mode);
     setProjectInfo({
       id: result.projectId,
       name: result.bookTitle || "",
       bookTitle: result.bookTitle || "",
       pdfFileName: result.pdfFileName || "",
       createdAt: new Date().toISOString(),
-      executionMode: result.mode,
+      executionMode: "manual",
     });
     setActiveStep(1); // Preview 步骤：创建后停在预览页，由用户点"下一步"触发后续流程
 
@@ -912,25 +912,8 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       }).catch(err => console.error("Failed to save pdfPageOffset:", err));
     }
 
-    // 自动模式：直接启动 orchestrator，无需用户再点击「开始自动生成」按钮
-    if (result.mode === "auto" && result.projectId) {
-      try {
-        const startRes = await fetch("/api/automation/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId: result.projectId }),
-        });
-        if (startRes.ok) {
-          const startData = await startRes.json();
-          if (startData.job?.id) setAutomationJobId(startData.job.id);
-        }
-      } catch (err) {
-        console.error("自动启动失败:", err);
-      }
-    }
-
-    // 自动模式进入 TaskManager（此时 automationJobId 已设置，直接显示看板）；手动模式进入 steps（TOC 目录页）
-    setViewMode(result.mode === "auto" ? "task-manager" : "steps");
+    // 新建后统一进入 steps 视图（Step 1 目录预览），用户可随时在步骤中启动自动化
+    setViewMode("steps");
     await loadProjectList();
   }, [loadProjectList]);
 
@@ -2998,8 +2981,7 @@ ${script.conclusion}
                 <Settings className="w-4 h-4" />
               </button>
 
-              {executionMode === "manual" && (
-              <button 
+              <button
                 type="button"
                 onClick={() => handleSplitBook(false)}
                 disabled={isParsing || !bookContentText.trim() || !bookTitle.trim()}
@@ -3019,7 +3001,6 @@ ${script.conclusion}
                       </>
                     )}
               </button>
-              )}
             </div>
           </div>
 
@@ -3536,13 +3517,11 @@ API地址：https://api.deepseek.com/chat/completions`}
               <div className="flex-1 overflow-y-auto p-6">
                 <div className="w-full space-y-6">
 
-              {/* 自动化模式面板：仅在手工模式下显示，自动模式由后端 orchestrator 处理 extract */}
-              {currentProjectId && modules.length > 0 && executionMode === "manual" && (
+              {/* 自动化面板：随时可启动自动化任务，模式由是否有活跃 job 自然表达 */}
+              {currentProjectId && modules.length > 0 && (
                 <AutomationPanel
                   projectId={currentProjectId}
                   modules={modules}
-                  executionMode={executionMode}
-                  onModeChange={setExecutionMode}
                   onEditSlice={(moduleId) => {
                     setActiveModuleId(moduleId);
                   }}

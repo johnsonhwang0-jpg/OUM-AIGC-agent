@@ -40,9 +40,9 @@ import {
   createModelConfig,
   updateModelConfig,
   deleteModelConfig,
-  getLatestJobsForProjects,
-  getActiveAutomationJob
+  getLatestJobsForProjects
 } from "./database.js";
+import { projectWriteLock } from "./middleware/projectLock.js";
 import {
   startAutomationJob,
   pauseJob,
@@ -458,26 +458,8 @@ app.get("/api/projects/:id", async (req, res) => {
 //           / saveExtractedContent / saveGeneratedAppCode / extract-pages
 // 不应用：execution-mode 切换（用户应能暂停/恢复/取消任务）
 //         automation 任务控制 / GET 读取 / 项目删除
+// 实现移至 middleware/projectLock.ts，便于单元测试
 // ============================================================
-const projectWriteLock = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  try {
-    const projectId = req.params.id;
-    if (!projectId) return next();
-    const activeJob = await getActiveAutomationJob(projectId);
-    if (activeJob) {
-      return res.status(409).json({
-        error: "Project is locked by an active automation job",
-        jobId: activeJob.id,
-        jobStatus: activeJob.status,
-      });
-    }
-    next();
-  } catch (err) {
-    console.error("projectWriteLock check failed:", err);
-    // 锁检查失败不阻塞业务，但记录错误
-    next();
-  }
-};
 
 app.post("/api/projects", async (req, res) => {
   try {

@@ -1,13 +1,11 @@
 import { useState, useCallback, useRef } from "react";
-import { FileText, X, RefreshCw, Check, Sparkles, Rocket, Settings as SettingsIcon } from "lucide-react";
+import { FileText, X, RefreshCw, Check, Sparkles } from "lucide-react";
 import { parseTextToDirectory } from "../utils/directoryParser";
 import { calculateAutoPageOffset } from "../utils/textbookMatcher";
-import type { ExecutionMode } from "../types";
 
 export interface NewProjectResult {
   projectId: string;
   projectName: string;
-  mode: ExecutionMode;
   bookTitle: string;
   bookContentText: string;
   directoryItems: any[];
@@ -43,7 +41,6 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
   const [pdfPageOffset, setPdfPageOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState("");
-  const [mode, setMode] = useState<ExecutionMode>("auto");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -189,17 +186,9 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
       }
       const project = await response.json();
 
-      // 同步设置 executionMode
-      await fetch(`/api/projects/${project.id}/execution-mode`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ executionMode: mode }),
-      });
-
       onCreated({
         projectId: project.id,
         projectName: projectName.trim(),
-        mode,
         bookTitle: projectName.trim(),
         bookContentText,
         directoryItems,
@@ -212,7 +201,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
       setError(err?.message || String(err));
       setCreating(false);
     }
-  }, [projectName, pdfData, bookContentText, directoryItems, pdfFileName, pdfPagesText, pdfPageOffset, mode, onCreated, isEdit, editProject, onSaved]);
+  }, [projectName, pdfData, bookContentText, directoryItems, pdfFileName, pdfPagesText, pdfPageOffset, onCreated, isEdit, editProject, onSaved]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -226,7 +215,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
             <div>
               <h3 className="font-semibold text-white text-sm">{isEdit ? "编辑项目" : "新建项目"}</h3>
               <p className="text-[10px] text-slate-500">
-                {isEdit ? "修改项目名称" : stage === "upload" ? "上传 PDF 教材，选择后续流程模式" : "确认项目信息并选择模式"}
+                {isEdit ? "修改项目名称" : stage === "upload" ? "上传 PDF 教材" : "确认项目信息"}
               </p>
             </div>
           </div>
@@ -312,32 +301,6 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
                   </p>
                 )}
               </div>
-
-              {!isEdit && (
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-2">③ 选择后续流程模式</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <ModeOption
-                    selected={mode === "auto"}
-                    onClick={() => setMode("auto")}
-                    icon={<Rocket className="w-5 h-5" />}
-                    title="自动模式"
-                    subtitle="全书自动生成互动内容，基于结果可校验修改"
-                    accent="cyan"
-                    disabled={creating}
-                  />
-                  <ModeOption
-                    selected={mode === "manual"}
-                    onClick={() => setMode("manual")}
-                    icon={<SettingsIcon className="w-5 h-5" />}
-                    title="校验模式"
-                    subtitle="先进行人工校验，通过校验后 AI 生成内容"
-                    accent="amber"
-                    disabled={creating}
-                  />
-                </div>
-              </div>
-              )}
             </>
           )}
         </div>
@@ -345,7 +308,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-6 py-3 border-t border-white/10 bg-black/30">
           <div className="text-[10px] text-slate-500">
-            {isEdit ? "仅支持修改项目名称" : stage === "configure" ? "自动模式将进入任务管理器页面" : "上传后可选择模式"}
+            {isEdit ? "仅支持修改项目名称" : stage === "configure" ? "创建后可在步骤中随时启动自动化" : "上传后将确认项目信息"}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -378,56 +341,5 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
         </div>
       </div>
     </div>
-  );
-}
-
-// ==================== ModeOption ====================
-
-interface ModeOptionProps {
-  selected: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  title: string;
-  subtitle: string;
-  accent: "cyan" | "amber";
-  disabled?: boolean;
-}
-
-function ModeOption({ selected, onClick, icon, title, subtitle, accent, disabled }: ModeOptionProps) {
-  const colors = {
-    cyan: {
-      border: selected ? "border-cyan-500/60" : "border-white/10",
-      bg: selected ? "bg-cyan-500/10" : "bg-white/5",
-      text: selected ? "text-cyan-300" : "text-slate-300",
-      iconBg: selected ? "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" : "bg-white/5 text-slate-400 border-white/10",
-      glow: selected ? "shadow-[0_0_15px_rgba(6,182,212,0.2)]" : "",
-    },
-    amber: {
-      border: selected ? "border-amber-500/60" : "border-white/10",
-      bg: selected ? "bg-amber-500/10" : "bg-white/5",
-      text: selected ? "text-amber-300" : "text-slate-300",
-      iconBg: selected ? "bg-amber-500/20 text-amber-400 border-amber-500/30" : "bg-white/5 text-slate-400 border-white/10",
-      glow: selected ? "shadow-[0_0_15px_rgba(245,158,11,0.2)]" : "",
-    },
-  }[accent];
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`text-left p-3 rounded-xl border transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${colors.border} ${colors.bg} ${colors.glow} hover:border-white/30`}
-    >
-      <div className="flex items-center gap-2 mb-1.5">
-        <div className={`p-1.5 rounded-lg border ${colors.iconBg}`}>{icon}</div>
-        <span className={`text-sm font-bold ${colors.text}`}>{title}</span>
-        {selected && (
-          <div className={`ml-auto p-0.5 rounded-full ${accent === "cyan" ? "bg-cyan-500" : "bg-amber-500"}`}>
-            <Check className="w-3 h-3 text-white" />
-          </div>
-        )}
-      </div>
-      <p className="text-[10px] text-slate-400 leading-relaxed">{subtitle}</p>
-    </button>
   );
 }
