@@ -1373,6 +1373,25 @@ export async function updateAutomationJob(jobId: string, updates: Partial<Automa
   saveDatabase(database);
 }
 
+/**
+ * 启动时清理僵尸 job：server 重启意味着所有 orchestrator 进程已死，
+ * DB 里残留的 running job 永远不会再推进，且会触发 projectWriteLock 锁住项目。
+ * 把所有 running 的 job 标记为 failed，让前端能正常恢复（用户可重试或取消）。
+ * paused 的 job 保留（用户主动暂停的，可能想恢复）。
+ */
+export async function recoverStaleJobs(): Promise<number> {
+  const database = await getDatabase();
+  const now = new Date().toISOString();
+  const result = database.run(
+    `UPDATE automation_jobs
+     SET status = 'failed', error = 'Server restarted, job interrupted', finishedAt = ?, updatedAt = ?
+     WHERE status = 'running'`,
+    [now, now]
+  );
+  if (result.changes > 0) saveDatabase(database);
+  return result.changes;
+}
+
 export async function createAutomationTask(data: {
   jobId: string;
   projectId: string;

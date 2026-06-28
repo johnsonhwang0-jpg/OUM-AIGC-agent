@@ -40,7 +40,8 @@ import {
   createModelConfig,
   updateModelConfig,
   deleteModelConfig,
-  getLatestJobsForProjects
+  getLatestJobsForProjects,
+  recoverStaleJobs
 } from "./database.js";
 import { projectWriteLock } from "./middleware/projectLock.js";
 import {
@@ -2901,6 +2902,13 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
     console.log("📦 Production assets statically mounted.");
+  }
+
+  // 启动前清理僵尸 job：server 重启意味着 orchestrator 进程已死，
+  // DB 里残留的 running job 会永远卡住且锁住项目，必须标记为 failed
+  const staleCount = await recoverStaleJobs();
+  if (staleCount > 0) {
+    console.log(`🧹 已清理 ${staleCount} 个僵尸自动化任务（running → failed）`);
   }
 
   app.listen(PORT, "0.0.0.0", () => {
