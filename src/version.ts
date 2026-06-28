@@ -39,7 +39,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.17",
     updatedAt: "2026-06-28 23:10:00",
-    gitCommit: "",
+    gitCommit: "731be20",
     changes: [
       "消除 AutomationPanel 与 TaskManager 职责重叠：AutomationPanel 精简为纯「开始自动生成」启动入口，删除进度看板/切片列表/下载按钮/SliceRow/StageBadge 等子组件（进度/暂停/取消/下载统一交 TaskManager 全屏看板）。job 启动后 App.tsx 自动切 task-manager 视图。渲染条件加 !automationJobId（有 job 时不渲染启动按钮）。修复切换视图时两个组件争抢同一 job 的 SSE 导致 ERR_ABORTED 的问题。useAutomationJob(null) 不建 SSE 连接，仅用 start()。",
     ],
