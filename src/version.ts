@@ -39,7 +39,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.16",
     updatedAt: "2026-06-28 22:40:00",
-    gitCommit: "",
+    gitCommit: "483c1f9",
     changes: [
       "修复 orchestrator 自动模式 extract 步骤被自身创建的活跃 job 锁住的严重 bug：projectWriteLock 判断「有活跃 job 即锁」，但 orchestrator 通过 internalPost 调 /api/projects/:id/extract-pages 时自己就是活跃 job，导致 409 自锁，extract 重试 3 次全部失败。修复方式：orchestrator 的 internalPost 调用统一带 x-internal-call: orchestrator header，projectWriteLock 识别该 header 放行内部编排调用（锁只针对用户手工入口）。同步新增 2 个单元测试覆盖该行为（内部调用放行 / 伪造 header 不放行）。",
     ],
