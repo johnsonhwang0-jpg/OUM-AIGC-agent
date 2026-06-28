@@ -39,7 +39,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.18",
     updatedAt: "2026-06-28 23:30:00",
-    gitCommit: "",
+    gitCommit: "b078c31",
     changes: [
       "修复 server 重启后僵尸 job 卡在 running 导致的连环问题：①前端 loadProject 误判有活跃任务，建 SSE 后因 orchestrator 已死永远无事件，切换视图时 es.close() 触发 ERR_ABORTED；②projectWriteLock 检测到 running job 锁住项目，用户无法编辑。修复：database.ts 新增 recoverStaleJobs()，server 启动时把所有 status=running 的 job 标记为 failed（error: 'Server restarted, job interrupted'），paused 保留（用户主动暂停的可恢复）。已验证：重启后僵尸 job job-1782658020953-5r883wi 已从 running 变为 failed。",
     ],
