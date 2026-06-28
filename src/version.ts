@@ -39,7 +39,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.15",
     updatedAt: "2026-06-27 14:00:00",
-    gitCommit: "",
+    gitCommit: "354153b",
     changes: [
       "弱化 executionMode 概念：NewProjectModal 新建项目不再强制选择自动/校验模式，直接进入 Step 1；AutomationPanel 移除 ModeToggle 模式切换组件，「开始自动生成」按钮始终显示；App.tsx 移除 executionMode state，视图切换由是否有活跃 automation job 自然表达（有活跃 job 进 task-manager，否则进 steps）",
       "清理根目录约 40 个 test_*.py/check_*.py 一次性调试脚本至 tests/scratch/，根目录只保留生产文件",
