@@ -293,13 +293,9 @@ export function TaskManager({
           {tmStatus === "all-done" && (language === "en"
             ? <><span className="font-bold text-emerald-300">All tasks completed</span> — Click View Details to review each interactive HTML.</>
             : <><span className="font-bold text-emerald-300">全部任务已完成</span>——点击「查看详情」开始验收每个互动 HTML。</>)}
-          {tmStatus === "not-started" && (projectInfo?.executionMode === "auto"
-            ? (language === "en"
-                ? <><span className="font-bold text-slate-200">Auto mode</span> — will generate all interactive HTML in ~30 min. Click Start Automation to begin — you can minimize and come back later.</>
-                : <><span className="font-bold text-slate-200">自动模式</span>——可一键生成全部互动 HTML，约 30 分钟。点击「启用自动模式」启动，期间可最小化去做别的事，完成后再回来验收。</>)
-            : (language === "en"
-                ? <><span className="font-bold text-slate-200">Manual mode</span> — You can minimize this board and continue in the manual editor, or start automation here and come back when it's done.</>
-                : <><span className="font-bold text-slate-200">手工模式</span>——你可以最小化当前看板返回操作界面继续手工操作，或直接在这里开启自动化流程，等执行完成后再来验收。</>))}
+          {tmStatus === "not-started" && (language === "en"
+            ? <><span className="font-bold text-slate-200">Not started</span> — You can minimize this board and continue in the editor, or start automation here and come back when it's done.</>
+            : <><span className="font-bold text-slate-200">未开始</span>——你可以最小化当前看板返回操作界面继续手工操作，或直接在这里开启自动化流程，等执行完成后再来验收。</>)}
         </p>
         <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
           tmStatus === "running" ? "bg-cyan-400 animate-pulse" :

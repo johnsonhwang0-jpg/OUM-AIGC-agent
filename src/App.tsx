@@ -660,7 +660,6 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
         name: p.name || "",
         bookTitle: p.bookTitle,
         pdfFileName: p.pdfFileName,
-        executionMode: p.executionMode === "auto" ? "auto" : "manual",
         createdAt: p.createdAt,
         updatedAt: p.updatedAt,
         sliceCount: typeof p.sliceCount === "number" ? p.sliceCount : sliceCount,
@@ -695,7 +694,6 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
         bookTitle: project.bookTitle || "",
         pdfFileName: project.pdfFileName || "",
         createdAt: project.createdAt || "",
-        executionMode: project.executionMode === "auto" ? "auto" : "manual",
       });
 
       // 恢复活跃的 automation job：若该项目有 running/paused 任务，自动恢复 automationJobId
@@ -899,7 +897,6 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       bookTitle: result.bookTitle || "",
       pdfFileName: result.pdfFileName || "",
       createdAt: new Date().toISOString(),
-      executionMode: "manual",
     });
     setActiveStep(1); // Preview 步骤：创建后停在预览页，由用户点"下一步"触发后续流程
 
@@ -2753,7 +2750,7 @@ ${script.conclusion}
                   if (currentProjectId) {
                     await loadProject(currentProjectId);
                   }
-                  // loadProject 会按 executionMode 设视图（auto→task-manager），这里覆盖为 steps
+                  // loadProject 会按活跃 job 设视图（有 job→task-manager），这里覆盖为 steps
                   setViewMode("steps");
                   // 刷新首页项目列表进度（sliceCount/scriptCount/appCount）
                   loadProjectList();

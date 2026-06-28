@@ -26,7 +26,7 @@ interface NewProjectModalProps {
 
 /**
  * 新建项目弹窗
- * 流程：上传 PDF → 自动提取名称 → 选模式 → 创建并开始
+ * 流程：上传 PDF → 自动提取名称 → 创建并开始
  * 编辑模式（传入 editProject）：仅修改项目名称
  */
 export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: NewProjectModalProps) {

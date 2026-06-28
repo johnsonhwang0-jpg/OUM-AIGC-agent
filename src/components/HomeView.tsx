@@ -17,7 +17,6 @@ export interface HomeProject {
   name: string;
   bookTitle?: string;
   pdfFileName?: string;
-  executionMode?: "auto" | "manual";
   createdAt?: string;
   updatedAt?: string;
   sliceCount: number;

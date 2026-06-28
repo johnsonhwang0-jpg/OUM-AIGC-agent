@@ -159,8 +159,6 @@ export interface GameSessionState {
 
 // ==================== 自动化任务类型 ====================
 
-export type ExecutionMode = "auto" | "manual";
-
 export type VerificationStatus = "pending" | "verified" | "rejected";
 
 export type AutomationJobStatus =
@@ -225,5 +223,4 @@ export interface ProjectInfo {
   bookTitle: string;
   pdfFileName: string;
   createdAt: string;
-  executionMode: ExecutionMode;
 }
