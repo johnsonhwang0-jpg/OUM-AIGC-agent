@@ -4,8 +4,11 @@ import type { Request, Response, NextFunction } from "express";
 import { createProjectWriteLock } from "../middleware/projectLock.ts";
 
 // 构造最小 Express 请求/响应 mock，验证中间件行为
-function mockReq(params: Record<string, string> = {}): Partial<Request> {
-  return { params } as Partial<Request>;
+function mockReq(params: Record<string, string> = {}, headers: Record<string, string> = {}): Partial<Request> {
+  return {
+    params,
+    get: (h: string) => headers[h.toLowerCase()] ?? headers[h] ?? undefined,
+  } as Partial<Request>;
 }
 
 function mockRes(): { res: Response; state: { statusCode: number; body: any } } {
@@ -88,4 +91,26 @@ test("projectWriteLock: paused 状态也视为活跃并锁定", async () => {
 
   assert.equal(state.statusCode, 409);
   assert.equal(state.body.jobStatus, "paused");
+});
+
+test("projectWriteLock: orchestrator 内部调用（x-internal-call header）放行，即使有活跃 job", async () => {
+  let getJobCalled = false;
+  const lock = createProjectWriteLock(async () => { getJobCalled = true; return { id: "j1", status: "running" }; });
+  const { res, state } = mockRes();
+  let nextCalled = false;
+
+  await lock(mockReq({ id: "p1" }, { "x-internal-call": "orchestrator" }) as Request, res, () => { nextCalled = true; });
+
+  assert.equal(nextCalled, true, "内部调用应放行");
+  assert.equal(getJobCalled, false, "内部调用不应查询 job 状态");
+  assert.equal(state.statusCode, 200);
+});
+
+test("projectWriteLock: 伪造的非 orchestrator header 不放行", async () => {
+  const lock = createProjectWriteLock(async () => ({ id: "j1", status: "running" }));
+  const { res, state } = mockRes();
+
+  await lock(mockReq({ id: "p1" }, { "x-internal-call": "fake" }) as Request, res, () => {});
+
+  assert.equal(state.statusCode, 409, "非 orchestrator 标记应被锁");
 });

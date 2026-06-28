@@ -7,6 +7,10 @@ import { getActiveAutomationJob } from "../database.js";
  * 应用范围：updateProject / updateProjectPdf / saveModuleScript
  *           / saveExtractedContent / saveGeneratedAppCode / extract-pages
  * 不应用：execution-mode 切换、automation 任务控制、GET 读取、项目删除
+ *
+ * 放行规则：orchestrator 通过 internalPost 调用的写接口带 x-internal-call: orchestrator
+ * header，锁不拦截内部编排调用（锁只针对用户手工入口）。
+ * 否则 orchestrator 会被自己创建的活跃 job 锁住，无法执行 extract 等步骤。
  */
 export function createProjectWriteLock(
   getActiveJob: (projectId: string) => Promise<{ id: string; status: string } | null>
@@ -15,6 +19,8 @@ export function createProjectWriteLock(
     try {
       const projectId = req.params.id;
       if (!projectId) return next();
+      // orchestrator 内部编排调用放行，避免自己锁自己
+      if (req.get("x-internal-call") === "orchestrator") return next();
       const activeJob = await getActiveJob(projectId);
       if (activeJob) {
         return res.status(409).json({

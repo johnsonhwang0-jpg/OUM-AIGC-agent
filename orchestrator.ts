@@ -82,7 +82,9 @@ async function internalPost(path: string, body: any): Promise<any> {
   const url = `http://localhost:${port}${path}`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    // 标记为 orchestrator 内部调用，projectWriteLock 据此放行
+    // 锁针对用户手工入口，内部编排调用不应被自己创建的锁拦截
+    headers: { "Content-Type": "application/json", "x-internal-call": "orchestrator" },
     body: JSON.stringify(body),
   });
   const text = await res.text();
