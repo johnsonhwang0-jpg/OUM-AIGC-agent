@@ -3514,16 +3514,13 @@ API地址：https://api.deepseek.com/chat/completions`}
               <div className="flex-1 overflow-y-auto p-6">
                 <div className="w-full space-y-6">
 
-              {/* 自动化面板：随时可启动自动化任务，模式由是否有活跃 job 自然表达 */}
-              {currentProjectId && modules.length > 0 && (
+              {/* 自动化面板：仅作启动入口，任务启动后交 TaskManager 展示进度。
+                  无活跃 job 时才渲染（有 job 时进度统一在 TaskManager 看），避免重复看板 + SSE 争抢。 */}
+              {currentProjectId && modules.length > 0 && !automationJobId && (
                 <AutomationPanel
                   projectId={currentProjectId}
-                  modules={modules}
-                  onEditSlice={(moduleId) => {
-                    setActiveModuleId(moduleId);
-                  }}
-                  jobId={automationJobId}
                   onJobIdChange={setAutomationJobId}
+                  onStarted={() => setViewMode("task-manager")}
                 />
               )}
 
