@@ -39,7 +39,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.20",
     updatedAt: "2026-06-29 00:20:00",
-    gitCommit: "",
+    gitCommit: "464b0df",
     changes: [
       "NewProjectModal 接入 i18n：之前弹窗全为硬编码中文，英文模式下也只显示中文。现提取 33 个翻译 key（npm* 前缀）到 LanguageContext 的 zh/en 双语，覆盖标题/副标题/上传提示/进度/错误/按钮等全部文案。带参数的文案（页数、切片数）通过本地 tf() helper 做 {key} 插值。编辑模式和新模式均支持中英切换。",
     ],
