@@ -1356,7 +1356,7 @@ export async function updateAutomationJob(jobId: string, updates: Partial<Automa
   const fields: string[] = [];
   const values: any[] = [];
 
-  const allowed: (keyof AutomationJob)[] = ["status", "completedSlices", "failedSlices", "concurrency", "startedAt", "finishedAt", "error"];
+  const allowed: (keyof AutomationJob)[] = ["status", "totalSlices", "completedSlices", "failedSlices", "concurrency", "startedAt", "finishedAt", "error"];
   for (const key of allowed) {
     if (updates[key] !== undefined) {
       fields.push(`${key} = ?`);

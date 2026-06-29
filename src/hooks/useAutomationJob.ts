@@ -58,6 +58,10 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
   }, [fetchSnapshot]);
 
   // SSE 连接
+  // 延迟创建 EventSource（setTimeout 0），避免 React StrictMode 开发模式双重挂载
+  // 导致 EventSource 在 CONNECTING 状态被 es.close() 中止，浏览器报 ERR_ABORTED。
+  // StrictMode 双重挂载是同步的（挂载→卸载→重挂），setTimeout 0 在下一个事件循环执行，
+  // 第一次的 timer 会被 cleanup 的 clearTimeout 取消，只有第二次真正创建连接。
   useEffect(() => {
     if (!jobId) {
       setConnected(false);
@@ -70,115 +74,121 @@ export function useAutomationJob(jobId: string | null): UseAutomationJobResult {
     // 先拉取一次快照
     fetchSnapshot(jobId);
 
-    const es = new EventSource(`/api/automation/${jobId}/stream`);
-    eventSourceRef.current = es;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
 
-    es.onopen = () => setConnected(true);
-    es.onerror = () => {
-      setConnected(false);
-      setError("SSE 连接断开，正在重连...");
-    };
+      const es = new EventSource(`/api/automation/${jobId}/stream`);
+      eventSourceRef.current = es;
 
-    const applySnapshot = (snap: AutomationJobSnapshot) => {
-      if (snap.job) setJob(snap.job);
-      if (snap.tasks) setTasks(snap.tasks);
-    };
+      es.onopen = () => setConnected(true);
+      es.onerror = () => {
+        setConnected(false);
+        setError("SSE 连接断开，正在重连...");
+      };
 
-    es.addEventListener("snapshot", (e) => {
-      try { applySnapshot(JSON.parse((e as MessageEvent).data)); } catch { /* */ }
-    });
+      const applySnapshot = (snap: AutomationJobSnapshot) => {
+        if (snap.job) setJob(snap.job);
+        if (snap.tasks) setTasks(snap.tasks);
+      };
 
-    es.addEventListener("job_progress", (e) => {
-      try {
-        const data = JSON.parse((e as MessageEvent).data);
-        setJob(prev => prev ? { ...prev, ...data, status: data.status || prev.status } : prev);
-      } catch { /* */ }
-    });
+      es.addEventListener("snapshot", (e) => {
+        try { applySnapshot(JSON.parse((e as MessageEvent).data)); } catch { /* */ }
+      });
 
-    es.addEventListener("slice_start", (e) => {
-      try {
-        const data = JSON.parse((e as MessageEvent).data);
-        setError(null);
-        // 可选：标记当前正在处理的切片
-        void data;
-      } catch { /* */ }
-    });
+      es.addEventListener("job_progress", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          setJob(prev => prev ? { ...prev, ...data, status: data.status || prev.status } : prev);
+        } catch { /* */ }
+      });
 
-    // 切片生成完成：通知上层刷新 modules
-    es.addEventListener("parse_book_complete", () => {
-      setParseBookDone(true);
-      // 顺便拉取一次最新快照，让 tasks 数据也更新
-      fetchSnapshot(jobId);
-    });
+      es.addEventListener("slice_start", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          setError(null);
+          void data;
+        } catch { /* */ }
+      });
 
-    es.addEventListener("task_update", (e) => {
-      try {
-        const data = JSON.parse((e as MessageEvent).data);
-        setTasks(prev => {
-          const idx = prev.findIndex(t => t.id === data.taskId);
-          if (idx >= 0) {
-            const copy = [...prev];
-            copy[idx] = { ...copy[idx], status: data.status, attempts: data.attempt ?? copy[idx].attempts };
-            return copy;
-          }
-          // 新任务：防抖合并拉取一次快照，避免每个事件都触发 fetchSnapshot
-          scheduleSnapshot(jobId);
-          return prev;
-        });
-      } catch { /* */ }
-    });
-
-    es.addEventListener("task_complete", (e) => {
-      try {
-        const data = JSON.parse((e as MessageEvent).data);
-        setTasks(prev => {
-          const idx = prev.findIndex(t => t.id === data.taskId);
-          if (idx >= 0) {
-            const copy = [...prev];
-            copy[idx] = { ...copy[idx], status: data.status, finishedAt: new Date().toISOString(), error: null };
-            return copy;
-          }
-          scheduleSnapshot(jobId);
-          return prev;
-        });
-      } catch { /* */ }
-    });
-
-    es.addEventListener("task_failed", (e) => {
-      try {
-        const data = JSON.parse((e as MessageEvent).data);
-        setTasks(prev => {
-          const idx = prev.findIndex(t => t.id === data.taskId);
-          if (idx >= 0) {
-            const copy = [...prev];
-            copy[idx] = { ...copy[idx], status: "failed", error: data.error, attempts: data.attempt ?? copy[idx].attempts };
-            return copy;
-          }
-          scheduleSnapshot(jobId);
-          return prev;
-        });
-      } catch { /* */ }
-    });
-
-    es.addEventListener("job_complete", (e) => {
-      try {
-        const data = JSON.parse((e as MessageEvent).data);
-        setJob(prev => prev ? { ...prev, status: "completed", completedSlices: data.completed, failedSlices: data.failed, finishedAt: new Date().toISOString() } : prev);
+      es.addEventListener("parse_book_complete", () => {
+        setParseBookDone(true);
         fetchSnapshot(jobId);
-      } catch { /* */ }
-    });
+      });
 
-    es.addEventListener("job_finished", (e) => {
-      try {
-        const data = JSON.parse((e as MessageEvent).data);
-        setJob(prev => prev ? { ...prev, status: data.status, completedSlices: data.completed, failedSlices: data.failed, finishedAt: new Date().toISOString() } : prev);
-        fetchSnapshot(jobId);
-      } catch { /* */ }
-    });
+      es.addEventListener("task_update", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          setTasks(prev => {
+            const idx = prev.findIndex(t => t.id === data.taskId);
+            if (idx >= 0) {
+              const copy = [...prev];
+              copy[idx] = { ...copy[idx], status: data.status, attempts: data.attempt ?? copy[idx].attempts };
+              return copy;
+            }
+            scheduleSnapshot(jobId);
+            return prev;
+          });
+        } catch { /* */ }
+      });
+
+      es.addEventListener("task_complete", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          setTasks(prev => {
+            const idx = prev.findIndex(t => t.id === data.taskId);
+            if (idx >= 0) {
+              const copy = [...prev];
+              copy[idx] = { ...copy[idx], status: data.status, finishedAt: new Date().toISOString(), error: null };
+              return copy;
+            }
+            scheduleSnapshot(jobId);
+            return prev;
+          });
+        } catch { /* */ }
+      });
+
+      es.addEventListener("task_failed", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          setTasks(prev => {
+            const idx = prev.findIndex(t => t.id === data.taskId);
+            if (idx >= 0) {
+              const copy = [...prev];
+              copy[idx] = { ...copy[idx], status: "failed", error: data.error, attempts: data.attempt ?? copy[idx].attempts };
+              return copy;
+            }
+            scheduleSnapshot(jobId);
+            return prev;
+          });
+        } catch { /* */ }
+      });
+
+      es.addEventListener("job_complete", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          setJob(prev => prev ? { ...prev, status: "completed", completedSlices: data.completed, failedSlices: data.failed, finishedAt: new Date().toISOString() } : prev);
+          fetchSnapshot(jobId);
+        } catch { /* */ }
+      });
+
+      es.addEventListener("job_finished", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          setJob(prev => prev ? { ...prev, status: data.status, completedSlices: data.completed, failedSlices: data.failed, finishedAt: new Date().toISOString() } : prev);
+          fetchSnapshot(jobId);
+        } catch { /* */ }
+      });
+    }, 0);
 
     return () => {
-      es.close();
-      eventSourceRef.current = null;
+      cancelled = true;
+      clearTimeout(timer);
+      const es = eventSourceRef.current;
+      if (es) {
+        es.close();
+        eventSourceRef.current = null;
+      }
       setConnected(false);
     };
   }, [jobId, fetchSnapshot, scheduleSnapshot]);
