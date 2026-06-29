@@ -378,7 +378,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
             {isEdit
               ? t("npmEditOnlyName")
               : stage === "configure"
-                ? (initialMode === "managed" ? t("npmModeManagedHint") : t("npmModeReviewHint"))
+                ? t("npmCreateHint")
                 : t("npmUploadHint")}
           </div>
           <div className="flex items-center gap-2">

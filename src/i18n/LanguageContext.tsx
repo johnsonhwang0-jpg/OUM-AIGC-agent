@@ -404,8 +404,6 @@ export const translations = {
     npmModeReview: "审核模式",
     npmModeManagedDesc: "AI 自动执行所有流程，产出最终互动内容后可以统一进行人工校验/修改。",
     npmModeReviewDesc: "AI 在人工监督下生产内容，每步执行的结果都经过人工审核/修改后再进入下一步。",
-    npmModeManagedHint: "创建后将自动启动编排，进入任务看板。完成后可统一校验。",
-    npmModeReviewHint: "创建后进入步骤视图，逐步人工审核后再进入下一步。",
   },
   en: {
     // Common
@@ -804,12 +802,10 @@ export const translations = {
     npmSave: "Save",
     npmCreateStart: "Create & Start",
     npmModeLabel: "Choose a working mode",
-    npmModeManaged: "Managed Mode",
-    npmModeReview: "Review Mode",
+    npmModeManaged: "Autopilot Mode",
+    npmModeReview: "Copilot Mode",
     npmModeManagedDesc: "AI runs the entire pipeline automatically. You can review and edit the final interactive content all at once.",
     npmModeReviewDesc: "AI produces content under human supervision. Each step's output is reviewed and edited before moving to the next.",
-    npmModeManagedHint: "Will auto-start the orchestrator and open the task board. You can review everything after completion.",
-    npmModeReviewHint: "Will enter the step view. Review each step's output before proceeding.",
   },
 } as const;
 
