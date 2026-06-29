@@ -39,7 +39,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.19",
     updatedAt: "2026-06-29 00:00:00",
-    gitCommit: "",
+    gitCommit: "20c8ab3",
     changes: [
       "修复 totalSlices 永远为 0 的 bug：updateAutomationJob 白名单缺少 totalSlices 字段，orchestrator 调用 updateAutomationJob(jobId, { totalSlices: slices.length }) 被静默忽略，进度条显示 0/0。修复：白名单加入 totalSlices。",
       "修复 ERR_ABORTED：React StrictMode 开发模式双重挂载导致 EventSource 在 CONNECTING 状态被 es.close() 中止，浏览器报 ERR_ABORTED。修复：useAutomationJob 的 SSE useEffect 用 setTimeout(0) 延迟创建 EventSource，StrictMode 第一次挂载的 timer 被 cleanup clearTimeout 取消，只有第二次真正创建连接。生产环境（无 StrictMode）不受影响。",
