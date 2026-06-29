@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from "react";
 import { FileText, X, RefreshCw, Check, Sparkles } from "lucide-react";
 import { parseTextToDirectory } from "../utils/directoryParser";
 import { calculateAutoPageOffset } from "../utils/textbookMatcher";
+import { useLanguage, type TranslationKey } from "../i18n/LanguageContext";
 
 export interface NewProjectResult {
   projectId: string;
@@ -30,6 +31,14 @@ interface NewProjectModalProps {
  * 编辑模式（传入 editProject）：仅修改项目名称
  */
 export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: NewProjectModalProps) {
+  const { t } = useLanguage();
+  // 支持参数插值的本地 helper
+  const tf = useCallback((key: TranslationKey, params?: Record<string, string | number>) => {
+    const s = t(key);
+    if (!params) return s;
+    return s.replace(/\{(\w+)\}/g, (_, k) => String(params[k] ?? `{${k}}`));
+  }, [t]);
+
   const isEdit = !!editProject;
   const [stage, setStage] = useState<"upload" | "configure">(isEdit ? "configure" : "upload");
   const [projectName, setProjectName] = useState(isEdit ? editProject!.name : "");
@@ -51,26 +60,26 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
     const file = files[0];
 
     if (!file.name.toLowerCase().endsWith(".pdf")) {
-      setError("请上传有效的 PDF 格式文档");
+      setError(tf("npmInvalidPdf"));
       return;
     }
 
     setError("");
     setLoading(true);
     setPdfFileName(file.name);
-    setProgress("正在挂载 PDF 解析器并提取文本数据...");
+    setProgress(tf("npmMounting"));
 
     try {
       const typedarray = await new Promise<Uint8Array>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => resolve(new Uint8Array(e.target?.result as ArrayBuffer));
-        reader.onerror = () => reject(new Error("文件读取失败"));
+        reader.onerror = () => reject(new Error(tf("npmReadFail")));
         reader.readAsArrayBuffer(file);
       });
 
       const pdfjsLib = (window as any)["pdfjs-dist/build/pdf"];
       if (!pdfjsLib) {
-        throw new Error("PDF.js 脚本未加载，请刷新页面后重试");
+        throw new Error(tf("npmScriptMissing"));
       }
       pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js";
 
@@ -79,13 +88,13 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
       const totalPages = pdf.numPages;
       const pageLimit = Math.min(totalPages, 150);
 
-      setProgress(`正在解析 PDF (共 ${totalPages} 页)...`);
+      setProgress(tf("npmParsing", { total: totalPages }));
 
       let extractedText = "";
       const pagesTextList: string[] = [];
 
       for (let i = 1; i <= pageLimit; i++) {
-        setProgress(`正在逐页提取文本 (${i} / ${pageLimit})...`);
+        setProgress(tf("npmExtracting", { i, total: pageLimit }));
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
         const pageText = textContent.items.map((item: any) => item.str).join(" ");
@@ -94,7 +103,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
       }
 
       if (!extractedText.trim()) {
-        throw new Error("该 PDF 是扫描版或图片文档，未能提取到文本");
+        throw new Error(tf("npmNoText"));
       }
 
       setPdfPagesText(pagesTextList);
@@ -111,7 +120,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
           const dataUrl = reader.result as string;
           resolve(dataUrl.split(",")[1]);
         };
-        reader.onerror = () => reject(new Error("PDF 转 base64 失败"));
+        reader.onerror = () => reject(new Error(tf("npmBase64Fail")));
         reader.readAsDataURL(file);
       });
       setPdfData(base64Pdf);
@@ -129,11 +138,11 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
       setLoading(false);
       setProgress("");
     }
-  }, []);
+  }, [tf]);
 
   const handleCreate = useCallback(async () => {
     if (!projectName.trim()) {
-      setError("请填写项目名称");
+      setError(tf("npmNameRequired"));
       return;
     }
     // 编辑模式：仅更新项目名称
@@ -148,7 +157,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
         });
         if (!res.ok) {
           const err = await res.json().catch(() => null);
-          throw new Error(err?.error || "保存失败");
+          throw new Error(err?.error || tf("npmSaveFail"));
         }
         onSaved?.(editProject.id, projectName.trim());
       } catch (err: any) {
@@ -158,7 +167,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
       return;
     }
     if (!pdfData || !bookContentText) {
-      setError("PDF 数据缺失，请重新上传");
+      setError(tf("npmPdfMissing"));
       return;
     }
 
@@ -182,7 +191,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
       });
       if (!response.ok) {
         const err = await response.json().catch(() => null);
-        throw new Error(err?.error || "项目创建失败");
+        throw new Error(err?.error || tf("npmCreateFail"));
       }
       const project = await response.json();
 
@@ -201,7 +210,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
       setError(err?.message || String(err));
       setCreating(false);
     }
-  }, [projectName, pdfData, bookContentText, directoryItems, pdfFileName, pdfPagesText, pdfPageOffset, onCreated, isEdit, editProject, onSaved]);
+  }, [projectName, pdfData, bookContentText, directoryItems, pdfFileName, pdfPagesText, pdfPageOffset, onCreated, isEdit, editProject, onSaved, tf]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -213,9 +222,9 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-semibold text-white text-sm">{isEdit ? "编辑项目" : "新建项目"}</h3>
+              <h3 className="font-semibold text-white text-sm">{isEdit ? t("npmEditTitle") : t("npmNewTitle")}</h3>
               <p className="text-[10px] text-slate-500">
-                {isEdit ? "修改项目名称" : stage === "upload" ? "上传 PDF 教材" : "确认项目信息"}
+                {isEdit ? t("npmEditSubtitle") : stage === "upload" ? t("npmUploadSubtitle") : t("npmConfirmSubtitle")}
               </p>
             </div>
           </div>
@@ -223,7 +232,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
             type="button"
             onClick={onClose}
             className="p-1.5 text-slate-500 hover:text-white hover:bg-white/10 rounded-lg transition cursor-pointer"
-            aria-label="关闭"
+            aria-label={t("close")}
           >
             <X className="w-4 h-4" />
           </button>
@@ -235,7 +244,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
           {!isEdit && (
           <div>
             <label className="block text-[11px] font-bold text-slate-400 mb-2">
-              {stage === "upload" ? "① 上传 PDF 教材" : "① 已上传 PDF"}
+              {stage === "upload" ? t("npmStep1Upload") : t("npmStep1Uploaded")}
             </label>
             <div className="border border-dashed border-white/20 rounded-xl bg-white/5 p-6 flex flex-col items-center justify-center text-center relative hover:border-cyan-500 hover:bg-white/10 transition">
               <input
@@ -254,7 +263,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
                   <span className="text-sm font-medium text-emerald-400 flex items-center gap-1.5 justify-center">
                     <Check className="w-4 h-4" /> {pdfFileName}
                   </span>
-                  <p className="text-[11px] text-slate-500">点击重新上传可替换</p>
+                  <p className="text-[11px] text-slate-500">{t("npmReplaceHint")}</p>
                 </div>
               ) : loading ? (
                 <div className="flex items-center gap-2 text-cyan-300">
@@ -263,8 +272,8 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
                 </div>
               ) : (
                 <div>
-                  <p className="text-sm font-semibold text-white">将 PDF 拖拽至此，或点此浏览上传</p>
-                  <p className="text-xs text-slate-500 mt-1">客户端自动提取文本与目录</p>
+                  <p className="text-sm font-semibold text-white">{t("npmDragHint")}</p>
+                  <p className="text-xs text-slate-500 mt-1">{t("npmParseHint")}</p>
                 </div>
               )}
             </div>
@@ -276,23 +285,23 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
           </div>
           )}
 
-          {/* 项目名称 + 模式选择（仅在上传完成后显示） */}
+          {/* 项目名称（仅在上传完成后显示） */}
           {stage === "configure" && (
             <>
               <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-2">{isEdit ? "项目名称" : "② 项目名称"}</label>
+                <label className="block text-[11px] font-bold text-slate-400 mb-2">{isEdit ? t("projectName") : t("npmStep2Name")}</label>
                 <input
                   type="text"
                   value={projectName}
                   onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="输入项目名称"
+                  placeholder={t("npmNamePlaceholder")}
                   className="w-full bg-[#0a0a0f] border border-white/10 focus:border-cyan-500 outline-none rounded-lg px-3.5 py-2 text-sm text-slate-100 transition"
                   disabled={creating}
                   autoFocus
                 />
                 {!isEdit && (
                 <p className="text-[10px] text-slate-500 mt-1">
-                  已识别 {directoryItems.length} 个目录章节
+                  {tf("npmRecognizedChapters", { count: directoryItems.length })}
                 </p>
                 )}
                 {error && isEdit && (
@@ -308,7 +317,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-6 py-3 border-t border-white/10 bg-black/30">
           <div className="text-[10px] text-slate-500">
-            {isEdit ? "仅支持修改项目名称" : stage === "configure" ? "创建后可在步骤中随时启动自动化" : "上传后将确认项目信息"}
+            {isEdit ? t("npmEditOnlyName") : stage === "configure" ? t("npmCreateHint") : t("npmUploadHint")}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -317,7 +326,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
               className="px-4 py-1.5 text-xs font-semibold text-slate-300 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition cursor-pointer"
               disabled={creating}
             >
-              取消
+              {t("cancel")}
             </button>
             {stage === "configure" && (
               <button
@@ -328,11 +337,11 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
               >
                 {creating ? (
                   <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> {isEdit ? "保存中..." : "创建中..."}
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> {isEdit ? t("npmSaving") : t("npmCreating")}
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-3.5 h-3.5" /> {isEdit ? "保存" : "创建并开始"}
+                    <Sparkles className="w-3.5 h-3.5" /> {isEdit ? t("npmSave") : t("npmCreateStart")}
                   </>
                 )}
               </button>
