@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.2.20";
+export const APP_VERSION = "1.2.21";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,19 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.21",
+    updatedAt: "2026-06-29 01:00:00",
+    gitCommit: "",
+    changes: [
+      "恢复新建项目时的模式选择入口，但语义改为「初始路径引导」而非「项目标签」：v1.2.15 误删了模式选择的全部价值，本次只恢复其作为视觉引导/教育入口的职责（让用户在创建时知道有两种工作方式），仍保留 v1.2.15 的核心结论（模式不写 DB、不打项目标签、过程中可随时切换）。",
+      "NewProjectModal 在项目名下方新增两张可点选卡片：托管模式（Rocket 图标，AI 自动执行全流程，产出后统一校验）/ 审核模式（ClipboardCheck 图标，AI 在人工监督下逐步生产，每步审核后进入下一步）。默认选中托管模式。编辑模式不显示卡片。",
+      "NewProjectResult 新增 initialMode: 'managed' | 'review' 字段，仅作初始路径用，不写 DB。",
+      "App.tsx handleNewProjectCreated 根据 initialMode 分流：托管模式自动调 useAutomationJob.start(projectId) 启动 orchestrator + setViewMode('task-manager') 进任务看板（失败回退 steps）；审核模式保持现状进 Step 1。",
+      "底部 hint 根据所选模式显示不同提示文案。",
+      "i18n：新增 7 个翻译键 npmModeLabel/npmModeManaged/npmModeReview/npmModeManagedDesc/npmModeReviewDesc/npmModeManagedHint/npmModeReviewHint，中英双语。",
+    ],
+  },
   {
     version: "1.2.20",
     updatedAt: "2026-06-29 00:20:00",

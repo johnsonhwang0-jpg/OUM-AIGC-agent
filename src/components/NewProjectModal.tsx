@@ -1,8 +1,10 @@
 import { useState, useCallback, useRef } from "react";
-import { FileText, X, RefreshCw, Check, Sparkles } from "lucide-react";
+import { FileText, X, RefreshCw, Check, Sparkles, Rocket, ClipboardCheck } from "lucide-react";
 import { parseTextToDirectory } from "../utils/directoryParser";
 import { calculateAutoPageOffset } from "../utils/textbookMatcher";
 import { useLanguage, type TranslationKey } from "../i18n/LanguageContext";
+
+export type NewProjectInitialMode = "managed" | "review";
 
 export interface NewProjectResult {
   projectId: string;
@@ -14,6 +16,8 @@ export interface NewProjectResult {
   pdfData: string;
   pdfPagesText: string[];
   pdfPageOffset: number;
+  /** 用户在弹窗选择的初始工作模式（仅作初始路径用，不写 DB） */
+  initialMode: NewProjectInitialMode;
 }
 
 interface NewProjectModalProps {
@@ -42,6 +46,7 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
   const isEdit = !!editProject;
   const [stage, setStage] = useState<"upload" | "configure">(isEdit ? "configure" : "upload");
   const [projectName, setProjectName] = useState(isEdit ? editProject!.name : "");
+  const [initialMode, setInitialMode] = useState<NewProjectInitialMode>("managed");
   const [pdfFileName, setPdfFileName] = useState("");
   const [pdfData, setPdfData] = useState("");
   const [bookContentText, setBookContentText] = useState("");
@@ -205,12 +210,13 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
         pdfData,
         pdfPagesText,
         pdfPageOffset,
+        initialMode,
       });
     } catch (err: any) {
       setError(err?.message || String(err));
       setCreating(false);
     }
-  }, [projectName, pdfData, bookContentText, directoryItems, pdfFileName, pdfPagesText, pdfPageOffset, onCreated, isEdit, editProject, onSaved, tf]);
+  }, [projectName, pdfData, bookContentText, directoryItems, pdfFileName, pdfPagesText, pdfPageOffset, onCreated, isEdit, editProject, onSaved, tf, initialMode]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -310,6 +316,58 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
                   </p>
                 )}
               </div>
+
+              {/* 工作模式选择（仅新建模式显示，作初始路径引导用，不写 DB） */}
+              {!isEdit && (
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-2">{t("npmModeLabel")}</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setInitialMode("managed")}
+                      disabled={creating}
+                      className={`text-left p-3 rounded-xl border transition cursor-pointer ${
+                        initialMode === "managed"
+                          ? "border-cyan-500 bg-cyan-500/10 shadow-[0_0_12px_rgba(6,182,212,0.25)]"
+                          : "border-white/15 bg-white/5 hover:border-white/30 hover:bg-white/10"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div className={`p-1.5 rounded-lg border ${initialMode === "managed" ? "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" : "bg-white/5 text-slate-400 border-white/10"}`}>
+                          <Rocket className="w-3.5 h-3.5" />
+                        </div>
+                        <span className={`text-xs font-bold ${initialMode === "managed" ? "text-cyan-300" : "text-slate-200"}`}>
+                          {t("npmModeManaged")}
+                        </span>
+                        {initialMode === "managed" && <Check className="w-3 h-3 text-cyan-400 ml-auto" />}
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">{t("npmModeManagedDesc")}</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setInitialMode("review")}
+                      disabled={creating}
+                      className={`text-left p-3 rounded-xl border transition cursor-pointer ${
+                        initialMode === "review"
+                          ? "border-cyan-500 bg-cyan-500/10 shadow-[0_0_12px_rgba(6,182,212,0.25)]"
+                          : "border-white/15 bg-white/5 hover:border-white/30 hover:bg-white/10"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div className={`p-1.5 rounded-lg border ${initialMode === "review" ? "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" : "bg-white/5 text-slate-400 border-white/10"}`}>
+                          <ClipboardCheck className="w-3.5 h-3.5" />
+                        </div>
+                        <span className={`text-xs font-bold ${initialMode === "review" ? "text-cyan-300" : "text-slate-200"}`}>
+                          {t("npmModeReview")}
+                        </span>
+                        {initialMode === "review" && <Check className="w-3 h-3 text-cyan-400 ml-auto" />}
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">{t("npmModeReviewDesc")}</p>
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -317,7 +375,11 @@ export function NewProjectModal({ onClose, onCreated, editProject, onSaved }: Ne
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-6 py-3 border-t border-white/10 bg-black/30">
           <div className="text-[10px] text-slate-500">
-            {isEdit ? t("npmEditOnlyName") : stage === "configure" ? t("npmCreateHint") : t("npmUploadHint")}
+            {isEdit
+              ? t("npmEditOnlyName")
+              : stage === "configure"
+                ? (initialMode === "managed" ? t("npmModeManagedHint") : t("npmModeReviewHint"))
+                : t("npmUploadHint")}
           </div>
           <div className="flex items-center gap-2">
             <button

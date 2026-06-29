@@ -60,6 +60,7 @@ import { AutomationPanel } from "./components/Automation";
 import { NewProjectModal, type NewProjectResult } from "./components/NewProjectModal";
 import { TaskManager } from "./components/TaskManager";
 import { HomeView, type HomeProject } from "./components/HomeView";
+import { useAutomationJob } from "./hooks/useAutomationJob";
 
 // Extract valid HTML from AI response, stripping markdown fences and explanatory text
 function extractValidHtml(raw: string): string {
@@ -473,6 +474,8 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   const [showProjectList, setShowProjectList] = useState<boolean>(false);
   const [automationJobId, setAutomationJobId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"steps" | "task-manager">("steps");
+  // 仅用于新建项目时启动托管模式 orchestrator（不订阅 SSE，进度由 TaskManager 接管）
+  const { start: startAutomationJob } = useAutomationJob(null);
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
   const [showNewProjectModal, setShowNewProjectModal] = useState<boolean>(false);
   // 编辑项目名称（复用 NewProjectModal 的编辑模式）
@@ -909,10 +912,24 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
       }).catch(err => console.error("Failed to save pdfPageOffset:", err));
     }
 
-    // 新建后统一进入 steps 视图（Step 1 目录预览），用户可随时在步骤中启动自动化
-    setViewMode("steps");
+    // 根据用户选择的初始模式分流：
+    //  - managed（托管模式）：自动启动 orchestrator，进入 TaskManager 看板
+    //  - review（审核模式）：进入 steps 视图，逐步人工审核
+    // 模式选择仅作初始路径引导，不写 DB、不打项目标签；过程中用户可随时暂停/启动切换
+    if (result.initialMode === "managed") {
+      try {
+        const newJobId = await startAutomationJob(result.projectId);
+        setAutomationJobId(newJobId);
+        setViewMode("task-manager");
+      } catch (err: any) {
+        console.error("启动托管模式失败，回退到步骤视图:", err);
+        setViewMode("steps");
+      }
+    } else {
+      setViewMode("steps");
+    }
     await loadProjectList();
-  }, [loadProjectList]);
+  }, [loadProjectList, startAutomationJob]);
 
   // Save current project state
   const saveCurrentProject = useCallback(async (overrideModules?: any[], overrideAiMeta?: typeof aiMeta, overrideRawBlueprint?: string) => {
