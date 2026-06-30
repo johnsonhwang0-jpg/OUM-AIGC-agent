@@ -38,7 +38,7 @@ export interface VersionEntry {
 export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.23",
-    updatedAt: "2026-06-30 23:30:00",
+    updatedAt: "2026-06-30 17:32:22",
     gitCommit: "bd2f1d9",
     changes: [
       "阶段 2：动态模型选择。3 个 AI 调用入口（教材内容智能切片、生成互动脚本、开始构建）从硬编码 deepseek 模型改为用户可选 provider + model。点击调用按钮旁的齿轮图标调起 ApiDebugDrawer，原静态模型名 div 改为内嵌 ModelSelectorInline 组件，先选 provider（仅展示已配置 API Key 的厂商）再选 model（实时拉取该 provider 的可用模型列表）。",
