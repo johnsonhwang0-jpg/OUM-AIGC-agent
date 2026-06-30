@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.2.23";
+export const APP_VERSION = "1.3.1";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -37,7 +37,7 @@ export interface VersionEntry {
  */
 export const VERSION_HISTORY: VersionEntry[] = [
   {
-    version: "1.2.23",
+    version: "1.3.1",
     updatedAt: "2026-06-30 17:32:22",
     gitCommit: "bd2f1d9",
     changes: [
@@ -51,7 +51,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
     ],
   },
   {
-    version: "1.2.22",
+    version: "1.3.0",
     updatedAt: "2026-06-30 15:40:00",
     gitCommit: "bb34b49",
     changes: [
