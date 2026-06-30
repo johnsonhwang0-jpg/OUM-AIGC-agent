@@ -39,6 +39,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.22",
     updatedAt: "2026-06-30 15:40:00",
+    gitCommit: "bb34b49",
     changes: [
       "AI Management 架构重构：API Key 从「模型级别」提升到「厂商级别」。一个 API Key 对应一个 provider，可调用该 provider 下所有可用模型，不再需要为每个模型单独配置。具体使用哪个模型 + 哪个 prompt 在调用入口的配置面板选择，不在这里绑定。",
       "数据库新增 api_keys 表（id/provider/apiKey/baseUrl/createdAt/updatedAt），替代原 model_configs 表的模型级配置。开发期 DROP+CREATE 强制重建表结构以去除遗留的 name/isActive 列。新增 4 个 CRUD 函数（getAllApiKeys/getApiKeyById/createApiKey/updateApiKey/deleteApiKey）。",
