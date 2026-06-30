@@ -60,6 +60,7 @@ import { AutomationPanel } from "./components/Automation";
 import { NewProjectModal, type NewProjectResult } from "./components/NewProjectModal";
 import { TaskManager } from "./components/TaskManager";
 import { HomeView, type HomeProject } from "./components/HomeView";
+import { ModelSelector, loadStoredSelection, type ModelSelection } from "./components/ModelSelector";
 import { useAutomationJob } from "./hooks/useAutomationJob";
 
 // Extract valid HTML from AI response, stripping markdown fences and explanatory text
@@ -299,9 +300,19 @@ function greet(name) {
   const [primaryColor, setPrimaryColor] = useState<string>('#06b6d4');
   const [isGeneratingApp, setIsGeneratingApp] = useState(false);
   const [finalCode, setFinalCode] = useState<string>('');
-  const [appModel, setAppModel] = useState<string>('deepseek-v4-flash');
   const [outputTab, setOutputTab] = useState<'code' | 'preview'>('preview');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  // 阶段 2：3 个 AI 调用入口的模型选择（provider + model），从 localStorage 恢复上次选择
+  const [sliceModelConfig, setSliceModelConfig] = useState<ModelSelection>(
+    () => loadStoredSelection("slice") || { provider: "deepseek", model: "deepseek-v4-flash" }
+  );
+  const [scriptModelConfig, setScriptModelConfig] = useState<ModelSelection>(
+    () => loadStoredSelection("script") || { provider: "deepseek", model: "deepseek-v4-flash" }
+  );
+  const [buildModelConfig, setBuildModelConfig] = useState<ModelSelection>(
+    () => loadStoredSelection("build") || { provider: "deepseek", model: "deepseek-v4-flash" }
+  );
 
   // Step 5 States: Slice selection for app building
   const [selectedStep5ModuleId, setSelectedStep5ModuleId] = useState<string | null>(null);
@@ -1347,7 +1358,9 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
     // 构造API请求数据 - 完全使用当前状态值
     const requestPayload: any = {
       title: bookTitle,
-      directoryStructure: directoryItems
+      directoryStructure: directoryItems,
+      provider: sliceModelConfig.provider,
+      model: sliceModelConfig.model
     };
 
     // Fetch latest prompt from DB for smart-split
@@ -1647,7 +1660,9 @@ Extracted Content: ${extractedOriginalText.substring(0, 8000)}`;
         designRationale: mod.designRationale,
         extractedContent: extractedOriginalText.substring(0, 8000),
         systemPrompt: savedSystemPrompt,
-        userPromptTemplate: savedUserPromptTemplate
+        userPromptTemplate: savedUserPromptTemplate,
+        provider: scriptModelConfig.provider,
+        model: scriptModelConfig.model
       };
 
       const response = await fetch("/api/generate-script", {
@@ -2226,7 +2241,7 @@ ${script.conclusion}
 
     setAppApiDebugInfo(prev => ({
       ...prev,
-      model: appModel,
+      model: buildModelConfig.model,
       userPrompt,
       status: 'calling',
       rawResponse: '',
@@ -2260,7 +2275,8 @@ ${script.conclusion}
           chapterTitle: `${mod.chapterIndex} · ${mod.title}`,
           coveredChapters: mod.coveredChapters,
           scriptMarkdown: markdown,
-          model: appModel,
+          provider: buildModelConfig.provider,
+          model: buildModelConfig.model,
           systemPrompt: appSavedSystemPrompt,
           userPromptTemplate: appSavedUserPromptTemplate
         })
@@ -4073,7 +4089,10 @@ API地址：https://api.deepseek.com/chat/completions`}
             aiEntry="smart-split"
             title={language === "en" ? "Slice - AI Config" : "切片-AI配置"}
             iconColor="text-cyan-400"
-            model="deepseek-v4-flash"
+            callSite="slice"
+            provider={sliceModelConfig.provider}
+            model={sliceModelConfig.model}
+            onModelChange={setSliceModelConfig}
             defaultSystemPrompt={sliceSystemPrompt}
             defaultUserPrompt={sliceUserPromptTemplate}
             apiDebugInfo={apiDebugInfo}
@@ -4086,7 +4105,10 @@ API地址：https://api.deepseek.com/chat/completions`}
             aiEntry="script-gen"
             title={language === "en" ? "Script - AI Config" : "脚本-AI配置"}
             iconColor="text-purple-400"
-            model="deepseek-chat"
+            callSite="script"
+            provider={scriptModelConfig.provider}
+            model={scriptModelConfig.model}
+            onModelChange={setScriptModelConfig}
             defaultSystemPrompt={simulationBlueprintSystemPrompt}
             defaultUserPrompt=""
             apiDebugInfo={apiDebugInfo}
@@ -4099,7 +4121,10 @@ API地址：https://api.deepseek.com/chat/completions`}
             aiEntry="app-code"
             title={language === "en" ? "App - AI Config" : "App-AI配置"}
             iconColor="text-cyan-400"
-            model={appModel}
+            callSite="build"
+            provider={buildModelConfig.provider}
+            model={buildModelConfig.model}
+            onModelChange={setBuildModelConfig}
             defaultSystemPrompt={appApiDebugInfo.systemPrompt}
             defaultUserPrompt={appApiDebugInfo.userPrompt}
             apiDebugInfo={appApiDebugInfo}
@@ -4237,7 +4262,7 @@ API地址：https://api.deepseek.com/chat/completions`}
                         </button>
                       </div>
                       <p className="text-center text-[10px] text-slate-500 mt-3 flex items-center justify-center gap-1">
-                        <Lock className="w-3 h-3" /> {language === "en" ? "Generated using DeepSeek V4 Flash model" : "使用 DeepSeek V4 Flash 模型生成"}
+                        <Lock className="w-3 h-3" /> {language === "en" ? "Click API Debug to switch model" : "点击 API 调试按钮切换模型"}
                       </p>
                     </div>
 

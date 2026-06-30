@@ -353,8 +353,7 @@ async function initDatabase(): Promise<Database> {
   database.run(`CREATE INDEX IF NOT EXISTS idx_model_configs_prompt ON model_configs(promptTemplateId)`);
 
   // API Key 表（provider 级别，阶段 1 新增）
-  // 开发期：表结构未稳定，强制重建。阶段 1 稳定后删除 DROP 语句。
-  database.run(`DROP TABLE IF EXISTS api_keys`);
+  // 表结构已在阶段 1 稳定，不再 DROP，避免清空用户已配置的密钥
   database.run(`
     CREATE TABLE IF NOT EXISTS api_keys (
       id TEXT PRIMARY KEY,

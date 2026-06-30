@@ -214,6 +214,117 @@ async function callDashScope(prompt: string, systemPrompt: string = "", model: s
 
 // (已移除 Gemini / Ollama / Hugging Face 客户端，仅保留 DeepSeek 与 DashScope)
 
+// ─── 阶段 2：统一按 provider + model 调用 AI（从 api_keys 表查 key） ───
+
+// 各 provider 的默认 base URL（与前端 src/providers.ts 一致）
+const PROVIDER_DEFAULT_BASE_URLS: Record<string, string> = {
+  deepseek: "https://api.deepseek.com",
+  qwen:     "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  minimax:  "https://api.minimax.chat/v1",
+  gemini:   "https://generativelanguage.googleapis.com/v1beta",
+  openai:   "https://api.openai.com/v1",
+  glm:      "https://open.bigmodel.cn/api/paas/v4",
+};
+
+// 根据 provider + baseUrl 拼出 OpenAI 兼容的 chat/completions 端点
+function getChatCompletionsUrl(provider: string, baseUrl: string): string {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  if (provider === "gemini") {
+    // Gemini 的 OpenAI 兼容端点在 /openai/ 路径下
+    return `${cleanBase}/openai/chat/completions`;
+  }
+  return `${cleanBase}/chat/completions`;
+}
+
+// 从 api_keys 表查找指定 provider 的 key；找不到则回退到环境变量（向后兼容）
+async function resolveCredentials(provider: string): Promise<{ apiKey: string; baseUrl: string }> {
+  const allKeys = await getAllApiKeys();
+  const dbKey = allKeys.find(k => k.provider === provider);
+  if (dbKey && dbKey.apiKey) {
+    return { apiKey: dbKey.apiKey, baseUrl: dbKey.baseUrl || PROVIDER_DEFAULT_BASE_URLS[provider] || "" };
+  }
+  // 回退到环境变量
+  if (provider === "deepseek") {
+    return { apiKey: process.env.DEEPSEEK_API_KEY || "", baseUrl: process.env.DEEPSEEK_BASE_URL || PROVIDER_DEFAULT_BASE_URLS.deepseek };
+  }
+  if (provider === "qwen" || provider === "dashscope") {
+    return { apiKey: process.env.DASHSCOPE_API_KEY || "", baseUrl: process.env.DASHSCOPE_BASE_URL || PROVIDER_DEFAULT_BASE_URLS.qwen };
+  }
+  return { apiKey: "", baseUrl: PROVIDER_DEFAULT_BASE_URLS[provider] || "" };
+}
+
+// 统一 AI 调用：按 provider 查 key，用 model 调 OpenAI 兼容端点，支持自动续写
+async function callAIByProvider(
+  provider: string,
+  model: string,
+  prompt: string,
+  systemPrompt: string,
+  maxTokens: number = 4096,
+  jsonMode: boolean = true
+): Promise<string> {
+  const { apiKey, baseUrl } = await resolveCredentials(provider);
+  if (!apiKey) {
+    throw new Error(`No API key configured for provider "${provider}". Please configure it in Setting → AI Management.`);
+  }
+  if (!model) {
+    throw new Error(`No model specified for provider "${provider}".`);
+  }
+  const chatUrl = getChatCompletionsUrl(provider, baseUrl);
+  console.log(`🔄 [callAIByProvider] provider=${provider} model=${model} url=${chatUrl} maxTokens=${maxTokens} jsonMode=${jsonMode}`);
+
+  let accumulated = "";
+  const maxRounds = 5;
+
+  for (let round = 0; round < maxRounds; round++) {
+    const messages: any[] = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: prompt }
+    ];
+    if (accumulated) {
+      messages.push({ role: "assistant", content: accumulated });
+      messages.push({ role: "user", content: "继续，不要停。如果代码还没写完，请接着上一段继续输出剩余部分。" });
+    }
+
+    let result: Awaited<ReturnType<typeof streamChatCompletion>> | null = null;
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        result = await streamChatCompletion({
+          url: chatUrl,
+          apiKey,
+          model,
+          messages,
+          maxTokens,
+          jsonMode: jsonMode && round === 0,
+          thinking: provider === "deepseek" ? "disabled" : undefined,
+        });
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        if (attempt === 2) throw err;
+        console.warn(`[callAIByProvider] ${provider}/${model} fetch aborted, retrying once...`);
+        await new Promise(resolve => setTimeout(resolve, 700));
+      }
+    }
+    if (!result) throw lastError || new Error("AI request failed");
+
+    const content = result.content;
+    const finishReason = result.finishReason;
+    accumulated += content;
+    console.log(`[callAIByProvider] ${provider}/${model} round ${round + 1}: +${content.length} chars, finish=${finishReason}, interrupted=${result.interrupted}`);
+
+    const completeJson = jsonMode ? extractCompleteJsonContent(accumulated) : null;
+    if (completeJson) {
+      accumulated = completeJson;
+      break;
+    }
+    if (finishReason !== "length" && !result.interrupted) break;
+  }
+
+  return accumulated;
+}
+
 // Ensure server is up and responsive
 /**
  * Utility to standardize and clean chapter range values to follow a clean uniform "a-b" or "a" format. Removes "Topic", "&", "and", etc.
@@ -592,6 +703,8 @@ app.get("/api/projects/:id/images", async (req, res) => {
  * 1) Parsing TOC & Module Blueprinting API
  */
 app.post("/api/parse-book", async (req, res) => {
+  const sliceProvider = req.body?.provider || "deepseek";
+  const sliceModel = req.body?.model || "deepseek-v4-flash";
   try {
     const { title, fullText, directoryStructure, systemPrompt, userPromptTemplate } = req.body;
 
@@ -736,10 +849,9 @@ designRationale 	 描述2-3个综合应用场景，说明完整的问题场景
 
     let outputText: string;
 
-    // Force use DeepSeek V4 Flash for this specific endpoint (textbook slicing)
-    const sliceModel = "deepseek-v4-flash";
-    console.log(`🔄 [parse-book] Forcing DeepSeek model: ${sliceModel}`);
-    outputText = await callDeepSeek(finalPromptMessage, finalSystemInstruction, sliceModel, 16384);
+    // 阶段 2：按前端选择的 provider + model 调用（sliceProvider/sliceModel 在 try 外声明）
+    console.log(`🔄 [parse-book] provider=${sliceProvider} model=${sliceModel}`);
+    outputText = await callAIByProvider(sliceProvider, sliceModel, finalPromptMessage, finalSystemInstruction, 16384, true);
 
     try {
       const resultObj = parseJsonResponse(outputText);
@@ -810,8 +922,8 @@ designRationale 	 描述2-3个综合应用场景，说明完整的问题场景
       res.json({
         ...blueprint,
         _meta: {
-          model: "deepseek-v4-flash",
-          provider: "deepseek",
+          model: sliceModel,
+          provider: sliceProvider,
           degraded: true,
           fallbackType: "heuristic",
           systemInstruction: "",
@@ -1088,6 +1200,8 @@ function getHeuristicOrMockBlueprint(title: string, fullText: string, directoryS
  * 2) Generate Interactive Playable Script API for individual chapters
  */
 app.post("/api/generate-script", async (req, res) => {
+  const scriptProvider = req.body?.provider || "deepseek";
+  const scriptModel = req.body?.model || "deepseek-v4-flash";
   try {
     let { 
       bookTitle, 
@@ -1209,24 +1323,15 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
 
     let outputText: string;
     
-    if (AI_PROVIDER === "deepseek") {
-      console.log(`🔄 Using DeepSeek (deepseek-v4-flash) for scenario script generation...`);
-      outputText = await callDeepSeek(finalPromptText, finalSystemInstruction, "deepseek-v4-flash", 6144, false);
-    } else if (AI_PROVIDER === "dashscope") {
-      console.log("🔄 Using DashScope (通义千问) for scenario script generation...");
-      outputText = await callDashScope(finalPromptText, finalSystemInstruction, "", 6144, false);
-    } else {
-      return res.status(400).json({
-        error: "不支持的 AI_PROVIDER",
-        message: `当前 AI_PROVIDER=${AI_PROVIDER} 不再支持。请使用 deepseek 或 dashscope。`
-      });
-    }
+    // 阶段 2：按前端选择的 provider + model 调用
+    console.log(`🔄 [generate-script] provider=${scriptProvider} model=${scriptModel}`);
+    outputText = await callAIByProvider(scriptProvider, scriptModel, finalPromptText, finalSystemInstruction, 6144, false);
 
     res.json({
       markdown: outputText.trim(),
       _meta: {
-        model: AI_PROVIDER === "deepseek" ? (process.env.DEEPSEEK_SCRIPT_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-chat") : AI_PROVIDER,
-        provider: AI_PROVIDER,
+        model: scriptModel,
+        provider: scriptProvider,
         systemInstruction: finalSystemInstruction,
         userPrompt: finalPromptText
       }
@@ -1239,8 +1344,10 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
 });
 
 app.post("/api/generate-app-code", async (req, res) => {
+  const appProvider = req.body?.provider || "deepseek";
+  const appModel = req.body?.model || "deepseek-v4-flash";
   try {
-    const { bookTitle, chapterTitle, coveredChapters, scriptMarkdown, model, systemPrompt, userPromptTemplate } = req.body;
+    const { bookTitle, chapterTitle, coveredChapters, scriptMarkdown, systemPrompt, userPromptTemplate } = req.body;
     if (!scriptMarkdown || typeof scriptMarkdown !== "string") {
       return res.status(400).json({ error: "Missing scriptMarkdown." });
     }
@@ -1263,13 +1370,9 @@ ${scriptMarkdown}`;
       : defaultPromptText;
 
     let outputText: string;
-    const selectedModel = model || "deepseek-v4-flash";
-
-    if (selectedModel === "qwen3.7-plus") {
-      outputText = await callDashScope(promptText, systemInstruction, "qwen3.7-plus", 32000, false);
-    } else {
-      outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 32000, false);
-    }
+    // 阶段 2：按前端选择的 provider + model 调用
+    console.log(`🔄 [generate-app-code] provider=${appProvider} model=${appModel}`);
+    outputText = await callAIByProvider(appProvider, appModel, promptText, systemInstruction, 32000, false);
 
     // Strip markdown code fences and any explanatory text before/after code
     let code = outputText.trim();
@@ -1280,7 +1383,7 @@ ${scriptMarkdown}`;
     code = code.replace(/```(?:html|HTML)?\s*\n?/gi, "");
     code = code.trim();
 
-    res.json({ code, model: selectedModel });
+    res.json({ code, model: appModel, provider: appProvider });
   } catch (error: any) {
     console.error("Error generating app code:", error);
     res.status(500).json({ error: error.message || "Failed to generate app code" });

@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Plus, Trash2, X, Copy } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, X, Copy, Cpu, Edit3, Check } from "lucide-react";
 import { useLanguage } from "../i18n/LanguageContext";
+import { PROVIDERS } from "../providers";
+import { loadStoredSelection, ModelSelectorInline, type ModelSelection } from "./ModelSelector";
 
 interface PromptTemplate {
   id: string;
@@ -23,16 +25,6 @@ interface ApiKey {
   createdAt: string;
   updatedAt: string;
 }
-
-// 厂商定义：value 与后端 api_keys.provider 对应
-const PROVIDERS = [
-  { value: "deepseek", label: "DeepSeek",   shortLabel: "DS", gradient: "from-blue-500 to-cyan-400",   defaultBaseUrl: "https://api.deepseek.com" },
-  { value: "qwen",     label: "Qwen (通义千问)", shortLabel: "QW", gradient: "from-purple-500 to-pink-400", defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
-  { value: "minimax",  label: "MiniMax",    shortLabel: "MM", gradient: "from-orange-500 to-red-400",  defaultBaseUrl: "https://api.minimax.chat/v1" },
-  { value: "gemini",   label: "Gemini",     shortLabel: "GM", gradient: "from-blue-500 to-indigo-400", defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta" },
-  { value: "openai",   label: "OpenAI",     shortLabel: "AI", gradient: "from-emerald-500 to-teal-400", defaultBaseUrl: "https://api.openai.com/v1" },
-  { value: "glm",      label: "GLM (智谱)",  shortLabel: "GL", gradient: "from-fuchsia-500 to-purple-400", defaultBaseUrl: "https://open.bigmodel.cn/api/paas/v4" },
-];
 
 const getAvailableVars = (language: "zh" | "en") => [
   { var: "{{bookTitle}}", desc: language === "en" ? "Book title" : "教材名称" },
@@ -752,6 +744,113 @@ export function PromptTab({ language }: { language: "zh" | "en" }) {
 }
 
 // ==================== Model Tab ====================
+
+// 3 个 AI 调用入口当前使用的模型概览（从 localStorage 读取用户上次选择，可直接编辑）
+function CurrentModelsOverview({ language }: { language: "zh" | "en" }) {
+  const t = (zh: string, en: string) => language === "en" ? en : zh;
+
+  const callSites = [
+    { site: "slice" as const,   entry: AI_ENTRIES[0] },
+    { site: "script" as const,  entry: AI_ENTRIES[1] },
+    { site: "build" as const,   entry: AI_ENTRIES[2] },
+  ];
+
+  // 3 个 callSite 的当前选择（从 localStorage 初始化）
+  const [selections, setSelections] = useState<Record<string, ModelSelection | null>>(() => ({
+    slice: loadStoredSelection("slice"),
+    script: loadStoredSelection("script"),
+    build: loadStoredSelection("build"),
+  }));
+  // 当前正在编辑哪个 callSite，null 表示都不在编辑
+  const [editingSite, setEditingSite] = useState<string | null>(null);
+
+  const handleSave = (site: string, sel: ModelSelection) => {
+    setSelections(prev => ({ ...prev, [site]: sel }));
+  };
+
+  return (
+    <div className="mt-4 mb-6 rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+          <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+            {t("当前各调用入口使用的模型", "Current Model per AI Entry")}
+          </h3>
+        </div>
+        <span className="text-[9px] font-mono text-slate-600">
+          {t("点击编辑可直接切换", "Click edit to switch")}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {callSites.map(({ site, entry }) => {
+          const sel = selections[site];
+          const providerCfg = sel ? PROVIDERS.find(p => p.value === sel.provider) : null;
+          const isEditing = editingSite === site;
+          return (
+            <div
+              key={site}
+              className={`rounded-lg border p-3 bg-[#050508] transition ${
+                isEditing ? "border-cyan-500/40" : "border-white/10"
+              }`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-base shrink-0">{entry.icon}</span>
+                  <span className="text-xs font-semibold text-slate-300 truncate">
+                    {language === "en" ? entry.nameEn : entry.name}
+                  </span>
+                </div>
+                {!isEditing && (
+                  <button
+                    onClick={() => setEditingSite(site)}
+                    className="p-1 rounded text-slate-500 hover:text-cyan-400 hover:bg-white/5 transition cursor-pointer shrink-0"
+                    title={t("编辑", "Edit")}
+                  >
+                    <Edit3 className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
+              {isEditing ? (
+                <div className="space-y-2">
+                  <ModelSelectorInline
+                    callSite={site}
+                    value={sel || { provider: "deepseek", model: "" }}
+                    onChange={(v) => handleSave(site, v)}
+                  />
+                  <button
+                    onClick={() => setEditingSite(null)}
+                    className="w-full mt-1 px-2 py-1.5 rounded bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[10px] font-semibold hover:bg-cyan-500/20 transition cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Check className="w-3 h-3" />
+                    {t("完成", "Done")}
+                  </button>
+                </div>
+              ) : sel && providerCfg ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-4 h-4 rounded bg-gradient-to-br ${providerCfg.gradient} flex items-center justify-center text-[7px] font-bold text-white shrink-0`}>
+                      {providerCfg.shortLabel}
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-400 truncate">{providerCfg.label.split(" ")[0]}</span>
+                  </div>
+                  <div className="text-[10px] font-mono text-purple-300 truncate" title={sel.model}>
+                    {sel.model || t("（未选模型）", "(no model)")}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[10px] text-slate-600 italic">
+                  {t("未配置，将使用默认", "Not set, will use default")}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function ModelTab({ language }: { language: "zh" | "en" }) {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -918,6 +1017,9 @@ export function ModelTab({ language }: { language: "zh" | "en" }) {
           {t("添加 API Key", "Add API Key")}
         </button>
       </div>
+
+      {/* 当前 3 个 AI 调用入口使用的模型概览 */}
+      <CurrentModelsOverview language={language} />
 
       {loading ? (
         <div className="text-center text-slate-500 text-sm py-8">{t("加载中...", "Loading...")}</div>

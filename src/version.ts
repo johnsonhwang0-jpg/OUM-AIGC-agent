@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.2.22";
+export const APP_VERSION = "1.2.23";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,20 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.23",
+    updatedAt: "2026-06-30 23:30:00",
+    gitCommit: "",
+    changes: [
+      "阶段 2：动态模型选择。3 个 AI 调用入口（教材内容智能切片、生成互动脚本、开始构建）从硬编码 deepseek 模型改为用户可选 provider + model。点击调用按钮旁的齿轮图标调起 ApiDebugDrawer，原静态模型名 div 改为内嵌 ModelSelectorInline 组件，先选 provider（仅展示已配置 API Key 的厂商）再选 model（实时拉取该 provider 的可用模型列表）。",
+      "新增 src/components/ModelSelector.tsx：导出 ModelSelectorInline（内联展开版，用于 ApiDebugDrawer 和 AIManagement 概览）和 loadStoredSelection/saveSelection（按 callSite 隔离的 localStorage 记忆）。3 个 callSite（slice/script/build）各自独立记忆，下次调用默认使用上次选择，未配置时回退 deepseek/deepseek-v4-flash。",
+      "后端 server.ts 新增 callAIByProvider 统一调用函数：按 provider 从 api_keys 表查 key（找不到回退环境变量兼容旧配置），按 provider 拼 OpenAI 兼容 /chat/completions 端点（Gemini 走 /openai/chat/completions），保留自动续写/JSON 提取/重试逻辑。改造 /api/parse-book、/api/generate-script、/api/generate-app-code 三个端点接受 provider + model 参数，未传时回退默认值，orchestrator 自动模式不受影响。",
+      "新增 src/providers.ts 共享厂商配置：PROVIDERS 常量统一管理 6 个厂商的 value/label/shortLabel/gradient/defaultBaseUrl，供 AIManagement 和 ModelSelector 复用，避免重复定义。",
+      "AIManagement「AI 模型 API」tab 顶部新增「当前各调用入口使用的模型」概览卡片：3 列网格展示 slice/script/build 各自的 provider 图标 + 模型名，每张卡片右上角带编辑按钮，点击内联展开 ModelSelectorInline 直接切换模型（与 ApiDebugDrawer 共用同一 localStorage key，双向同步）。",
+      "修复 API Key 丢失 bug：database.ts 初始化时 DROP TABLE IF EXISTS api_keys 语句每次重启 dev server 都清空用户已配置的密钥（阶段 1 遗留的开发期临时措施未及时删除）。改为纯 CREATE TABLE IF NOT EXISTS，密钥持久化保留。",
+      "i18n：顶部「AI Management」按钮文案改为「Setting」（中英统一）。",
+    ],
+  },
   {
     version: "1.2.22",
     updatedAt: "2026-06-30 15:40:00",

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { X, Settings, Info, RefreshCw, CheckCircle2, XCircle, Edit3, Save, FileText } from "lucide-react";
 import { useLanguage } from "../i18n/LanguageContext";
+import { ModelSelectorInline, type ModelSelection } from "./ModelSelector";
 
 interface ApiDebugDrawerProps {
   show: boolean;
@@ -8,7 +9,14 @@ interface ApiDebugDrawerProps {
   aiEntry: "smart-split" | "script-gen" | "app-code";
   title: string;
   iconColor?: string;
+  /** 调用入口标识，用于模型选择记忆 */
+  callSite: "slice" | "script" | "build";
+  /** 当前 provider */
+  provider: string;
+  /** 当前 model */
   model: string;
+  /** 模型选择变化回调 */
+  onModelChange: (value: ModelSelection) => void;
   defaultSystemPrompt: string;
   defaultUserPrompt: string;
   apiDebugInfo?: {
@@ -24,7 +32,10 @@ const ApiDebugDrawer: React.FC<ApiDebugDrawerProps> = ({
   aiEntry,
   title,
   iconColor = "text-purple-400",
+  callSite,
+  provider,
   model,
+  onModelChange,
   defaultSystemPrompt,
   defaultUserPrompt,
   apiDebugInfo,
@@ -174,10 +185,16 @@ const ApiDebugDrawer: React.FC<ApiDebugDrawerProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Model */}
+          {/* Model - 可切换 provider + model */}
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Calling Model" : "调用模型"}</label>
-            <div className="bg-[#050508] border border-white/10 rounded-lg p-3 text-xs text-purple-400 font-mono font-bold">{model}</div>
+            <div className="bg-[#050508] border border-white/10 rounded-lg p-3">
+              <ModelSelectorInline
+                callSite={callSite}
+                value={{ provider, model }}
+                onChange={onModelChange}
+              />
+            </div>
           </div>
 
           {/* Status */}
