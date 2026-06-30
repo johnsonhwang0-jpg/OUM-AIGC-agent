@@ -39,7 +39,7 @@ export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.2.23",
     updatedAt: "2026-06-30 23:30:00",
-    gitCommit: "",
+    gitCommit: "bd2f1d9",
     changes: [
       "阶段 2：动态模型选择。3 个 AI 调用入口（教材内容智能切片、生成互动脚本、开始构建）从硬编码 deepseek 模型改为用户可选 provider + model。点击调用按钮旁的齿轮图标调起 ApiDebugDrawer，原静态模型名 div 改为内嵌 ModelSelectorInline 组件，先选 provider（仅展示已配置 API Key 的厂商）再选 model（实时拉取该 provider 的可用模型列表）。",
       "新增 src/components/ModelSelector.tsx：导出 ModelSelectorInline（内联展开版，用于 ApiDebugDrawer 和 AIManagement 概览）和 loadStoredSelection/saveSelection（按 callSite 隔离的 localStorage 记忆）。3 个 callSite（slice/script/build）各自独立记忆，下次调用默认使用上次选择，未配置时回退 deepseek/deepseek-v4-flash。",
