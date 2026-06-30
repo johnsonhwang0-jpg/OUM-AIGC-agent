@@ -130,3 +130,81 @@
 - 各 Step 视图组件（拆分后）
 
 **状态**：[ ] 待处理
+
+---
+
+## 需求 5：后处理 / AI 审核体系（待处理）
+
+**背景**：当前系统在 Autopilot 模式下产出 extract → script → app-code 后，校验/修改完全依赖人工。随着产物增多，需要一个成体系的后处理 + AI 审核层，让 AI 在产物交付给用户前先做一轮自动审核与修正，降低人工负担，同时为 Copilot 模式提供"AI 辅助审核"能力。这是一个完整的体系，不是单点功能。
+
+**可能包含的子方向**（待进一步拆解）：
+
+1. **产物质量审核**
+   - extract 产物：页码对齐、章节完整性、文本质量
+   - script 产物：语法正确性、与教材内容一致性、互动逻辑合理性
+   - app-code 产物：可运行性、与 script 对应关系、潜在 bug
+   - 审核结果以分级（pass / warn / fail）+ 问题清单形式呈现
+
+2. **AI 自动修正**
+   - 对 warn/fail 项自动调用 AI 修正，修正后再次审核
+   - 设置最大修正轮次避免死循环
+
+3. **审核报告**
+   - 每个切片/项目生成一份审核报告，记录发现的问题、修正过程、最终结论
+   - 报告可作为用户是否采纳产物的决策依据
+
+4. **与现有模式的关系**
+   - Autopilot 模式：自动执行全流程后，自动进入 AI 审核阶段，审核通过才交付
+   - Copilot 模式：每步产出后可选触发 AI 审核，作为人工审核的辅助
+
+5. **后处理流水线**
+   - 可能需要新增 orchestrator 阶段（review/polish）
+   - 或独立的后处理服务，产物完成后异步触发
+
+**涉及文件**：
+- `orchestrator.ts`（新增审核阶段或 hook）
+- `server.ts` / 拆分后的路由（审核接口、报告查询）
+- `src/components/TaskManager.tsx`（审核结果展示）
+- 可能新增 `reviewer.ts` / `post-processor.ts` 模块
+- prompt 模板（审核专用 prompt）
+
+**状态**：[ ] 待处理
+- 待进一步细化：审核范围、审核标准、修正策略、报告格式、与 orchestrator 的集成方式
+
+---
+
+## 需求 6：接入 Codex 执行最终 AI Coding（待处理）
+
+**背景**：当前 Step 5（Build App）由系统直接调用 AI 生成 app-code。但 app-code 是最终交付物，质量要求高，且当前 AI 生成代码的能力边界有限。Codex（或类似 coding agent）在代码生成/打磨上更专业。应在最终代码生成环节把 Codex 接进来，让 Codex 承担最后的 AI coding 工作，提升产出的可运行性与工程质量。
+
+**具体改动**：
+
+1. **集成方式**
+   - 方案 A：后端调用 Codex CLI / API，把 script + 上下文交给 Codex 生成 app-code
+   - 方案 B：导出产物（script + extract）为 Codex 可消费的格式，由用户手动在 Codex 中打开
+   - 方案 C：Codex 作为 orchestrator 的一个阶段，接收前序产物，输出最终代码
+   - **待决策**：选哪种集成方式，取决于 Codex 的 API/CLI 能力与产品定位
+
+2. **产物传递**
+   - 把 extract 产物、script 产物、教材上下文、prompt 模板等组装成 Codex 的输入
+   - 明确 Codex 输出格式（单文件 / 多文件 / 项目结构）
+
+3. **回写与预览**
+   - Codex 生成的代码回写到项目，替换或并存现有 app-code
+   - Step 5 预览支持查看 Codex 产物
+   - 保留版本对比（AI 直出 vs Codex 产出）便于回滚
+
+4. **凭据与配置**
+   - Codex API key / CLI 路径等配置项
+   - 凭据只记录位置，不记录值
+
+**涉及文件**：
+- `orchestrator.ts`（新增 codex 阶段或替换现有 app-code 阶段）
+- `server.ts` / 拆分后的路由（codex 调用接口）
+- `src/components/TaskManager.tsx` + Step 5 视图（产物展示）
+- 可能新增 `codex-adapter.ts` / `code-builder.ts` 模块
+- prompt 模板（codex 专用 prompt，含上下文组装）
+- `.env.example`（新增 codex 配置项占位）
+
+**状态**：[ ] 待处理
+- 待决策：集成方式（A/B/C）、Codex 产物格式、是否替换现有 AI 直出

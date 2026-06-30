@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { ArrowLeft, Settings, Globe, FileText, Brain, History, GitCommit, Copy, Check } from "lucide-react";
 import { useLanguage } from "../i18n/LanguageContext";
-import { PromptTab } from "./ModelManagement";
+import { PromptTab, ModelTab } from "./AIManagement";
 import { APP_VERSION, VERSION_UPDATED_AT, VERSION_HISTORY } from "../version";
 
 type SettingsTab = "models" | "prompts" | "language" | "version";
@@ -69,30 +69,10 @@ export default function SystemSettings({ onBack }: SystemSettingsProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === "models" && <ModelsTab />}
+        {activeTab === "models" && <ModelTab language={language} />}
         {activeTab === "prompts" && <PromptTab language={language} />}
         {activeTab === "language" && <LanguageTab />}
         {activeTab === "version" && <VersionTab />}
-      </div>
-    </div>
-  );
-}
-
-// Models Tab
-function ModelsTab() {
-  const { t } = useLanguage();
-  return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="max-w-4xl mx-auto">
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <Brain className="w-5 h-5 text-cyan-400" />
-          {t("modelConfig")}
-        </h2>
-        <p className="text-sm text-slate-400 mb-6">{t("modelConfigDesc")}</p>
-        <div className="bg-white/5 border border-white/10 rounded-xl p-8 text-center text-slate-400">
-          <p>{t("modelConfigDev")}</p>
-          <p className="text-xs mt-2">{t("modelConfigEnv")}</p>
-        </div>
       </div>
     </div>
   );

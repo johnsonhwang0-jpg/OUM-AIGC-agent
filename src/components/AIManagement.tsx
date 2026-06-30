@@ -14,29 +14,24 @@ interface PromptTemplate {
   updatedAt: string;
 }
 
-interface ModelConfig {
+// API Key（provider 级别），与后端 database.ts ApiKey 对应
+interface ApiKey {
   id: string;
-  name: string;
   provider: string;
-  modelId: string;
-  apiKey: string | null;
+  apiKey: string;
   baseUrl: string | null;
-  maxTokens: number;
-  temperature: number;
-  topP: number;
-  promptTemplateId: string | null;
-  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
+// 厂商定义：value 与后端 api_keys.provider 对应
 const PROVIDERS = [
-  { value: "deepseek", label: "DeepSeek" },
-  { value: "dashscope", label: "DashScope (Qwen)" },
-  { value: "openai", label: "OpenAI" },
-  { value: "gemini", label: "Google Gemini" },
-  { value: "ollama", label: "Ollama" },
-  { value: "huggingface", label: "Hugging Face" },
+  { value: "deepseek", label: "DeepSeek",   shortLabel: "DS", gradient: "from-blue-500 to-cyan-400",   defaultBaseUrl: "https://api.deepseek.com" },
+  { value: "qwen",     label: "Qwen (通义千问)", shortLabel: "QW", gradient: "from-purple-500 to-pink-400", defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
+  { value: "minimax",  label: "MiniMax",    shortLabel: "MM", gradient: "from-orange-500 to-red-400",  defaultBaseUrl: "https://api.minimax.chat/v1" },
+  { value: "gemini",   label: "Gemini",     shortLabel: "GM", gradient: "from-blue-500 to-indigo-400", defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta" },
+  { value: "openai",   label: "OpenAI",     shortLabel: "AI", gradient: "from-emerald-500 to-teal-400", defaultBaseUrl: "https://api.openai.com/v1" },
+  { value: "glm",      label: "GLM (智谱)",  shortLabel: "GL", gradient: "from-fuchsia-500 to-purple-400", defaultBaseUrl: "https://open.bigmodel.cn/api/paas/v4" },
 ];
 
 const getAvailableVars = (language: "zh" | "en") => [
@@ -284,7 +279,7 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
 
 type TabKey = "models" | "prompts";
 
-export default function ModelManagement({ onBack }: { onBack: () => void }) {
+export default function AIManagement({ onBack }: { onBack: () => void }) {
   const { language } = useLanguage();
   const [activeTab, setActiveTab] = useState<TabKey>("prompts");
 
@@ -296,7 +291,7 @@ export default function ModelManagement({ onBack }: { onBack: () => void }) {
           <button onClick={onBack} className="p-2 rounded-lg hover:bg-white/10 transition cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h1 className="text-lg font-bold">{language === "en" ? "Model & Prompt Management" : "模型与提示词管理"}</h1>
+          <h1 className="text-lg font-bold">{language === "en" ? "AI Management" : "AI 管理"}</h1>
         </div>
         <div className="flex gap-1 bg-white/5 rounded-lg p-1">
           <button
@@ -305,7 +300,7 @@ export default function ModelManagement({ onBack }: { onBack: () => void }) {
               activeTab === "prompts" ? "bg-purple-500/30 text-white" : "text-slate-400 hover:text-white"
             }`}
           >
-            {language === "en" ? "Prompt Management" : "提示词管理"}
+            {language === "en" ? "Prompts" : "提示词"}
           </button>
           <button
             onClick={() => setActiveTab("models")}
@@ -313,7 +308,7 @@ export default function ModelManagement({ onBack }: { onBack: () => void }) {
               activeTab === "models" ? "bg-cyan-500/30 text-white" : "text-slate-400 hover:text-white"
             }`}
           >
-            {language === "en" ? "Model Management" : "模型管理"}
+            {language === "en" ? "AI Model API" : "AI 模型 API"}
           </button>
         </div>
       </div>
@@ -758,103 +753,98 @@ export function PromptTab({ language }: { language: "zh" | "en" }) {
 
 // ==================== Model Tab ====================
 export function ModelTab({ language }: { language: "zh" | "en" }) {
-  const [models, setModels] = useState<ModelConfig[]>([]);
-  const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
+  const [keys, setKeys] = useState<ApiKey[]>([]);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [editingModel, setEditingModel] = useState<Partial<ModelConfig> | null>(null);
+  const [editing, setEditing] = useState<Partial<ApiKey> & { apiKeyConfirm?: string } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  // 动态获取的模型列表缓存：apiKeyId -> models[]
+  const [modelsCache, setModelsCache] = useState<Record<string, string[]>>({});
+  const [modelsLoading, setModelsLoading] = useState<string | null>(null);
+  const [modelsError, setModelsError] = useState<string | null>(null);
 
   const t = (zh: string, en: string) => language === "en" ? en : zh;
 
-  const loadModels = async () => {
+  const loadKeys = async () => {
     setLoading(true);
     try {
-      const [modelsRes, promptsRes] = await Promise.all([
-        fetch("/api/model-configs"),
-        fetch("/api/prompt-templates"),
-      ]);
-      const modelsData = await modelsRes.json();
-      const promptsData = await promptsRes.json();
-      setModels(Array.isArray(modelsData) ? modelsData : []);
-      setPrompts(Array.isArray(promptsData) ? promptsData : []);
+      const res = await fetch("/api/api-keys");
+      const data = await res.json();
+      setKeys(Array.isArray(data) ? data : []);
     } catch (e) {
-      console.error("Failed to load models:", e);
+      console.error("Failed to load API keys:", e);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadModels();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadKeys();
   }, []);
 
   const handleCreate = () => {
-    setEditingModel({
-      name: "",
+    setEditing({
       provider: "deepseek",
-      modelId: "",
       apiKey: "",
       baseUrl: "",
-      maxTokens: 16000,
-      temperature: 0.7,
-      topP: 0.9,
-      promptTemplateId: null,
-      isActive: false,
+      apiKeyConfirm: "",
     });
     setShowEditModal(true);
   };
 
-  const handleEdit = (m: ModelConfig) => {
-    setEditingModel({ ...m });
+  const handleEdit = (k: ApiKey) => {
+    setEditing({
+      id: k.id,
+      provider: k.provider,
+      apiKey: "",
+      apiKeyConfirm: "",
+      baseUrl: k.baseUrl || "",
+    });
     setShowEditModal(true);
   };
 
   const handleSave = async () => {
-    if (!editingModel) return;
+    if (!editing) return;
+    if (!editing.provider) {
+      alert(t("请选择厂商", "Please select a provider"));
+      return;
+    }
+    if (!editing.id && !editing.apiKey) {
+      alert(t("请填写 API Key", "Please fill in API key"));
+      return;
+    }
+    if (editing.apiKey && editing.apiKey !== editing.apiKeyConfirm) {
+      alert(t("两次输入的 API Key 不一致", "API keys do not match"));
+      return;
+    }
     setLoading(true);
     try {
-      if (editingModel.id) {
-        const res = await fetch(`/api/model-configs/${editingModel.id}`, {
+      const payload: Record<string, unknown> = {
+        provider: editing.provider,
+        baseUrl: editing.baseUrl || null,
+      };
+      if (editing.apiKey) {
+        payload.apiKey = editing.apiKey;
+      }
+      if (editing.id) {
+        const res = await fetch(`/api/api-keys/${editing.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: editingModel.name,
-            provider: editingModel.provider,
-            modelId: editingModel.modelId,
-            apiKey: editingModel.apiKey,
-            baseUrl: editingModel.baseUrl,
-            maxTokens: editingModel.maxTokens,
-            temperature: editingModel.temperature,
-            topP: editingModel.topP,
-            promptTemplateId: editingModel.promptTemplateId,
-            isActive: editingModel.isActive,
-          }),
+          body: JSON.stringify(payload),
         });
         const updated = await res.json();
-        setModels(prev => prev.map(m => m.id === updated.id ? updated : m));
+        setKeys(prev => prev.map(k => k.id === updated.id ? updated : k));
       } else {
-        const res = await fetch("/api/model-configs", {
+        const res = await fetch("/api/api-keys", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: editingModel.name || "Untitled",
-            provider: editingModel.provider || "deepseek",
-            modelId: editingModel.modelId || "",
-            apiKey: editingModel.apiKey || null,
-            baseUrl: editingModel.baseUrl || null,
-            maxTokens: editingModel.maxTokens || 16000,
-            temperature: editingModel.temperature ?? 0.7,
-            topP: editingModel.topP ?? 0.9,
-            promptTemplateId: editingModel.promptTemplateId || null,
-            isActive: editingModel.isActive || false,
-          }),
+          body: JSON.stringify(payload),
         });
         const created = await res.json();
-        setModels(prev => [...prev, created]);
+        setKeys(prev => [created, ...prev]);
       }
       setShowEditModal(false);
-      setEditingModel(null);
+      setEditing(null);
     } catch (e) {
       console.error("Failed to save:", e);
     } finally {
@@ -863,75 +853,161 @@ export function ModelTab({ language }: { language: "zh" | "en" }) {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm(t("确定删除此模型配置？", "Are you sure you want to delete this model config?"))) return;
+    if (!confirm(t("确定删除此 API Key？", "Are you sure you want to delete this API key?"))) return;
     try {
-      await fetch(`/api/model-configs/${id}`, { method: "DELETE" });
-      setModels(prev => prev.filter(m => m.id !== id));
+      await fetch(`/api/api-keys/${id}`, { method: "DELETE" });
+      setKeys(prev => prev.filter(k => k.id !== id));
+      setModelsCache(prev => { const n = { ...prev }; delete n[id]; return n; });
     } catch (e) {
       console.error("Failed to delete:", e);
     }
   };
 
+  // 动态获取该 API Key 可调用的模型列表（调 provider 的 /models 端点）
+  const handleFetchModels = async (id: string) => {
+    if (modelsCache[id]) {
+      // 已缓存，直接展开/收起
+      setExpandedId(expandedId === id ? null : id);
+      return;
+    }
+    setModelsLoading(id);
+    setModelsError(null);
+    try {
+      const res = await fetch(`/api/api-keys/${id}/models`);
+      const data = await res.json();
+      if (!res.ok) {
+        setModelsError(data.detail || data.error || "Failed to fetch models");
+        setExpandedId(id);
+      } else {
+        setModelsCache(prev => ({ ...prev, [id]: data.models || [] }));
+        setExpandedId(id);
+      }
+    } catch (e: any) {
+      setModelsError(e.message || "Network error");
+      setExpandedId(id);
+    } finally {
+      setModelsLoading(null);
+    }
+  };
+
+  const maskKey = (key: string) => {
+    if (!key) return "—";
+    if (key.length <= 8) return "****";
+    return `${key.slice(0, 4)}••••${key.slice(-4)}`;
+  };
+
+  const currentProvider = PROVIDERS.find(p => p.value === editing?.provider);
+
   return (
     <div className="h-full overflow-y-auto p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-lg font-bold">{language === "en" ? "Model Configurations" : "模型配置"}</h2>
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h2 className="text-lg font-bold">{language === "en" ? "API Keys" : "API Key 管理"}</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            {t(
+              "按厂商配置 API Key。一个 Key 可调用该厂商下所有可用模型。具体用哪个模型 + 哪个提示词，在调用入口的配置面板选择。",
+              "Configure API keys per provider. One key unlocks all available models of that provider. Which model + prompt to use is chosen at each AI entry's config panel."
+            )}
+          </p>
+        </div>
         <button
           onClick={handleCreate}
           className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-purple-500 to-cyan-500 hover:from-purple-600 hover:to-cyan-600 text-white text-sm font-semibold transition cursor-pointer"
         >
           <Plus className="w-4 h-4" />
-          {t("新建模型", "New Model")}
+          {t("添加 API Key", "Add API Key")}
         </button>
       </div>
 
       {loading ? (
         <div className="text-center text-slate-500 text-sm py-8">{t("加载中...", "Loading...")}</div>
-      ) : models.length === 0 ? (
-        <div className="text-center text-slate-500 text-sm py-12 bg-white/5 border border-white/10 rounded-xl">
-          <div>{t("暂无模型配置，点击「新建模型」添加", "No model configs yet, click 'New Model' to add")}</div>
+      ) : keys.length === 0 ? (
+        <div className="text-center text-slate-500 text-sm py-12 bg-white/5 border border-white/10 rounded-xl mt-6">
+          <div className="mb-2 text-3xl opacity-50">🔑</div>
+          <div>{t("暂无 API Key，点击「添加 API Key」开始", "No API keys yet. Click 'Add API Key' to start.")}</div>
         </div>
       ) : (
-        <div className="space-y-3">
-          {models.map(m => {
-            const provider = PROVIDERS.find(p => p.value === m.provider);
+        <div className="space-y-3 mt-4">
+          {keys.map(k => {
+            const provider = PROVIDERS.find(p => p.value === k.provider);
+            const cached = modelsCache[k.id];
+            const expanded = expandedId === k.id;
+            const isLoadingModels = modelsLoading === k.id;
             return (
               <div
-                key={m.id}
+                key={k.id}
                 className="p-4 rounded-xl bg-white/5 border border-white/10 hover:border-white/20 transition"
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500/20 to-cyan-500/20 flex items-center justify-center text-lg">
-                      🤖
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className={`w-11 h-11 shrink-0 rounded-xl bg-gradient-to-br ${provider?.gradient || "from-slate-500 to-slate-600"} flex items-center justify-center text-white text-xs font-bold shadow-lg`}>
+                      {provider?.shortLabel || k.provider.slice(0, 2).toUpperCase()}
                     </div>
-                    <div>
-                      <div className="font-semibold">{m.name}</div>
-                      <div className="text-xs text-slate-400">
-                        {provider?.label || m.provider} / {m.modelId}
+                    <div className="min-w-0 flex-1">
+                      <span className="font-semibold truncate block">{provider?.label || k.provider}</span>
+                      <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span className="font-mono text-amber-400/80">{maskKey(k.apiKey)}</span>
+                        {k.baseUrl && (
+                          <>
+                            <span className="text-slate-600">·</span>
+                            <span className="font-mono text-slate-500 truncate max-w-[200px]">{k.baseUrl}</span>
+                          </>
+                        )}
                       </div>
                     </div>
-                    {m.isActive && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-medium">
-                        {t("使用中", "Active")}
-                      </span>
-                    )}
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 shrink-0 ml-3">
                     <button
-                      onClick={() => handleEdit(m)}
+                      onClick={() => handleFetchModels(k.id)}
+                      disabled={isLoadingModels}
+                      className="text-xs px-3 py-1.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition cursor-pointer disabled:opacity-50"
+                    >
+                      {isLoadingModels
+                        ? t("获取中...", "Fetching...")
+                        : expanded
+                          ? t("收起", "Hide")
+                          : t("可用模型", "Models")}
+                    </button>
+                    <button
+                      onClick={() => handleEdit(k)}
                       className="text-xs px-3 py-1.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition cursor-pointer"
                     >
                       {t("编辑", "Edit")}
                     </button>
                     <button
-                      onClick={() => handleDelete(m.id)}
+                      onClick={() => handleDelete(k.id)}
                       className="text-xs px-3 py-1.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition cursor-pointer"
+                      title={t("删除", "Delete")}
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>
                   </div>
                 </div>
+                {expanded && (
+                  <div className="mt-3 pt-3 border-t border-white/10">
+                    <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">
+                      {t("可用模型（实时调用 provider API 获取）", "Available models (fetched live from provider)")}
+                    </div>
+                    {modelsError && expandedId === k.id && !cached ? (
+                      <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded p-2">
+                        {modelsError}
+                      </div>
+                    ) : cached && cached.length === 0 ? (
+                      <span className="text-xs text-slate-500">{t("该 key 未返回任何模型", "No models returned")}</span>
+                    ) : cached ? (
+                      <div className="flex flex-wrap gap-2">
+                        {cached.map((m: string) => (
+                          <span
+                            key={m}
+                            className="text-xs px-2.5 py-1 rounded-md bg-white/5 border border-white/10 font-mono text-slate-300"
+                          >
+                            {m}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -939,15 +1015,15 @@ export function ModelTab({ language }: { language: "zh" | "en" }) {
       )}
 
       {/* Edit Modal */}
-      {showEditModal && editingModel && (
+      {showEditModal && editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-[#1a1a2e] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
               <h2 className="text-lg font-bold">
-                {editingModel.id ? t("编辑模型", "Edit Model") : t("新建模型", "New Model")}
+                {editing.id ? t("编辑 API Key", "Edit API Key") : t("添加 API Key", "Add API Key")}
               </h2>
               <button
-                onClick={() => { setShowEditModal(false); setEditingModel(null); }}
+                onClick={() => { setShowEditModal(false); setEditing(null); }}
                 className="p-2 rounded-lg hover:bg-white/10 transition cursor-pointer"
               >
                 <X className="w-5 h-5 text-slate-400" />
@@ -957,58 +1033,61 @@ export function ModelTab({ language }: { language: "zh" | "en" }) {
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                  {t("名称", "Name")}
+                  {t("厂商", "Provider")}
                 </label>
-                <input
-                  type="text"
-                  value={editingModel.name || ""}
-                  onChange={e => setEditingModel({ ...editingModel, name: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
-                  placeholder={t("模型配置名称", "Model config name")}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                    {t("提供商", "Provider")}
-                  </label>
-                  <select
-                    value={editingModel.provider || "deepseek"}
-                    onChange={e => setEditingModel({ ...editingModel, provider: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:border-purple-500/50"
-                  >
-                    {PROVIDERS.map(p => (
-                      <option key={p.value} value={p.value} className="bg-[#1a1a2e]">{p.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                    {t("模型ID", "Model ID")}
-                  </label>
-                  <input
-                    type="text"
-                    value={editingModel.modelId || ""}
-                    onChange={e => setEditingModel({ ...editingModel, modelId: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
-                    placeholder="deepseek-chat"
-                  />
+                <div className="grid grid-cols-3 gap-2">
+                  {PROVIDERS.map(p => (
+                    <button
+                      key={p.value}
+                      type="button"
+                      onClick={() => setEditing({ ...editing, provider: p.value })}
+                      className={`flex flex-col items-center gap-1.5 p-2.5 rounded-lg border transition cursor-pointer ${
+                        editing.provider === p.value
+                          ? "border-purple-500/60 bg-purple-500/10"
+                          : "border-white/10 bg-white/5 hover:border-white/20"
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${p.gradient} flex items-center justify-center text-white text-[10px] font-bold`}>
+                        {p.shortLabel}
+                      </div>
+                      <span className="text-[10px] text-slate-300 text-center leading-tight">{p.label}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                  API Key
+                  API Key {!editing.id && <span className="text-red-400">*</span>}
+                  {editing.id && (
+                    <span className="ml-2 text-slate-500 normal-case font-normal">
+                      {t("留空表示不修改", "Leave empty to keep current")}
+                    </span>
+                  )}
                 </label>
                 <input
                   type="password"
-                  value={editingModel.apiKey || ""}
-                  onChange={e => setEditingModel({ ...editingModel, apiKey: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
-                  placeholder="sk-..."
+                  value={editing.apiKey || ""}
+                  onChange={e => setEditing({ ...editing, apiKey: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 font-mono"
+                  placeholder={editing.id ? "••••••••" : "sk-..."}
                 />
               </div>
+
+              {editing.apiKey && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                    {t("确认 API Key", "Confirm API Key")}
+                  </label>
+                  <input
+                    type="password"
+                    value={editing.apiKeyConfirm || ""}
+                    onChange={e => setEditing({ ...editing, apiKeyConfirm: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 font-mono"
+                    placeholder={t("再次输入", "Type again")}
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
@@ -1016,91 +1095,29 @@ export function ModelTab({ language }: { language: "zh" | "en" }) {
                 </label>
                 <input
                   type="text"
-                  value={editingModel.baseUrl || ""}
-                  onChange={e => setEditingModel({ ...editingModel, baseUrl: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
-                  placeholder="https://api.deepseek.com"
+                  value={editing.baseUrl || ""}
+                  onChange={e => setEditing({ ...editing, baseUrl: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 font-mono"
+                  placeholder={currentProvider?.defaultBaseUrl || "https://..."}
                 />
+                {currentProvider && !editing.baseUrl && (
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    {t("默认", "Default")}: <span className="font-mono">{currentProvider.defaultBaseUrl}</span>
+                  </p>
+                )}
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                    Max Tokens
-                  </label>
-                  <input
-                    type="number"
-                    value={editingModel.maxTokens ?? 16000}
-                    onChange={e => setEditingModel({ ...editingModel, maxTokens: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:border-purple-500/50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                    Temperature
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="2"
-                    value={editingModel.temperature ?? 0.7}
-                    onChange={e => setEditingModel({ ...editingModel, temperature: parseFloat(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:border-purple-500/50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                    Top P
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="1"
-                    value={editingModel.topP ?? 0.9}
-                    onChange={e => setEditingModel({ ...editingModel, topP: parseFloat(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:border-purple-500/50"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                  {t("关联提示词模板", "Linked Prompt Template")}
-                </label>
-                <select
-                  value={editingModel.promptTemplateId || ""}
-                  onChange={e => setEditingModel({ ...editingModel, promptTemplateId: e.target.value || null })}
-                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:border-purple-500/50"
-                >
-                  <option value="" className="bg-[#1a1a2e]">{t("无", "None")}</option>
-                  {prompts.map(p => (
-                    <option key={p.id} value={p.id} className="bg-[#1a1a2e]">{p.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setEditingModel({ ...editingModel, isActive: !editingModel.isActive })}
-                  className={`relative w-10 h-5 rounded-full transition cursor-pointer ${
-                    editingModel.isActive ? "bg-emerald-500" : "bg-white/10"
-                  }`}
-                >
-                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition ${
-                    editingModel.isActive ? "left-5" : "left-0.5"
-                  }`} />
-                </button>
-                <span className="text-sm text-slate-300">
-                  {editingModel.isActive ? t("设为使用中", "Set as Active") : t("未启用", "Inactive")}
-                </span>
-              </div>
+              <p className="text-[11px] text-slate-500 bg-white/5 border border-white/10 rounded-lg p-2.5">
+                {t(
+                  "可用模型在保存后点击列表项的「可用模型」按钮实时获取。具体使用哪个模型 + 哪个提示词，在调用入口的配置面板选择。",
+                  "Available models are fetched live after saving (click 'Models' on the list item). Which model + prompt to use is chosen at each AI entry's config panel."
+                )}
+              </p>
             </div>
 
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
               <button
-                onClick={() => { setShowEditModal(false); setEditingModel(null); }}
+                onClick={() => { setShowEditModal(false); setEditing(null); }}
                 className="px-5 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-sm transition cursor-pointer"
               >
                 {t("取消", "Cancel")}

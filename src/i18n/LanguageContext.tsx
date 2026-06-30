@@ -38,8 +38,8 @@ export const translations = {
     // Navigation
     myProjects: "我的项目",
     newProject: "新建项目",
-    systemSettings: "设置",
-    modelManagement: "模型管理",
+    systemSettings: "AI 管理",
+    modelManagement: "AI 模型 API",
     promptManagement: "提示词管理",
     languageSettings: "语言设置",
 
@@ -440,8 +440,8 @@ export const translations = {
     // Navigation
     myProjects: "My Projects",
     newProject: "New Project",
-    systemSettings: "Settings",
-    modelManagement: "Model Management",
+    systemSettings: "AI Management",
+    modelManagement: "AI Model API",
     promptManagement: "Prompt Management",
     languageSettings: "Language Settings",
 

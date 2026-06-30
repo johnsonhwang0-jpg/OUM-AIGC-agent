@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import { execSync } from "child_process";
 import dotenv from "dotenv";
-import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import { extractCompleteJsonContent, streamChatCompletion } from "./ai-stream.js";
 import { applyPromptTemplate } from "./prompt-template.js";
@@ -40,6 +39,11 @@ import {
   createModelConfig,
   updateModelConfig,
   deleteModelConfig,
+  getAllApiKeys,
+  getApiKeyById,
+  createApiKey,
+  updateApiKey,
+  deleteApiKey,
   getLatestJobsForProjects,
   recoverStaleJobs
 } from "./database.js";
@@ -71,7 +75,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use("/api/pdf-images", express.static(path.join(process.cwd(), "uploads", "pdf_images")));
 
 // AI Provider configuration
-const AI_PROVIDER = process.env.AI_PROVIDER || "deepseek"; // "deepseek", "dashscope", "gemini", "ollama", or "huggingface"
+const AI_PROVIDER = process.env.AI_PROVIDER || "deepseek"; // "deepseek" 或 "dashscope"
 
 // DeepSeek API client with auto-continue on truncation
 async function callDeepSeek(prompt: string, systemPrompt: string = "", model: string = "", maxTokens: number = 4096, jsonMode: boolean = true): Promise<string> {
@@ -208,94 +212,7 @@ async function callDashScope(prompt: string, systemPrompt: string = "", model: s
   }
 }
 
-// Lazy initializer for Google GenAI client
-let aiInstance: GoogleGenAI | null = null;
-function getGenAI(): GoogleGenAI {
-  if (!aiInstance) {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      console.warn("⚠️ Warning: GEMINI_API_KEY environment variable is not set!");
-    }
-    aiInstance = new GoogleGenAI({
-      apiKey: key || "MOCK_KEY",
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
-  }
-  return aiInstance;
-}
-
-// Ollama API client
-async function callOllama(prompt: string, systemPrompt: string = "", model: string = "", jsonMode: boolean = true): Promise<string> {
-  try {
-    const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
-    const ollamaModel = model || process.env.OLLAMA_MODEL || "llama3.1:8b";
-    
-    const response = await fetch(`${ollamaHost}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: ollamaModel,
-        prompt: prompt,
-        system: systemPrompt,
-        ...(jsonMode ? { format: "json" } : {}),
-        stream: false
-      })
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Ollama API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    return data.response || "";
-  } catch (error) {
-    console.error("Ollama call failed:", error);
-    throw error;
-  }
-}
-
-// Hugging Face Inference API client (免费云端模型)
-async function callHuggingFace(prompt: string, systemPrompt: string = "", model: string = ""): Promise<string> {
-  try {
-    const hfModel = model || process.env.HUGGINGFACE_MODEL || "Qwen/Qwen2-7B-Instruct";
-    const hfToken = process.env.HUGGINGFACE_TOKEN || "";
-    
-    const fullPrompt = systemPrompt ? `<|system|>${systemPrompt}</s><|user|>${prompt}</s><|assistant|>` : prompt;
-    
-    const response = await fetch(`https://api-inference.huggingface.co/models/${hfModel}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(hfToken && { "Authorization": `Bearer ${hfToken}` })
-      },
-      body: JSON.stringify({
-        inputs: fullPrompt,
-        parameters: {
-          max_new_tokens: 2048,
-          temperature: 0.7,
-          top_p: 0.95,
-          repetition_penalty: 1.0,
-          return_full_text: false
-        }
-      })
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Hugging Face API error: ${response.status} - ${errorText}`);
-    }
-    
-    const data = await response.json();
-    return data[0]?.generated_text || data?.generated_text || "";
-  } catch (error) {
-    console.error("Hugging Face call failed:", error);
-    throw error;
-  }
-}
+// (已移除 Gemini / Ollama / Hugging Face 客户端，仅保留 DeepSeek 与 DashScope)
 
 // Ensure server is up and responsive
 /**
@@ -1298,37 +1215,11 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
     } else if (AI_PROVIDER === "dashscope") {
       console.log("🔄 Using DashScope (通义千问) for scenario script generation...");
       outputText = await callDashScope(finalPromptText, finalSystemInstruction, "", 6144, false);
-    } else if (AI_PROVIDER === "ollama") {
-      console.log("🔄 Using Ollama for scenario script generation...");
-      outputText = await callOllama(finalPromptText, finalSystemInstruction, "", false);
-    } else if (AI_PROVIDER === "huggingface") {
-      console.log("🔄 Using Hugging Face for scenario script generation...");
-      outputText = await callHuggingFace(finalPromptText, finalSystemInstruction);
-    } else if (AI_PROVIDER === "gemini") {
-      const key = process.env.GEMINI_API_KEY;
-      if (!key || key.trim() === "" || key.trim() === "your-actual-gemini-api-key-here") {
-        return res.status(401).json({ 
-          error: "GEMINI_API_KEY 未配置",
-          message: "请在 .env 文件中设置有效的 Google Gemini API Key，或者设置 AI_PROVIDER=dashscope 使用阿里云通义千问。",
-          detail: "当前无法调用 AI 模型生成场景脚本，请先配置 API Key 或切换到 DashScope。"
-        });
-      }
-      
-      const ai = getGenAI();
-      console.log("🔄 Using Gemini for scenario script generation...");
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: finalPromptText,
-        config: {
-          systemInstruction: finalSystemInstruction
-        }
+    } else {
+      return res.status(400).json({
+        error: "不支持的 AI_PROVIDER",
+        message: `当前 AI_PROVIDER=${AI_PROVIDER} 不再支持。请使用 deepseek 或 dashscope。`
       });
-      
-      outputText = response.text;
-      if (!outputText) {
-        throw new Error("No output generated from Gemini model.");
-      }
     }
 
     res.json({
@@ -1406,69 +1297,25 @@ app.post("/api/recommend-scenario", async (req, res) => {
       return res.status(400).json({ error: "Missing required chapter meta (chapterTitle, gameType)." });
     }
 
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      // Local highly intelligent recommended scenarios
-      let gameTitle = "微缩宇宙：未知平衡态调控";
-      let gameRules = "当前物理系统处于紧急泄露临界状态。你将扮演特遣危机处置专员，必须依靠对本单元知识点的系统内化，实时诊断各类偏差变量，平衡不稳定性，做出明智的关键性决策以拯救设施。";
+    // Local highly intelligent recommended scenarios (Gemini 调用已移除，始终走本地推荐)
+    let gameTitle = "微缩宇宙：未知平衡态调控";
+    let gameRules = "当前物理系统处于紧急泄露临界状态。你将扮演特遣危机处置专员，必须依靠对本单元知识点的系统内化，实时诊断各类偏差变量，平衡不稳定性，做出明智的关键性决策以拯救设施。";
 
-      if (gameType === "interactive-story") {
-        gameTitle = `《${chapterTitle}：危机决策风暴》`;
-        gameRules = `你被紧急投送到一处面临解体危机的科学基站！当前的核心挑战是：如何利用 [${summary}] 的相互作用链条制止灾难。你必须在数个涉及生死权衡和逻辑链冲突的选项中做出核心选择，每一步都会诱发物理系统的连锁崩溃或救赎。`;
-      } else if (gameType === "quiz") {
-        gameTitle = `《${chapterTitle}：多维诊断大密室》`;
-        gameRules = `你被锁在了一台暴走的人造反应舱中！系统主控脑抛出了一系列关于 [${summary}] 的深度反直觉现象诊断。你必须担任逻辑排障专家，在限时内诊断并论证正确的成因以解锁气闸安全协议。`;
-      } else if (gameType === "coding-puzzle") {
-        gameTitle = `《${chapterTitle}：逻辑重构与数据阻断行动》`;
-        gameRules = `受阻于 [${summary}] 物理数据流的异常溢出，控制中枢代码大面积瘫痪。作为逻辑架构师，你需要诊断溢出漏洞，重置物理守恒定律的数据结构，修补失衡的代码控制律，在溢出红线前重建数据网。`;
-      } else if (gameType === "math-quest") {
-        gameTitle = `《${chapterTitle}：精密计算突围协议》`;
-        gameRules = `灾难已经进入物理突击期！要强行抑制参数暴涨，你必须化身安全计算总指挥，在极小的时间窗口里对 [${summary}] 进行参数极值平衡、反应公式对齐、以及流量计算，精准将指针回调到安全区间。`;
-      }
-
-      return res.json({ gameTitle, gameRules });
+    if (gameType === "interactive-story") {
+      gameTitle = `《${chapterTitle}：危机决策风暴》`;
+      gameRules = `你被紧急投送到一处面临解体危机的科学基站！当前的核心挑战是：如何利用 [${summary}] 的相互作用链条制止灾难。你必须在数个涉及生死权衡和逻辑链冲突的选项中做出核心选择，每一步都会诱发物理系统的连锁崩溃或救赎。`;
+    } else if (gameType === "quiz") {
+      gameTitle = `《${chapterTitle}：多维诊断大密室》`;
+      gameRules = `你被锁在了一台暴走的人造反应舱中！系统主控脑抛出了一系列关于 [${summary}] 的深度反直觉现象诊断。你必须担任逻辑排障专家，在限时内诊断并论证正确的成因以解锁气闸安全协议。`;
+    } else if (gameType === "coding-puzzle") {
+      gameTitle = `《${chapterTitle}：逻辑重构与数据阻断行动》`;
+      gameRules = `受阻于 [${summary}] 物理数据流的异常溢出，控制中枢代码大面积瘫痪。作为逻辑架构师，你需要诊断溢出漏洞，重置物理守恒定律的数据结构，修补失衡的代码控制律，在溢出红线前重建数据网。`;
+    } else if (gameType === "math-quest") {
+      gameTitle = `《${chapterTitle}：精密计算突围协议》`;
+      gameRules = `灾难已经进入物理突击期！要强行抑制参数暴涨，你必须化身安全计算总指挥，在极小的时间窗口里对 [${summary}] 进行参数极值平衡、反应公式对齐、以及流量计算，精准将指针回调到安全区间。`;
     }
 
-    const ai = getGenAI();
-
-    const systemInstruction = `You are a creative educational writer and interactive gamification designer (中文环境).
-Your sole task is to recommend a highly polished, high-tension educational game title and a concise, high-cognition gameplay conflict description based on the provided core concepts and preferred game mechanics.
-
-Instructions for generation:
-1. "gameTitle" must be a punchy, dramatic sci-fi, fantasy, historic, or high-concept narrative title (e.g., "金斯限界引力失衡漏气警报", "泰坦霸权终结与秩序过渡", "数据魔咒重构阻断协议"). It should capture attention instantly.
-2. "gameRules" must be a concise paragraph (100-150 words in Chinese) describing:
-   - The virtual role/occupation of the player.
-   - The urgent crisis or trigger event they face.
-   - The cognitive conflict they must resolve using the target concepts (avoid simple quiz memory lookup; frame it as a trade-off, diagnostic study, or logic repair).
-   - What the player must do to gain victory.
-   
-Respond strictly in JSON format matching the schema. Do not use markdown wraps.`;
-
-    const promptText = `Suggest a dramatic game title and gameplay scenario ruleset for:
-- Concept Chapter Slice: "${chapterTitle}"
-- Target Core Concepts: [${summary}]
-- Gamification Mechanic Mode: "${gameType}"
-- Pedagogical Objective: "${designRationale || 'None'}"`;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: promptText,
-      config: {
-        systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            gameTitle: { type: Type.STRING, description: "A beautifully crafted, high-traction game title." },
-            gameRules: { type: Type.STRING, description: "Detailed 1-paragraph game objective/rules in Chinese explaining the crisis, role, and key choices." }
-          },
-          required: ["gameTitle", "gameRules"]
-        }
-      }
-    });
-
-    const parsed = parseJsonResponse(response.text);
-    res.json(parsed);
+    return res.json({ gameTitle, gameRules });
 
   } catch (error: any) {
     console.error("Error recommending scenario:", error);
@@ -1486,40 +1333,18 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error: "Messages array is required." });
     }
 
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      const lastMsg = messages[messages.length - 1]?.text?.toLowerCase() || "";
-      let reply = "你好！我是你的 AI 学习游戏策划专家。有什么关于当前课本、章节拆分或互动游戏玩法设计的，尽管问我！";
-      if (lastMsg.includes("建议") || lastMsg.includes("推荐") || lastMsg.includes("玩法")) {
-        reply = "我可以为你配置多种游戏：知识大比拼 (Quiz)、连线搭配 (Match)、文本填空 (Blank Fill)、探险抉择文本冒险 (Story Quest)、代码纠错魔咒 (Coding Puzzle) 或者是 算术速算闯关 (Math Quest)！";
-      } else if (lastMsg.includes("章节") || lastMsg.includes("目录")) {
-        reply = "课件最好划分为 3-6 个独立模块。你可以在 Step 2 页面对每个章节标题和具体的游戏规则进行完全定制的汉化与修改！";
-      }
-      return res.json({ reply });
+    // Gemini 调用已移除，始终走本地 mock 回复
+    const lastMsg = messages[messages.length - 1]?.text?.toLowerCase() || "";
+    let reply = "你好！我是你的 AI 学习游戏策划专家。有什么关于当前课本、章节拆分或互动游戏玩法设计的，尽管问我！";
+    if (lastMsg.includes("建议") || lastMsg.includes("推荐") || lastMsg.includes("玩法")) {
+      reply = "我可以为你配置多种游戏：知识大比拼 (Quiz)、连线搭配 (Match)、文本填空 (Blank Fill)、探险抉择文本冒险 (Story Quest)、代码纠错魔咒 (Coding Puzzle) 或者是 算术速算闯关 (Math Quest)！";
+    } else if (lastMsg.includes("章节") || lastMsg.includes("目录")) {
+      reply = "课件最好划分为 3-6 个独立模块。你可以在 Step 2 页面对每个章节标题和具体的游戏规则进行完全定制的汉化与修改！";
     }
-
-    const ai = getGenAI();
-    
-    // Convert to Gemini parts structure
-    const contentsPayload = messages.map(m => ({
-      role: m.sender === 'user' ? 'user' : 'model',
-      parts: [{ text: m.text }]
-    }));
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: contentsPayload,
-      config: {
-        systemInstruction: `You are an expert educational gamification consultant and curriculum advisor.
-Support the user in organizing, outlining, and refining highly immersive educational simulations based on textbooks.
-Reply in Chinese, keep answers insightful and focused on scenario design.`
-      }
-    });
-
-    return res.json({ reply: response.text });
+    return res.json({ reply });
   } catch (error: any) {
     console.error("Error in conversational API:", error);
-    res.status(500).json({ error: error.message || "Failed to engage Gemini chat." });
+    res.status(500).json({ error: error.message || "Chat service error." });
   }
 });
 
@@ -2728,6 +2553,110 @@ async function startServer() {
     try {
       await deleteModelConfig(req.params.id);
       res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================== API Key CRUD（provider 级别）====================
+  // 阶段 1：明文存储 + 明文返回；阶段 1 后半场做 DB 加密 + GET mask
+  app.get("/api/api-keys", async (req, res) => {
+    try {
+      const keys = await getAllApiKeys();
+      res.json(keys);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/api-keys", async (req, res) => {
+    try {
+      const { provider, apiKey, baseUrl } = req.body || {};
+      if (!provider || !apiKey) {
+        return res.status(400).json({ error: "provider, apiKey are required" });
+      }
+      const created = await createApiKey({ provider, apiKey, baseUrl: baseUrl || null });
+      res.json(created);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/api-keys/:id", async (req, res) => {
+    try {
+      const updated = await updateApiKey(req.params.id, req.body || {});
+      if (!updated) return res.status(404).json({ error: "API key not found" });
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/api-keys/:id", async (req, res) => {
+    try {
+      await deleteApiKey(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 动态获取 provider 的可用模型列表（用配置的 key 调 /models 端点）
+  app.get("/api/api-keys/:id/models", async (req, res) => {
+    try {
+      const key = await getApiKeyById(req.params.id);
+      if (!key) return res.status(404).json({ error: "API key not found" });
+
+      // 各 provider 的 models 端点（OpenAI 兼容格式）
+      const PROVIDER_MODELS_ENDPOINT: Record<string, string> = {
+        deepseek: "https://api.deepseek.com/models",
+        qwen:     "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+        minimax:  "https://api.minimax.chat/v1/models",
+        gemini:   "https://generativelanguage.googleapis.com/v1beta/models",
+        openai:   "https://api.openai.com/v1/models",
+        glm:      "https://open.bigmodel.cn/api/paas/v4/models",
+      };
+      const baseUrl = key.baseUrl || PROVIDER_MODELS_ENDPOINT[key.provider] || "";
+      if (!baseUrl) {
+        return res.status(400).json({ error: `Unknown provider: ${key.provider}` });
+      }
+
+      // Gemini 用 query param 传 key，其他用 Bearer
+      const isGemini = key.provider === "gemini";
+      const url = isGemini
+        ? `${baseUrl}?key=${encodeURIComponent(key.apiKey)}`
+        : baseUrl;
+
+      const fetchResp = await fetch(url, {
+        method: "GET",
+        headers: isGemini
+          ? { "Content-Type": "application/json" }
+          : { "Authorization": `Bearer ${key.apiKey}`, "Content-Type": "application/json" },
+      });
+
+      if (!fetchResp.ok) {
+        const errText = await fetchResp.text();
+        return res.status(502).json({
+          error: `Provider API returned ${fetchResp.status}`,
+          detail: errText.slice(0, 500),
+        });
+      }
+
+      const data = await fetchResp.json();
+
+      // 统一提取 model id 列表
+      // OpenAI 兼容格式: { data: [{ id: "..." }, ...] }
+      // Gemini 格式: { models: [{ name: "models/gemini-1.5-flash", ... }] }
+      let models: string[] = [];
+      if (Array.isArray(data?.data)) {
+        models = data.data.map((m: any) => m.id).filter(Boolean);
+      } else if (Array.isArray(data?.models)) {
+        models = data.models
+          .map((m: any) => (m.name || "").replace(/^models\//, ""))
+          .filter(Boolean);
+      }
+
+      res.json({ models });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

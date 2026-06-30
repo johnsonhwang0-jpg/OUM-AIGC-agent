@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.2.21";
+export const APP_VERSION = "1.2.22";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,19 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.2.22",
+    updatedAt: "2026-06-30 15:40:00",
+    changes: [
+      "AI Management 架构重构：API Key 从「模型级别」提升到「厂商级别」。一个 API Key 对应一个 provider，可调用该 provider 下所有可用模型，不再需要为每个模型单独配置。具体使用哪个模型 + 哪个 prompt 在调用入口的配置面板选择，不在这里绑定。",
+      "数据库新增 api_keys 表（id/provider/apiKey/baseUrl/createdAt/updatedAt），替代原 model_configs 表的模型级配置。开发期 DROP+CREATE 强制重建表结构以去除遗留的 name/isActive 列。新增 4 个 CRUD 函数（getAllApiKeys/getApiKeyById/createApiKey/updateApiKey/deleteApiKey）。",
+      "后端新增 /api/api-keys CRUD 路由（GET/POST/PUT/DELETE），POST 不再要求 name 字段，只需 provider + apiKey + 可选 baseUrl。",
+      "后端新增 GET /api/api-keys/:id/models 接口：用配置的 key 调用 provider 的 /models 端点，实时获取真实可用模型列表。支持 OpenAI 兼容格式（data:[{id}]）和 Gemini 格式（models:[{name}]），Gemini 用 query param 传 key，其他用 Bearer。",
+      "前端 AIManagement.tsx（原 ModelManagement.tsx 改名）重构：删除 name 输入框、isActive 开关、静态 PROVIDER_MODELS 常量。ModelTab 列表项主标题改为 provider label（不再是 name），点「可用模型」按钮实时获取并缓存模型列表，获取失败显示错误信息。",
+      "厂商从 3 个扩展到 6 个：DeepSeek（DS 蓝青）、Qwen（QW 紫粉）、MiniMax（MM 橙红）、Gemini（GM 蓝紫）、OpenAI（AI 翡翠绿）、GLM 智谱（GL 品红紫，Base URL: open.bigmodel.cn/api/paas/v4）。厂商选择从下拉框改为 3 列色块按钮网格。",
+      "编辑 Modal 简化为：厂商选择 + API Key（新建必填，编辑留空表示不修改 + 二次确认）+ Base URL（placeholder 显示该 provider 默认 endpoint）。删除了 modelId/maxTokens/temperature/topP/linked prompt template 等模型级参数。",
+    ],
+  },
   {
     version: "1.2.21",
     updatedAt: "2026-06-29 01:00:00",

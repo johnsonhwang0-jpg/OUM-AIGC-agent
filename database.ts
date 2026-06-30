@@ -153,6 +153,19 @@ export interface ModelConfig {
   updatedAt: string;
 }
 
+// ==================== API Key（provider 级别）====================
+// 一个 API Key 对应一个 provider，可调用该 provider 下所有可用模型。
+// 具体用哪个 model + prompt 在调用入口的配置面板选择，不在这里绑定。
+// 不含 name / isActive：标识用 provider label，启用状态在调用入口决定。
+export interface ApiKey {
+  id: string;
+  provider: string;       // deepseek | qwen | minimax | gemini | openai
+  apiKey: string;         // 明文存储（阶段 1）；阶段 1 后半场做 DB 加密
+  baseUrl: string | null;  // 可选，覆盖 provider 默认 endpoint
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ==================== 自动化编排 ====================
 
 export type AutomationJobStatus = "pending" | "running" | "paused" | "completed" | "partial" | "cancelled" | "failed";
@@ -338,6 +351,20 @@ async function initDatabase(): Promise<Database> {
   `);
 
   database.run(`CREATE INDEX IF NOT EXISTS idx_model_configs_prompt ON model_configs(promptTemplateId)`);
+
+  // API Key 表（provider 级别，阶段 1 新增）
+  // 开发期：表结构未稳定，强制重建。阶段 1 稳定后删除 DROP 语句。
+  database.run(`DROP TABLE IF EXISTS api_keys`);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      apiKey TEXT NOT NULL,
+      baseUrl TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
 
   // ==================== Schema 迁移系统 ====================
   // 检查当前 schema 版本
@@ -1228,6 +1255,85 @@ export async function updateModelConfig(id: string, data: {
 export async function deleteModelConfig(id: string): Promise<boolean> {
   const database = await getDatabase();
   database.run(`DELETE FROM model_configs WHERE id = ?`, [id]);
+  saveDatabase(database);
+  return true;
+}
+
+// ==================== API Key CRUD（provider 级别）====================
+
+export async function getAllApiKeys(): Promise<ApiKey[]> {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT id, provider, apiKey, baseUrl, createdAt, updatedAt FROM api_keys ORDER BY createdAt DESC`);
+  if (result.length === 0) return [];
+  return result[0].values.map((row) => ({
+    id: row[0] as string,
+    provider: row[1] as string,
+    apiKey: row[2] as string,
+    baseUrl: (row[3] as string | null) || null,
+    createdAt: row[4] as string,
+    updatedAt: row[5] as string,
+  }));
+}
+
+export async function getApiKeyById(id: string): Promise<ApiKey | null> {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT id, provider, apiKey, baseUrl, createdAt, updatedAt FROM api_keys WHERE id = ?`, [id]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  const row = result[0].values[0];
+  return {
+    id: row[0] as string,
+    provider: row[1] as string,
+    apiKey: row[2] as string,
+    baseUrl: (row[3] as string | null) || null,
+    createdAt: row[4] as string,
+    updatedAt: row[5] as string,
+  };
+}
+
+export async function createApiKey(data: {
+  provider: string;
+  apiKey: string;
+  baseUrl?: string | null;
+}): Promise<ApiKey> {
+  const database = await getDatabase();
+  const id = `ak-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const now = new Date().toISOString();
+  database.run(
+    `INSERT INTO api_keys (id, provider, apiKey, baseUrl, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`,
+    [id, data.provider, data.apiKey, data.baseUrl || null, now, now]
+  );
+  saveDatabase(database);
+  return {
+    id, provider: data.provider, apiKey: data.apiKey,
+    baseUrl: data.baseUrl || null, createdAt: now, updatedAt: now,
+  };
+}
+
+export async function updateApiKey(id: string, data: {
+  provider?: string;
+  apiKey?: string;
+  baseUrl?: string | null;
+}): Promise<ApiKey | null> {
+  const database = await getDatabase();
+  const existing = await getApiKeyById(id);
+  if (!existing) return null;
+  const updated = {
+    provider: data.provider ?? existing.provider,
+    apiKey: data.apiKey !== undefined ? data.apiKey : existing.apiKey,
+    baseUrl: data.baseUrl !== undefined ? data.baseUrl : existing.baseUrl,
+  };
+  const now = new Date().toISOString();
+  database.run(
+    `UPDATE api_keys SET provider=?, apiKey=?, baseUrl=?, updatedAt=? WHERE id=?`,
+    [updated.provider, updated.apiKey, updated.baseUrl, now, id]
+  );
+  saveDatabase(database);
+  return { ...existing, ...updated, updatedAt: now };
+}
+
+export async function deleteApiKey(id: string): Promise<boolean> {
+  const database = await getDatabase();
+  database.run(`DELETE FROM api_keys WHERE id = ?`, [id]);
   saveDatabase(database);
   return true;
 }

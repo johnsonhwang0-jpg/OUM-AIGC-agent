@@ -52,7 +52,7 @@ import StandalonePreview from "./components/StandalonePreview";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-import ModelManagement from "./components/ModelManagement";
+import AIManagement from "./components/AIManagement";
 import SystemSettings from "./components/SystemSettings";
 import { APP_VERSION } from "./version";
 import ApiDebugDrawer from "./components/ApiDebugDrawer";
@@ -193,7 +193,7 @@ export default function App() {
   const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
   const [scriptGenerating, setScriptGenerating] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<'simulator' | 'code' | 'original' | 'edit'>('simulator');
-  const [showModelManagement, setShowModelManagement] = useState<boolean>(false);
+  const [showAIManagement, setShowAIManagement] = useState<boolean>(false);
   const [showApiDrawer, setShowApiDrawer] = useState<boolean>(false);
   const [showSliceSettings, setShowSliceSettings] = useState<boolean>(false);
   const [apiDebugInfo, setApiDebugInfo] = useState<{
@@ -2358,8 +2358,8 @@ ${script.conclusion}
   const activeModule = getActiveModule();
 
   // System Settings full-screen page
-  if (showModelManagement) {
-    return <SystemSettings onBack={() => setShowModelManagement(false)} />;
+  if (showAIManagement) {
+    return <SystemSettings onBack={() => setShowAIManagement(false)} />;
   }
 
   return (
@@ -2408,7 +2408,7 @@ ${script.conclusion}
             {/* Minimal decoration */}
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setShowModelManagement(true)}
+                onClick={() => setShowAIManagement(true)}
                 className="text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer flex items-center gap-1"
                 title={t("systemSettingsTitle")}
               >
