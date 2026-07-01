@@ -338,6 +338,7 @@ function greet(name) {
   const [codexEvents, setCodexEvents] = useState<any[]>([]); // Codex Agent 执行事件流
   const [codexArtifacts, setCodexArtifacts] = useState<any[]>([]); // Codex 产物列表
   const [codexArtifactName, setCodexArtifactName] = useState<string>(''); // 实际下载的产物文件名
+  const codexAbortRef = useRef(false); // 停止轮询标志
   useEffect(() => {
     fetch("/api/codex-config")
       .then(r => r.json())
@@ -2334,14 +2335,26 @@ ${script.conclusion}
         setCodexArtifacts([]);
         setCodexArtifactName('');
         setLastCodexRaw('');
+        // 用后端返回的实际 prompt 更新 Debug 面板（而非旧的 fixedPrompt）
+        if (startData.systemPromptUsed || startData.promptTextUsed) {
+          setAppApiDebugInfo(prev => ({
+            ...prev,
+            userPrompt: `【System】${startData.systemPromptUsed || '(default)'}\n\n【User】${startData.promptTextUsed || '(default)'}`,
+          }));
+        }
 
         const startedAt = Date.now();
         const pollIntervalMs = 3000;
         const pollMaxMs = (timeoutSeconds + 60) * 1000;
         let lastStatus = 'queued';
+        codexAbortRef.current = false;
 
         while (Date.now() - startedAt < pollMaxMs) {
           await new Promise(r => setTimeout(r, pollIntervalMs));
+          if (codexAbortRef.current) {
+            setCodexRunStatus('stopped');
+            break;
+          }
           const statusRes = await fetch(`/api/codex-build/${runId}/status`);
           const statusText = await statusRes.text();
           if (!statusRes.ok) throw new Error(statusText || `HTTP ${statusRes.status}`);
@@ -2355,6 +2368,12 @@ ${script.conclusion}
             .then(d => { if (d && Array.isArray(d.events)) setCodexEvents(d.events.slice(-30)); })
             .catch(() => {});
           if (lastStatus === 'completed' || lastStatus === 'failed') break;
+        }
+
+        if (codexAbortRef.current) {
+          // 用户主动停止，不拉结果，直接返回
+          setIsGeneratingApp(false);
+          return;
         }
 
         // 完成后拉一次 artifacts（无论成功失败都尝试，便于排查）
@@ -4383,6 +4402,16 @@ API地址：https://api.deepseek.com/chat/completions`}
                         </>
                       )}
                     </button>
+                    {isGeneratingApp && buildMode === "codex" && (
+                      <button
+                        onClick={() => { codexAbortRef.current = true; }}
+                        className="py-2.5 px-3 rounded-lg flex items-center gap-1.5 text-xs font-bold transition text-white bg-red-500 hover:bg-red-600 cursor-pointer shadow-[0_0_15px_rgba(239,68,68,0.4)]"
+                        title={language === "en" ? "Stop polling (Codex run continues server-side)" : "停止轮询（Codex 任务在服务端继续）"}
+                      >
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                        {language === "en" ? "Stop" : "停止"}
+                      </button>
+                    )}
                     <button
                       onClick={() => setShowAppApiDrawer(true)}
                       className="p-2 rounded-lg transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"

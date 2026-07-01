@@ -490,21 +490,27 @@ async function getCodexRunResult(runId: string): Promise<{ code: string; rawCode
   return { code: finalResponse, rawCodexResponse: finalResponse, artifactName: null };
 }
 
-/** 辅助：获取 Codex run 的 events（调试用，返回原始事件流） */
+/** 辅助：获取 Codex run 的 events（调试用，容错：Codex API 返回非 200 时返回空数组而非抛错） */
 async function getCodexRunEvents(runId: string): Promise<any[]> {
   const cfg = await getCodexConfig();
   if (!cfg || !cfg.token) {
-    throw new Error("Codex token 丢失");
+    return [];
   }
-  const eventsRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/events`, {
-    headers: { "Authorization": `Bearer ${cfg.token}` },
-  });
-  if (!eventsRes.ok) {
-    const errText = await eventsRes.text();
-    throw new Error(`Codex events failed: HTTP ${eventsRes.status} - ${errText.slice(0, 200)}`);
+  try {
+    const eventsRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/events`, {
+      headers: { "Authorization": `Bearer ${cfg.token}` },
+    });
+    if (!eventsRes.ok) {
+      // run 刚启动时 events 可能还没产生，返回空数组而非抛错
+      console.log(`ℹ️ [getCodexRunEvents] ${runId} HTTP ${eventsRes.status} (run may be early)`);
+      return [];
+    }
+    const eventsData = await eventsRes.json();
+    return Array.isArray(eventsData.events) ? eventsData.events : (Array.isArray(eventsData) ? eventsData : []);
+  } catch (err: any) {
+    console.warn(`⚠️ [getCodexRunEvents] ${runId} error: ${err?.message || err}`);
+    return [];
   }
-  const eventsData = await eventsRes.json();
-  return Array.isArray(eventsData.events) ? eventsData.events : (Array.isArray(eventsData) ? eventsData : []);
 }
 
 /** 辅助：获取 Codex run 的 artifacts 列表（调试用） */
@@ -1719,7 +1725,12 @@ DELIVERABLE: Write the complete HTML game to output/index.html. Do not output HT
       : defaultPromptText;
 
     const { runId, sandbox, timeoutSeconds } = await startCodexRun(promptText, systemInstruction);
-    res.json({ runId, sandbox, timeoutSeconds, status: "queued" });
+    res.json({
+      runId, sandbox, timeoutSeconds, status: "queued",
+      // 返回实际使用的 prompt 摘要供前端 Debug 面板显示
+      systemPromptUsed: systemInstruction.slice(0, 500),
+      promptTextUsed: promptText.slice(0, 1000),
+    });
   } catch (error: any) {
     console.error("Error starting codex build:", error);
     res.status(500).json({ error: error.message || "Failed to start codex build" });

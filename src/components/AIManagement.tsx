@@ -118,6 +118,41 @@ const AI_ENTRIES: AIEntryDef[] = [
   },
 ];
 
+// 主入口分组：左侧只显示 3 个主组，Build App 组内通过子 tab 切换 API / Codex CLI
+const MAIN_GROUPS: {
+  key: "slice" | "script" | "build";
+  labelZh: string;
+  labelEn: string;
+  icon: string;
+  color: "cyan" | "purple" | "emerald";
+  entries: AIEntryKey[];
+}[] = [
+  {
+    key: "slice",
+    labelZh: "切片",
+    labelEn: "Slice",
+    icon: "📄",
+    color: "cyan",
+    entries: ["smart-split"],
+  },
+  {
+    key: "script",
+    labelZh: "脚本生成",
+    labelEn: "Script Generation",
+    icon: "🎬",
+    color: "purple",
+    entries: ["script-gen"],
+  },
+  {
+    key: "build",
+    labelZh: "构建应用",
+    labelEn: "Build App",
+    icon: "🎮",
+    color: "emerald",
+    entries: ["app-code", "codex-build"],
+  },
+];
+
 const DEFAULT_PROMPTS: Record<AIEntryKey, { name: string; systemPrompt: string; userPromptTemplate: string }> = {
   "smart-split": {
     name: "智能切片提示词",
@@ -398,6 +433,8 @@ export function PromptTab({ language }: { language: "zh" | "en" }) {
   const [loading, setLoading] = useState(false);
 
   const currentEntry = AI_ENTRIES.find(e => e.key === selectedEntry)!;
+  const currentGroup = MAIN_GROUPS.find(g => g.entries.includes(selectedEntry))!;
+  const isBuildGroup = currentGroup.entries.length > 1;
   const colorMap = {
     cyan: { bg: "from-cyan-500/20", border: "border-cyan-500/30", text: "text-cyan-400", hover: "hover:border-cyan-500/50", active: "bg-cyan-500/10 border-cyan-500/40", tab: "bg-cyan-500/20 border-cyan-500/40 text-cyan-300" },
     purple: { bg: "from-purple-500/20", border: "border-purple-500/30", text: "text-purple-400", hover: "hover:border-purple-500/50", active: "bg-purple-500/10 border-purple-500/40", tab: "bg-purple-500/20 border-purple-500/40 text-purple-300" },
@@ -450,7 +487,13 @@ export function PromptTab({ language }: { language: "zh" | "en" }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleEntryChange = (entry: AIEntryKey) => {
+  const handleGroupChange = (group: typeof MAIN_GROUPS[number]) => {
+    const firstEntry = group.entries[0];
+    setSelectedEntry(firstEntry);
+    loadPrompts(firstEntry);
+  };
+
+  const handleSubEntryChange = (entry: AIEntryKey) => {
     setSelectedEntry(entry);
     loadPrompts(entry);
   };
@@ -564,24 +607,29 @@ export function PromptTab({ language }: { language: "zh" | "en" }) {
           <div className="text-[10px] uppercase tracking-wider text-slate-500 px-2 mb-2">
             {t("AI 入口", "AI Entry Point")}
           </div>
-          {AI_ENTRIES.map(entry => {
-            const ec = colorMap[entry.color];
-            const isActive = selectedEntry === entry.key;
+          {MAIN_GROUPS.map(group => {
+            const isActive = currentGroup.key === group.key;
+            const ec = colorMap[group.color];
             return (
               <button
-                key={entry.key}
-                onClick={() => handleEntryChange(entry.key)}
+                key={group.key}
+                onClick={() => handleGroupChange(group)}
                 className={`w-full text-left p-3 rounded-lg border transition cursor-pointer ${
                   isActive ? ec.tab : "bg-white/5 border-white/10 hover:bg-white/10"
                 }`}
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">{entry.icon}</span>
+                  <span className="text-lg">{group.icon}</span>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold truncate">
-                      {language === "en" ? entry.nameEn : entry.name}
+                      {language === "en" ? group.labelEn : group.labelZh}
                     </div>
                   </div>
+                  {group.entries.length > 1 && (
+                    <span className="text-[9px] text-slate-500 px-1.5 py-0.5 rounded bg-white/5 border border-white/10">
+                      {group.entries.length}
+                    </span>
+                  )}
                 </div>
               </button>
             );
@@ -591,6 +639,29 @@ export function PromptTab({ language }: { language: "zh" | "en" }) {
 
       {/* Right: Flat Prompt List Table */}
       <div className="flex-1 overflow-y-auto p-6">
+        {/* Build App 组子 tab：API / Codex CLI */}
+        {isBuildGroup && (
+          <div className="flex items-center gap-1 mb-4 pb-3 border-b border-white/5">
+            {currentGroup.entries.map(subKey => {
+              const subEntry = AI_ENTRIES.find(e => e.key === subKey)!;
+              const isSubActive = selectedEntry === subKey;
+              const subLabel = subKey === "app-code" ? "API" : "Codex CLI";
+              return (
+                <button
+                  key={subKey}
+                  onClick={() => handleSubEntryChange(subKey)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                    isSubActive
+                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                      : "text-slate-400 hover:text-white border border-transparent"
+                  }`}
+                >
+                  <span className="mr-1">{subEntry.icon}</span>{subLabel}
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold flex items-center gap-2">
             <span className="text-xl">{currentEntry.icon}</span>

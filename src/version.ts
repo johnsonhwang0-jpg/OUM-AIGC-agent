@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.3.3";
+export const APP_VERSION = "1.3.4";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,17 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.3.4",
+    updatedAt: "2026-07-01 00:00:00",
+    gitCommit: "",
+    changes: [
+      "Prompt Management 左侧标签重构：3 个主组（Slice / Script Generation / Build App）替代原来的 4 个 AI_ENTRIES 平铺，Build App 组内通过 API / Codex CLI 子 tab 切换管理两套 prompt。数据层不变，仍是 4 个独立 aiEntry。",
+      "Codex Debug 面板修复：之前显示 fixedPrompt（硬编码旧 API prompt），改为显示后端 start 返回的实际 systemPromptUsed + promptTextUsed（真实发给 Codex 的 codex-build prompt 摘要）。",
+      "Codex 停止按钮：running 状态时构建按钮旁出现红色停止按钮，点击设置 codexAbortRef 中止前端轮询（Codex API 无 cancel 端点，服务端任务继续直到超时/完成，前端不再等待）。",
+      "Events 接口容错：getCodexRunEvents 在 Codex API 返回非 200（run 刚启动 events 未产生）或网络错误时返回空数组而非抛 500，消除前端 net::ERR_ABORTED 报错。",
+    ],
+  },
   {
     version: "1.3.3",
     updatedAt: "2026-07-01 14:01:34",
