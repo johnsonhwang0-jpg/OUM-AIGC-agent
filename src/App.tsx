@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, Component, ErrorInfo, ReactNode } from "react";
-import { 
-  Upload, BookOpen, Sparkles, Play, Check, Plus, Trash2, Edit3, Layers, 
-  MessageSquare, Send, RefreshCw, FileText, Settings, ArrowRight, Gamepad2, 
-  CheckCircle2, XCircle, Compass, HelpCircle, Info, Download, Copy, AlertCircle, 
+import {
+  Upload, BookOpen, Sparkles, Play, Check, Plus, Trash2, Edit3, Layers,
+  MessageSquare, Send, RefreshCw, FileText, Settings, ArrowRight, Gamepad2,
+  CheckCircle2, XCircle, Compass, HelpCircle, Info, Download, Copy, AlertCircle,
   Award, Trophy, ChevronRight, CornerDownRight, Volume2, Gamepad, Lock, Code2, Terminal,
-  Maximize2, Minimize2, X, Eye, Scissors, FileCode, Rocket
+  Maximize2, Minimize2, X, Eye, Scissors, FileCode, Rocket, Zap, Bot
 } from "lucide-react";
 import { useLanguage, type TranslationKey } from "./i18n/LanguageContext";
 
@@ -230,6 +230,8 @@ export default function App() {
     rawResponse: '',
     timestamp: ''
   });
+  // Codex 专用：最后一次 run 的原始返回（用于 Step 5 debug 面板）
+  const [lastCodexRaw, setLastCodexRaw] = useState<string>('');
   const [scriptCopySuccess, setScriptCopySuccess] = useState<boolean>(false);
   const [copyToast, setCopyToast] = useState<{ message: string; visible: boolean }>({ message: '', visible: false });
   const [recommendingId, setRecommendingId] = useState<string | null>(null);
@@ -313,6 +315,32 @@ function greet(name) {
   const [buildModelConfig, setBuildModelConfig] = useState<ModelSelection>(
     () => loadStoredSelection("build") || { provider: "deepseek", model: "deepseek-v4-flash" }
   );
+
+  // Step 5 Build App 的执行模式：API（同步 LLM）/ Codex（异步 Agent）
+  // 独立于 provider 选择，两种模式有各自的 UX
+  const [buildMode, setBuildMode] = useState<"api" | "codex">(() => {
+    try {
+      const v = localStorage.getItem("booktogame:buildMode");
+      if (v === "codex") return "codex";
+    } catch {}
+    return "api";
+  });
+  useEffect(() => {
+    try { localStorage.setItem("booktogame:buildMode", buildMode); } catch {}
+  }, [buildMode]);
+
+  // Codex 配置状态（用于 Step 5 切换器显示是否可点击 Codex 模式）
+  const [codexConfigured, setCodexConfigured] = useState(false);
+  const [codexDebugOpen, setCodexDebugOpen] = useState(true); // codex debug 面板默认展开
+  const [codexRunId, setCodexRunId] = useState<string>('');
+  const [codexRunStatus, setCodexRunStatus] = useState<string>(''); // queued/running/completed/failed
+  const [codexRunElapsed, setCodexRunElapsed] = useState<number>(0); // 秒
+  useEffect(() => {
+    fetch("/api/codex-config")
+      .then(r => r.json())
+      .then(data => setCodexConfigured(!!(data && data.id && data.token)))
+      .catch(() => setCodexConfigured(false));
+  }, [showAIManagement]);
 
   // Step 5 States: Slice selection for app building
   const [selectedStep5ModuleId, setSelectedStep5ModuleId] = useState<string | null>(null);
@@ -2241,16 +2269,20 @@ ${script.conclusion}
 
     setAppApiDebugInfo(prev => ({
       ...prev,
-      model: buildModelConfig.model,
+      model: buildMode === "codex" ? "codex-agent" : buildModelConfig.model,
       userPrompt,
       status: 'calling',
       rawResponse: '',
       timestamp: new Date().toLocaleTimeString()
     }));
 
-    addAgentMessage(language === "en"
-      ? `🚀 Generating scenario simulation game based on slice **${mod.chapterIndex} · ${mod.title}** interactive script...`
-      : `🚀 正在基于切片 **${mod.chapterIndex} · ${mod.title}** 的互动脚本生成场景模拟游戏...`);
+    addAgentMessage(buildMode === "codex"
+      ? (language === "en"
+        ? `🤖 [Codex CLI] Generating scenario simulation game based on slice **${mod.chapterIndex} · ${mod.title}**... (async agent run, may take 30s+)`
+        : `🤖 [Codex CLI] 正在基于切片 **${mod.chapterIndex} · ${mod.title}** 生成场景模拟游戏...（异步 Agent，可能需 30s+）`)
+      : (language === "en"
+        ? `🚀 Generating scenario simulation game based on slice **${mod.chapterIndex} · ${mod.title}** interactive script...`
+        : `🚀 正在基于切片 **${mod.chapterIndex} · ${mod.title}** 的互动脚本生成场景模拟游戏...`));
 
     // Fetch saved prompts from DB
     let appSavedSystemPrompt: string | undefined;
@@ -2267,44 +2299,107 @@ ${script.conclusion}
     }
 
     try {
-      const response = await fetch('/api/generate-app-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bookTitle,
-          chapterTitle: `${mod.chapterIndex} · ${mod.title}`,
-          coveredChapters: mod.coveredChapters,
-          scriptMarkdown: markdown,
-          provider: buildModelConfig.provider,
-          model: buildModelConfig.model,
-          systemPrompt: appSavedSystemPrompt,
-          userPromptTemplate: appSavedUserPromptTemplate
-        })
-      });
+      let generatedCode = '';
+      let rawCodex: string | undefined;
 
-      const rawText = await response.text();
-      if (!response.ok) {
-        setAppApiDebugInfo(prev => ({
-          ...prev,
-          status: 'error',
-          rawResponse: `HTTP ${response.status}: ${rawText}`,
-          timestamp: new Date().toLocaleTimeString()
-        }));
-        throw new Error(rawText || `HTTP ${response.status}`);
+      if (buildMode === "codex") {
+        // ── Codex 异步轮询架构：start → poll → result ──
+        const startRes = await fetch('/api/codex-build/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bookTitle,
+            chapterTitle: `${mod.chapterIndex} · ${mod.title}`,
+            coveredChapters: mod.coveredChapters,
+            scriptMarkdown: markdown,
+            systemPrompt: appSavedSystemPrompt,
+            userPromptTemplate: appSavedUserPromptTemplate
+          })
+        });
+        const startText = await startRes.text();
+        if (!startRes.ok) throw new Error(startText || `HTTP ${startRes.status}`);
+        const startData = JSON.parse(startText);
+        const runId = startData.runId;
+        const timeoutSeconds = startData.timeoutSeconds || 120;
+        if (!runId) throw new Error('Codex start returned no runId');
+        setCodexRunId(runId);
+        setCodexRunStatus('queued');
+        setCodexRunElapsed(0);
+
+        const startedAt = Date.now();
+        const pollIntervalMs = 3000;
+        const pollMaxMs = (timeoutSeconds + 60) * 1000;
+        let lastStatus = 'queued';
+
+        while (Date.now() - startedAt < pollMaxMs) {
+          await new Promise(r => setTimeout(r, pollIntervalMs));
+          const statusRes = await fetch(`/api/codex-build/${runId}/status`);
+          const statusText = await statusRes.text();
+          if (!statusRes.ok) throw new Error(statusText || `HTTP ${statusRes.status}`);
+          const statusData = JSON.parse(statusText);
+          lastStatus = statusData.status || 'unknown';
+          setCodexRunStatus(lastStatus);
+          setCodexRunElapsed(Math.round((Date.now() - startedAt) / 1000));
+          if (lastStatus === 'completed' || lastStatus === 'failed') break;
+        }
+
+        if (lastStatus !== 'completed') {
+          throw new Error(`Codex run ${lastStatus} after ${Math.round((Date.now() - startedAt) / 1000)}s`);
+        }
+
+        // 拉取结果
+        const resultRes = await fetch(`/api/codex-build/${runId}/result`);
+        const resultText = await resultRes.text();
+        if (!resultRes.ok) throw new Error(resultText || `HTTP ${resultRes.status}`);
+        const resultData = JSON.parse(resultText);
+        generatedCode = resultData.code || '';
+        rawCodex = resultData.rawCodexResponse as string | undefined;
+        if (rawCodex) setLastCodexRaw(rawCodex);
+      } else {
+        // ── API 同步模式（原逻辑） ──
+        const response = await fetch('/api/generate-app-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bookTitle,
+            chapterTitle: `${mod.chapterIndex} · ${mod.title}`,
+            coveredChapters: mod.coveredChapters,
+            scriptMarkdown: markdown,
+            provider: buildModelConfig.provider,
+            model: buildModelConfig.model,
+            systemPrompt: appSavedSystemPrompt,
+            userPromptTemplate: appSavedUserPromptTemplate
+          })
+        });
+        const rawText = await response.text();
+        if (!response.ok) {
+          setAppApiDebugInfo(prev => ({
+            ...prev,
+            status: 'error',
+            rawResponse: `HTTP ${response.status}: ${rawText}`,
+            timestamp: new Date().toLocaleTimeString()
+          }));
+          throw new Error(rawText || `HTTP ${response.status}`);
+        }
+        const data = JSON.parse(rawText);
+        generatedCode = data.code || '';
       }
 
-      const data = JSON.parse(rawText);
-      let generatedCode = data.code || '';
-      
       // Extract valid HTML from AI response
       generatedCode = extractValidHtml(generatedCode);
-      
+
+      // Codex 模式下如果提取失败（黑屏），用原始返回包成注释显示，方便排查
+      if (!generatedCode && rawCodex) {
+        const preview = rawCodex.slice(0, 2000);
+        generatedCode = `<!-- ⚠️ Codex 返回内容无法提取为有效 HTML，原始返回前 2000 字符如下：\n\n${preview}\n\n-->\n<!DOCTYPE html><html><body style="font-family:monospace;padding:20px;background:#1a1a1a;color:#f87171;"><h2>Codex 返回内容无法提取为 HTML</h2><p>请打开 API 调试查看完整原始返回。</p><pre style="white-space:pre-wrap;word-break:break-all;font-size:11px;">${preview.replace(/</g, '&lt;')}</pre></body></html>`;
+      }
+
       setFinalCode(generatedCode);
 
       setAppApiDebugInfo(prev => ({
         ...prev,
         status: 'success',
-        rawResponse: rawText.substring(0, 10000),
+        rawResponse: (rawCodex || generatedCode).substring(0, 10000),
         timestamp: new Date().toLocaleTimeString()
       }));
       
@@ -2319,12 +2414,14 @@ ${script.conclusion}
       }
       
       setIsGeneratingApp(false);
+      setCodexRunStatus('completed');
       setOutputTab('preview');
       addAgentMessage(language === "en"
         ? `✅ **Scenario simulation game generated successfully!**\n\nYou can preview the effect on the right, or switch to the code view to see the HTML source code.`
         : `✅ **场景模拟游戏生成完成！**\n\n你可以在右侧预览效果，或切换到代码视图查看 HTML 源码。`, 'text');
     } catch (err: any) {
       setIsGeneratingApp(false);
+      setCodexRunStatus('failed');
       const message = err?.message || (language === "en" ? "Unknown error" : "未知错误");
       setFinalCode(`<!-- ${language === "en" ? "DeepSeek V4 Flash code generation failed" : "DeepSeek V4 Flash 代码生成失败"} -->\n<!-- ${message} -->`);
       setAppApiDebugInfo(prev => ({
@@ -4192,84 +4289,172 @@ API地址：https://api.deepseek.com/chat/completions`}
               </div>
 
               {/* Right: Build controls and output */}
-              <div className="flex-1 overflow-y-auto z-10 w-full">
-                <div className="space-y-6 flex flex-col h-full">
-              
-                <div className="bg-gradient-to-r from-cyan-950/40 to-[#0a0a0f] border border-cyan-500/30 rounded-2xl p-6 flex flex-col md:flex-row items-center gap-5 shadow-lg">
-                  <div className="p-3 bg-cyan-500/20 text-cyan-400 border border-cyan-400/20 rounded-xl">
-                    <Gamepad2 className="w-8 h-8 animate-pulse" />
+              <div className="flex-1 overflow-hidden z-10 w-full flex flex-col gap-3 min-h-0">
+
+                {/* ── 顶部紧凑栏：切片信息 + 引擎切换 + 构建按钮 + 调试 ── */}
+                <div className="shrink-0 bg-[#0a0a0f] border border-white/10 rounded-2xl p-3 flex flex-wrap items-center gap-3">
+                  {/* 切片信息（左侧） */}
+                  <div className="flex-1 min-w-[180px]">
+                    {selectedStep5ModuleId ? (() => {
+                      const mod = modules.find(m => m.id === selectedStep5ModuleId);
+                      if (!mod) return null;
+                      return (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold text-slate-500 font-mono tracking-wide shrink-0">{mod.chapterIndex}</span>
+                          <span className={`text-sm font-semibold ${buildMode === "codex" ? "text-emerald-400" : "text-cyan-400"} truncate`}>{mod.title}</span>
+                          {mod.coveredChapters && (
+                            <span className="text-[10px] text-slate-500 truncate hidden md:inline">{mod.coveredChapters}</span>
+                          )}
+                        </div>
+                      );
+                    })() : (
+                      <span className="text-xs text-slate-500">{language === "en" ? "Select a slice from left →" : "← 请从左侧选择切片"}</span>
+                    )}
                   </div>
-                  <div>
-                    <h3 className="font-semibold text-base text-white">
-                      {language === "en" ? "Scene Simulation Game Build" : "场景模拟游戏构建"}
-                    </h3>
-                    <p className="text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                      {language === "en" ? "Select a slice with a generated script from the left sidebar, click \"Start Build\", and AI will generate an immersive HTML scene simulation game based on the interactive script." : "选择左侧一个已生成脚本的切片，点击\"开始构建\"，AI 将基于互动脚本内容生成沉浸式 HTML 场景模拟游戏。"}
-                    </p>
+
+                  {/* 引擎切换（中间） */}
+                  <div className="flex items-center gap-0.5 p-0.5 bg-black/40 rounded-lg border border-white/10 shrink-0">
+                    <button
+                      onClick={() => setBuildMode("api")}
+                      className={`py-1.5 px-2.5 rounded-md text-[10px] font-bold transition flex items-center gap-1 cursor-pointer ${
+                        buildMode === "api"
+                          ? "bg-cyan-500/20 text-cyan-300"
+                          : "text-slate-400 hover:text-slate-300"
+                      }`}
+                    >
+                      <Zap className="w-3 h-3" /> API
+                    </button>
+                    <button
+                      onClick={() => setBuildMode("codex")}
+                      className={`py-1.5 px-2.5 rounded-md text-[10px] font-bold transition flex items-center gap-1 cursor-pointer ${
+                        buildMode === "codex"
+                          ? "bg-emerald-500/20 text-emerald-300"
+                          : "text-slate-400 hover:text-slate-300"
+                      }`}
+                    >
+                      <Bot className="w-3 h-3" /> Codex
+                      {!codexConfigured && <span className="w-1.5 h-1.5 rounded-full bg-red-400" />}
+                    </button>
+                  </div>
+
+                  {/* 构建按钮 + 调试齿轮（右侧） */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={handleGenerateFinalApp}
+                      disabled={isGeneratingApp || !selectedStep5ModuleId || isProjectLocked || (buildMode === "codex" && !codexConfigured)}
+                      className={`py-2.5 px-4 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold transition text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
+                        buildMode === "codex"
+                          ? "bg-emerald-500 hover:bg-emerald-600 shadow-[0_0_15px_rgba(16,185,129,0.4)]"
+                          : "bg-cyan-500 hover:bg-cyan-600 shadow-[0_0_15px_rgba(6,182,212,0.4)]"
+                      }`}
+                    >
+                      {isGeneratingApp ? (
+                        <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> {language === "en" ? "Running..." : "执行中..."}</>
+                      ) : (
+                        <>
+                          {buildMode === "codex" ? <Bot className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />}
+                          {buildMode === "codex"
+                            ? (codexConfigured ? (language === "en" ? "Codex Build" : "Codex 构建") : (language === "en" ? "Configure Codex" : "请先配置"))
+                            : (language === "en" ? "Build" : "构建")}
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setShowAppApiDrawer(true)}
+                      className="p-2 rounded-lg transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
+                      title={language === "en" ? "API Debug" : "API 调试"}
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6">
-                  
-                  {/* Build Controls */}
-                  <div className="space-y-6">
-                    
-                    {/* Selected slice info */}
-                    {selectedStep5ModuleId && (
-                      <div className="bg-[#0a0a0f] border border-white/10 rounded-xl p-4">
-                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">{language === "en" ? "Selected Slice" : "当前选中切片"}</div>
-                        {(() => {
-                          const mod = modules.find(m => m.id === selectedStep5ModuleId);
-                          if (!mod) return null;
-                          return (
-                            <div>
-                              <div className="text-sm font-semibold text-cyan-400">{mod.chapterIndex} · {mod.title}</div>
-                              <div className="text-xs text-slate-400 mt-1 line-clamp-3">
-                                {mod.coveredChapters && `${language === "en" ? "Covered Chapters" : "覆盖章节"}: ${mod.coveredChapters}`}
-                              </div>
-                            </div>
-                          );
-                        })()}
+                {/* ── Codex 调试面板（仅 codex 模式） ── */}
+                {buildMode === "codex" && (
+                  <div className="shrink-0 bg-[#0a0a0f] border border-emerald-500/20 rounded-2xl overflow-hidden">
+                    <button
+                      onClick={() => setCodexDebugOpen(!codexDebugOpen)}
+                      className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-white/[0.03] transition cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Bot className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-[11px] font-bold text-emerald-300">{language === "en" ? "Codex Debug" : "Codex 调试"}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono ${
+                          codexConfigured ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
+                        }`}>
+                          {codexConfigured ? (language === "en" ? "Configured" : "已配置") : (language === "en" ? "Not configured" : "未配置")}
+                        </span>
+                        {isGeneratingApp && buildMode === "codex" && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 animate-pulse">
+                            {codexRunStatus || 'starting'}{codexRunElapsed > 0 ? ` · ${codexRunElapsed}s` : ''}
+                          </span>
+                        )}
+                        {!isGeneratingApp && codexRunStatus === 'completed' && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">{language === "en" ? "Done" : "完成"}</span>
+                        )}
+                        {!isGeneratingApp && codexRunStatus === 'failed' && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">{language === "en" ? "Error" : "错误"}</span>
+                        )}
+                      </div>
+                      <span className={`text-slate-500 text-[10px] transition-transform ${codexDebugOpen ? 'rotate-90deg' : ''}`}>▶</span>
+                    </button>
+                    {codexDebugOpen && (
+                      <div className="px-3 pb-3 border-t border-emerald-500/10 space-y-2.5">
+                        {/* Run ID + 状态 */}
+                        {codexRunId && (
+                          <div className="flex items-center gap-2 text-[10px] font-mono">
+                            <span className="text-slate-500">run:</span>
+                            <span className="text-emerald-400/80 truncate">{codexRunId}</span>
+                            <button
+                              onClick={() => { try { navigator.clipboard.writeText(codexRunId); } catch {} }}
+                              className="text-slate-500 hover:text-slate-300 cursor-pointer shrink-0"
+                            >
+                              <Copy className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        )}
+                        {/* 发送的 Prompt */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Prompt sent to Codex" : "发送给 Codex 的 Prompt"}</span>
+                            <button
+                              onClick={() => { try { navigator.clipboard.writeText(appApiDebugInfo.userPrompt); } catch {} }}
+                              className="text-[9px] text-slate-500 hover:text-slate-300 flex items-center gap-0.5 cursor-pointer"
+                            >
+                              <Copy className="w-2.5 h-2.5" /> {language === "en" ? "Copy" : "复制"}
+                            </button>
+                          </div>
+                          <pre className="text-[10px] text-slate-400 font-mono bg-black/30 border border-white/5 rounded-lg p-2 max-h-24 overflow-auto whitespace-pre-wrap break-all leading-relaxed">{appApiDebugInfo.userPrompt || (language === "en" ? "(not sent yet)" : "(尚未发送)")}</pre>
+                        </div>
+                        {/* Codex 原始返回 */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Raw Codex Response" : "Codex 原始返回"}</span>
+                            <button
+                              onClick={() => { try { navigator.clipboard.writeText(lastCodexRaw); } catch {} }}
+                              className="text-[9px] text-slate-500 hover:text-slate-300 flex items-center gap-0.5 cursor-pointer"
+                            >
+                              <Copy className="w-2.5 h-2.5" /> {language === "en" ? "Copy" : "复制"}
+                            </button>
+                          </div>
+                          {lastCodexRaw ? (
+                            <pre className="text-[10px] text-emerald-300/70 font-mono bg-black/30 border border-emerald-500/10 rounded-lg p-2 max-h-48 overflow-auto whitespace-pre-wrap break-all leading-relaxed">{lastCodexRaw.slice(0, 3000)}{lastCodexRaw.length > 3000 ? `\n\n... (${lastCodexRaw.length - 3000} ${language === "en" ? "more chars" : "字符剩余"})` : ''}</pre>
+                          ) : (
+                            <div className="text-[10px] text-slate-600 italic py-2 text-center">{language === "en" ? "No response yet. Click Build to start a Codex run." : "暂无返回，点击构建按钮启动 Codex 执行。"}</div>
+                          )}
+                        </div>
+                        {/* 错误信息 */}
+                        {appApiDebugInfo.status === 'error' && (
+                          <div className="text-[10px] text-red-400 font-mono bg-red-500/5 border border-red-500/10 rounded-lg p-2 break-all">{appApiDebugInfo.rawResponse.slice(0, 500)}</div>
+                        )}
                       </div>
                     )}
-
-                    {/* Build Action */}
-                    <div className="pt-4 border-t border-white/10">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={handleGenerateFinalApp}
-                          disabled={isGeneratingApp || !selectedStep5ModuleId || isProjectLocked}
-                          className="flex-1 py-4 rounded-xl flex items-center justify-center gap-2 font-bold transition text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-500 hover:bg-cyan-600 cursor-pointer"
-                        >
-                          {isGeneratingApp ? (
-                            <>
-                              <RefreshCw className="w-5 h-5 animate-spin" />
-                              {language === "en" ? "AI is generating the scene simulation game..." : "AI 正在生成场景模拟游戏..."}
-                            </>
-                          ) : (
-                            <>
-                              <Download className="w-5 h-5" />
-                              {selectedStep5ModuleId ? (language === "en" ? 'Start Build' : '开始构建') : (language === "en" ? 'Please select a slice first' : '请先选择一个切片')}
-                            </>
-                          )}
-                        </button>
-                        <button
-                          onClick={() => setShowAppApiDrawer(true)}
-                          className="p-3 rounded-xl transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10 shrink-0"
-                          title={language === "en" ? "API Debug" : "API 调试"}
-                        >
-                          <Settings className="w-5 h-5" />
-                        </button>
-                      </div>
-                      <p className="text-center text-[10px] text-slate-500 mt-3 flex items-center justify-center gap-1">
-                        <Lock className="w-3 h-3" /> {language === "en" ? "Click API Debug to switch model" : "点击 API 调试按钮切换模型"}
-                      </p>
-                    </div>
-
                   </div>
+                )}
 
-                  {/* Live Output Pane */}
-                  <div className="bg-[#0a0a0f] border border-white/10 rounded-2xl flex flex-col overflow-hidden h-full min-h-[400px]">
+
+                {/* Scene Simulation Game（占满下方空间） */}
+                <div className="flex-1 min-h-0 bg-[#0a0a0f] border border-white/10 rounded-2xl flex flex-col overflow-hidden">
                   <div className="bg-[#050508] border-b border-white/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
@@ -4355,8 +4540,6 @@ API地址：https://api.deepseek.com/chat/completions`}
                   </div>
                 </div>
 
-              </div>
-              </div>
             </div>
             </div>
           )}

@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Settings, Globe, FileText, Brain, History, GitCommit, Copy, Check } from "lucide-react";
+import { ArrowLeft, Settings, Globe, FileText, Brain, History, GitCommit, Copy, Check, Terminal, Cpu } from "lucide-react";
 import { useLanguage } from "../i18n/LanguageContext";
-import { PromptTab, ModelTab } from "./AIManagement";
+import { PromptTab, ModelTab, CodexTab } from "./AIManagement";
 import { APP_VERSION, VERSION_UPDATED_AT, VERSION_HISTORY } from "../version";
 
-type SettingsTab = "models" | "prompts" | "language" | "version";
+type SettingsTab = "ai" | "prompts" | "language" | "version";
+type AIChannel = "models" | "codex";
 
 interface SystemSettingsProps {
   onBack: () => void;
@@ -12,7 +13,7 @@ interface SystemSettingsProps {
 
 export default function SystemSettings({ onBack }: SystemSettingsProps) {
   const { t, language, setLanguage } = useLanguage();
-  const [activeTab, setActiveTab] = useState<SettingsTab>("models");
+  const [activeTab, setActiveTab] = useState<SettingsTab>("ai");
 
   return (
     <div className="h-screen bg-[#0a0a0f] text-white flex flex-col">
@@ -29,13 +30,13 @@ export default function SystemSettings({ onBack }: SystemSettingsProps) {
         </div>
         <div className="flex gap-1 bg-white/5 rounded-lg p-1">
           <button
-            onClick={() => setActiveTab("models")}
+            onClick={() => setActiveTab("ai")}
             className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition cursor-pointer ${
-              activeTab === "models" ? "bg-cyan-500/30 text-white" : "text-slate-400 hover:text-white"
+              activeTab === "ai" ? "bg-cyan-500/30 text-white" : "text-slate-400 hover:text-white"
             }`}
           >
             <Brain className="w-3.5 h-3.5" />
-            {t("modelManagement")}
+            {t("aiChannels")}
           </button>
           <button
             onClick={() => setActiveTab("prompts")}
@@ -69,10 +70,103 @@ export default function SystemSettings({ onBack }: SystemSettingsProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === "models" && <ModelTab language={language} />}
+        {activeTab === "ai" && <AIChannelsTab language={language} />}
         {activeTab === "prompts" && <PromptTab language={language} />}
         {activeTab === "language" && <LanguageTab />}
         {activeTab === "version" && <VersionTab />}
+      </div>
+    </div>
+  );
+}
+
+// ==================== AI 调用 Tab（Model API + Codex CLI 二合一）====================
+function AIChannelsTab({ language }: { language: "zh" | "en" }) {
+  const { t } = useLanguage();
+  const [channel, setChannel] = useState<AIChannel>("models");
+  const [codexConfigured, setCodexConfigured] = useState(false);
+  const [codexConnected, setCodexConnected] = useState(false);
+  const [modelProviderCount, setModelProviderCount] = useState(0);
+
+  // 初始加载两个渠道的配置状态（CodexTab mount 后会通过 callback 持续更新）
+  useEffect(() => {
+    fetch("/api/codex-config")
+      .then(r => r.json())
+      .then(data => {
+        const configured = !!(data && data.id && data.token);
+        setCodexConfigured(configured);
+        if (!configured) setCodexConnected(false);
+      })
+      .catch(() => {});
+    fetch("/api/api-keys")
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) setModelProviderCount(data.length);
+      })
+      .catch(() => {});
+  }, []);
+
+  // CodexTab 操作回调：实时更新 badge 状态
+  const handleCodexStatusChange = (configured: boolean, connected: boolean) => {
+    setCodexConfigured(configured);
+    setCodexConnected(connected);
+  };
+
+  // 子 tab 状态指示器
+  const renderCodexBadge = () => {
+    if (!codexConfigured) {
+      return <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-slate-500/20 text-slate-400">未配置</span>;
+    }
+    if (codexConnected) {
+      return <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>已连接</span>;
+    }
+    return <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300"><span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>已配置</span>;
+  };
+
+  const renderModelsBadge = () => {
+    if (modelProviderCount === 0) {
+      return <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-slate-500/20 text-slate-400">未配置</span>;
+    }
+    return <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/20 text-cyan-300"><span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>{modelProviderCount} 个</span>;
+  };
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* 子 tab 切换栏 */}
+      <div className="px-6 pt-4 pb-3 border-b border-white/5 shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500 mr-2">{t("aiChannelsLabel")}</span>
+          <button
+            onClick={() => setChannel("models")}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-sm font-medium transition cursor-pointer ${
+              channel === "models"
+                ? "bg-cyan-500/20 border border-cyan-500/40 text-cyan-300"
+                : "bg-white/[0.02] border border-white/10 text-slate-400 hover:text-white hover:border-white/20"
+            }`}
+          >
+            <Cpu className="w-3.5 h-3.5" />
+            {t("modelManagement")}
+            <span className="text-[10px] text-slate-500 ml-1">Model API</span>
+            {renderModelsBadge()}
+          </button>
+          <button
+            onClick={() => setChannel("codex")}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-sm font-medium transition cursor-pointer ${
+              channel === "codex"
+                ? "bg-emerald-500/20 border border-emerald-500/40 text-emerald-300"
+                : "bg-white/[0.02] border border-white/10 text-slate-400 hover:text-white hover:border-white/20"
+            }`}
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            {t("codexManagement")}
+            <span className="text-[10px] text-slate-500 ml-1">Agent</span>
+            {renderCodexBadge()}
+          </button>
+        </div>
+      </div>
+
+      {/* 子内容 */}
+      <div className="flex-1 overflow-hidden">
+        {channel === "models" ? <ModelTab language={language} /> : <CodexTab language={language} onStatusChange={handleCodexStatusChange} />}
       </div>
     </div>
   );

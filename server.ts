@@ -44,6 +44,9 @@ import {
   createApiKey,
   updateApiKey,
   deleteApiKey,
+  getCodexConfig,
+  upsertCodexConfig,
+  deleteCodexConfig,
   getLatestJobsForProjects,
   recoverStaleJobs
 } from "./database.js";
@@ -251,6 +254,205 @@ async function resolveCredentials(provider: string): Promise<{ apiKey: string; b
     return { apiKey: process.env.DASHSCOPE_API_KEY || "", baseUrl: process.env.DASHSCOPE_BASE_URL || PROVIDER_DEFAULT_BASE_URLS.qwen };
   }
   return { apiKey: "", baseUrl: PROVIDER_DEFAULT_BASE_URLS[provider] || "" };
+}
+
+// ==================== Codex CLI 调用（异步 Run + 轮询 + 取结果）====================
+const CODEX_API_BASE_URL = "https://codex-api.tangyinx.com";
+
+/**
+ * 调用 Codex API 创建 run 并轮询直到完成，返回 final_response
+ * - 用 codex_configs 表中的 token/sandbox/timeout/skills
+ * - prompt 前会拼接 default skills（如 "$using-superpowers $verification-before-completion"）
+ * - 失败/超时会抛错
+ */
+async function callCodexRun(promptText: string, systemInstruction: string): Promise<string> {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    throw new Error("Codex 未配置：请在 Setting → AI 调用 → Codex CLI 中配置 Token");
+  }
+
+  // 拼 skills：把 defaultSkills 转成 "$skill1 $skill2" 前缀
+  const skillsArr = (cfg.defaultSkills || "")
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+  const skillsPrefix = skillsArr.length > 0 ? `${skillsArr.join(" ")}\n\n` : "";
+
+  // System instruction 作为 prompt 前置上下文（Codex API 只有一个 prompt 字段）
+  // Codex 是 Agent，默认会输出自然语言总结；这里强制要求只返回完整 HTML
+  const outputConstraint = `\n\n【输出要求】请直接输出一个完整的、可独立运行的 HTML 文件（以 <!DOCTYPE html> 开头），不要输出任何解释、思考过程或 markdown 代码块标记。所有 CSS 和 JS 内联在 <style> 和 <script> 标签中。`;
+  const fullPrompt = `${skillsPrefix}${systemInstruction}\n\n${promptText}${outputConstraint}`;
+
+  const sandbox = cfg.defaultSandbox === "workspace-write" ? "workspace-write" : "read-only";
+  const timeoutSeconds = Math.min(1800, Math.max(30, cfg.defaultTimeoutSeconds || 120));
+
+  console.log(`🔄 [callCodexRun] sandbox=${sandbox} timeout=${timeoutSeconds}s skills=${skillsArr.length}`);
+
+  // 1. 创建 run
+  const createRes = await fetch(`${CODEX_API_BASE_URL}/runs`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${cfg.token}`,
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: fullPrompt,
+      sandbox,
+      timeout_seconds: timeoutSeconds,
+    }),
+  });
+  if (!createRes.ok) {
+    const errText = await createRes.text();
+    throw new Error(`Codex create run failed: HTTP ${createRes.status} - ${errText.slice(0, 300)}`);
+  }
+  const createData = await createRes.json();
+  const runId = createData?.run?.id;
+  if (!runId) {
+    throw new Error(`Codex create run returned no id: ${JSON.stringify(createData).slice(0, 300)}`);
+  }
+  console.log(`✅ [callCodexRun] run created: ${runId}`);
+
+  // 2. 轮询直到终态（3s 间隔，最多等 timeoutSeconds + 60s 的轮询余量）
+  const pollIntervalMs = 3000;
+  const pollMaxMs = (timeoutSeconds + 60) * 1000;
+  const startedAt = Date.now();
+  let lastStatus = "queued";
+
+  while (Date.now() - startedAt < pollMaxMs) {
+    await new Promise(r => setTimeout(r, pollIntervalMs));
+    const statusRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}`, {
+      headers: { "Authorization": `Bearer ${cfg.token}` },
+    });
+    if (!statusRes.ok) {
+      const errText = await statusRes.text();
+      throw new Error(`Codex poll status failed: HTTP ${statusRes.status} - ${errText.slice(0, 200)}`);
+    }
+    const statusData = await statusRes.json();
+    lastStatus = statusData?.run?.status || "unknown";
+    console.log(`⏳ [callCodexRun] ${runId} status=${lastStatus} elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
+
+    if (lastStatus === "completed" || lastStatus === "failed") break;
+  }
+
+  if (lastStatus !== "completed" && lastStatus !== "failed") {
+    throw new Error(`Codex run timed out after ${Math.round((Date.now() - startedAt) / 1000)}s (last status: ${lastStatus})`);
+  }
+
+  // 3. 取结果
+  const resultRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/result`, {
+    headers: { "Authorization": `Bearer ${cfg.token}` },
+  });
+  if (!resultRes.ok) {
+    const errText = await resultRes.text();
+    throw new Error(`Codex get result failed: HTTP ${resultRes.status} - ${errText.slice(0, 200)}`);
+  }
+  const resultData = await resultRes.json();
+
+  if (resultData.status === "failed") {
+    throw new Error(`Codex run failed: ${resultData.error || "unknown error"}`);
+  }
+
+  const finalResponse = resultData.final_response;
+  if (!finalResponse || typeof finalResponse !== "string") {
+    console.error(`❌ [callCodexRun] ${runId} final_response empty or not string. Result keys:`, Object.keys(resultData));
+    console.error(`❌ [callCodexRun] full resultData:`, JSON.stringify(resultData).slice(0, 1000));
+    throw new Error(`Codex run completed but final_response is empty`);
+  }
+  console.log(`✅ [callCodexRun] ${runId} completed, response length=${finalResponse.length}`);
+  console.log(`📝 [callCodexRun] first 800 chars:\n${finalResponse.slice(0, 800)}`);
+  console.log(`📝 [callCodexRun] last 300 chars:\n${finalResponse.slice(-300)}`);
+  return finalResponse;
+}
+
+// ==================== Codex 异步轮询架构（拆分为 start/poll/result 三步）====================
+
+/** 构建 Codex prompt（skills + system + user + 输出约束） */
+function buildCodexPrompt(systemInstruction: string, promptText: string, cfg: any): string {
+  const skillsArr = (cfg.defaultSkills || "")
+    .split(",")
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+  const skillsPrefix = skillsArr.length > 0 ? `${skillsArr.join(" ")}\n\n` : "";
+  const outputConstraint = `\n\n【输出要求】请直接输出一个完整的、可独立运行的 HTML 文件（以 <!DOCTYPE html> 开头），不要输出任何解释、思考过程或 markdown 代码块标记。所有 CSS 和 JS 内联在 <style> 和 <script> 标签中。`;
+  return `${skillsPrefix}${systemInstruction}\n\n${promptText}${outputConstraint}`;
+}
+
+/** 步骤 1：创建 Codex run，返回 runId */
+async function startCodexRun(promptText: string, systemInstruction: string): Promise<{ runId: string; sandbox: string; timeoutSeconds: number }> {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    throw new Error("Codex 未配置：请在 Setting → AI 调用 → Codex CLI 中配置 Token");
+  }
+  const fullPrompt = buildCodexPrompt(systemInstruction, promptText, cfg);
+  const sandbox = cfg.defaultSandbox === "workspace-write" ? "workspace-write" : "read-only";
+  const timeoutSeconds = Math.min(1800, Math.max(30, cfg.defaultTimeoutSeconds || 120));
+
+  console.log(`🔄 [startCodexRun] sandbox=${sandbox} timeout=${timeoutSeconds}s`);
+
+  const createRes = await fetch(`${CODEX_API_BASE_URL}/runs`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${cfg.token}`,
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    },
+    body: JSON.stringify({ prompt: fullPrompt, sandbox, timeout_seconds: timeoutSeconds }),
+  });
+  if (!createRes.ok) {
+    const errText = await createRes.text();
+    throw new Error(`Codex create run failed: HTTP ${createRes.status} - ${errText.slice(0, 300)}`);
+  }
+  const createData = await createRes.json();
+  const runId = createData?.run?.id;
+  if (!runId) {
+    throw new Error(`Codex create run returned no id: ${JSON.stringify(createData).slice(0, 300)}`);
+  }
+  console.log(`✅ [startCodexRun] run created: ${runId}`);
+  return { runId, sandbox, timeoutSeconds };
+}
+
+/** 步骤 2：查询 Codex run 状态（单次轮询，不阻塞） */
+async function pollCodexRun(runId: string): Promise<{ status: string; raw: any }> {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    throw new Error("Codex token 丢失");
+  }
+  const statusRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}`, {
+    headers: { "Authorization": `Bearer ${cfg.token}` },
+  });
+  if (!statusRes.ok) {
+    const errText = await statusRes.text();
+    throw new Error(`Codex poll failed: HTTP ${statusRes.status} - ${errText.slice(0, 200)}`);
+  }
+  const statusData = await statusRes.json();
+  const status = statusData?.run?.status || "unknown";
+  return { status, raw: statusData };
+}
+
+/** 步骤 3：获取 Codex run 结果（仅在 status=completed 时调用） */
+async function getCodexRunResult(runId: string): Promise<string> {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    throw new Error("Codex token 丢失");
+  }
+  const resultRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/result`, {
+    headers: { "Authorization": `Bearer ${cfg.token}` },
+  });
+  if (!resultRes.ok) {
+    const errText = await resultRes.text();
+    throw new Error(`Codex get result failed: HTTP ${resultRes.status} - ${errText.slice(0, 200)}`);
+  }
+  const resultData = await resultRes.json();
+  if (resultData.status === "failed") {
+    throw new Error(`Codex run failed: ${resultData.error || "unknown error"}`);
+  }
+  const finalResponse = resultData.final_response;
+  if (!finalResponse || typeof finalResponse !== "string") {
+    throw new Error(`Codex run completed but final_response is empty. Result keys: ${Object.keys(resultData).join(",")}`);
+  }
+  console.log(`✅ [getCodexRunResult] ${runId} response length=${finalResponse.length}`);
+  return finalResponse;
 }
 
 // 统一 AI 调用：按 provider 查 key，用 model 调 OpenAI 兼容端点，支持自动续写
@@ -1346,6 +1548,7 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
 app.post("/api/generate-app-code", async (req, res) => {
   const appProvider = req.body?.provider || "deepseek";
   const appModel = req.body?.model || "deepseek-v4-flash";
+  const buildMode = req.body?.mode === "codex" ? "codex" : "api";
   try {
     const { bookTitle, chapterTitle, coveredChapters, scriptMarkdown, systemPrompt, userPromptTemplate } = req.body;
     if (!scriptMarkdown || typeof scriptMarkdown !== "string") {
@@ -1370,9 +1573,17 @@ ${scriptMarkdown}`;
       : defaultPromptText;
 
     let outputText: string;
-    // 阶段 2：按前端选择的 provider + model 调用
-    console.log(`🔄 [generate-app-code] provider=${appProvider} model=${appModel}`);
-    outputText = await callAIByProvider(appProvider, appModel, promptText, systemInstruction, 32000, false);
+    let rawCodexResponse: string | undefined;
+    if (buildMode === "codex") {
+      // Codex CLI 渠道：调用 Codex API（异步 run + 轮询）
+      console.log(`🔄 [generate-app-code] mode=codex, calling Codex API...`);
+      outputText = await callCodexRun(promptText, systemInstruction);
+      rawCodexResponse = outputText; // 保留原始返回，供前端 debug 查看
+    } else {
+      // 阶段 2：按前端选择的 provider + model 调用
+      console.log(`🔄 [generate-app-code] mode=api provider=${appProvider} model=${appModel}`);
+      outputText = await callAIByProvider(appProvider, appModel, promptText, systemInstruction, 32000, false);
+    }
 
     // Strip markdown code fences and any explanatory text before/after code
     let code = outputText.trim();
@@ -1383,10 +1594,75 @@ ${scriptMarkdown}`;
     code = code.replace(/```(?:html|HTML)?\s*\n?/gi, "");
     code = code.trim();
 
-    res.json({ code, model: appModel, provider: appProvider });
+    // codex 模式下额外返回原始响应，方便前端 debug 排查黑屏问题
+    const respPayload: any = { code, model: appModel, provider: appProvider };
+    if (rawCodexResponse !== undefined) {
+      respPayload.rawCodexResponse = rawCodexResponse;
+      respPayload.mode = "codex";
+    }
+    res.json(respPayload);
   } catch (error: any) {
     console.error("Error generating app code:", error);
     res.status(500).json({ error: error.message || "Failed to generate app code" });
+  }
+});
+
+// ==================== Codex 异步轮询：start / status / result ====================
+
+/** POST /api/codex-build/start — 创建 Codex run，立即返回 runId */
+app.post("/api/codex-build/start", async (req, res) => {
+  try {
+    const { scriptMarkdown, systemPrompt, userPromptTemplate, bookTitle, chapterTitle, coveredChapters } = req.body;
+    if (!scriptMarkdown || typeof scriptMarkdown !== "string") {
+      return res.status(400).json({ error: "Missing scriptMarkdown." });
+    }
+    const defaultSystemInstruction = `你是一个顶级的全栈工程师，必须输出可直接运行的完整代码，注重UI美感和交互细节，如果代码被截断要主动重试。只需要输出代码，不需要解释文字。`;
+    const defaultPromptText = `根据以下要求，帮我实现一个web端的html。这是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。\n\n以下是该章节的互动脚本内容，请根据脚本中的场景、角色、交互流程、反馈规则等来实现HTML场景模拟游戏：\n\n${scriptMarkdown}`;
+    const systemInstruction = systemPrompt || defaultSystemInstruction;
+    const promptText = userPromptTemplate
+      ? applyPromptTemplate(userPromptTemplate, {
+          scriptMarkdown,
+          bookTitle: bookTitle || "",
+          chapterTitle: chapterTitle || "",
+        })
+      : defaultPromptText;
+
+    const { runId, sandbox, timeoutSeconds } = await startCodexRun(promptText, systemInstruction);
+    res.json({ runId, sandbox, timeoutSeconds, status: "queued" });
+  } catch (error: any) {
+    console.error("Error starting codex build:", error);
+    res.status(500).json({ error: error.message || "Failed to start codex build" });
+  }
+});
+
+/** GET /api/codex-build/:runId/status — 查询 Codex run 状态（单次轮询，不阻塞） */
+app.get("/api/codex-build/:runId/status", async (req, res) => {
+  try {
+    const { runId } = req.params;
+    if (!runId) return res.status(400).json({ error: "Missing runId" });
+    const { status, raw } = await pollCodexRun(runId);
+    res.json({ runId, status, raw });
+  } catch (error: any) {
+    console.error("Error polling codex status:", error);
+    res.status(500).json({ error: error.message || "Failed to poll codex status" });
+  }
+});
+
+/** GET /api/codex-build/:runId/result — 获取 Codex run 结果（仅在 status=completed 时调用） */
+app.get("/api/codex-build/:runId/result", async (req, res) => {
+  try {
+    const { runId } = req.params;
+    if (!runId) return res.status(400).json({ error: "Missing runId" });
+    const finalResponse = await getCodexRunResult(runId);
+    let code = finalResponse.trim();
+    code = code.replace(/^```(?:html|HTML)?\s*\n?/i, "");
+    code = code.replace(/\n?\s*```$/i, "");
+    code = code.replace(/```(?:html|HTML)?\s*\n?/gi, "");
+    code = code.trim();
+    res.json({ runId, code, rawCodexResponse: finalResponse, mode: "codex" });
+  } catch (error: any) {
+    console.error("Error getting codex result:", error);
+    res.status(500).json({ error: error.message || "Failed to get codex result" });
   }
 });
 
@@ -2701,6 +2977,74 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================== Codex CLI 配置路由 ====================
+  // 单条全局配置：GET 拿配置（可能为 null），PUT upsert，DELETE 清空
+
+  app.get("/api/codex-config", async (req, res) => {
+    try {
+      const config = await getCodexConfig();
+      res.json(config);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/codex-config", async (req, res) => {
+    try {
+      const { token, defaultSandbox, defaultTimeoutSeconds, defaultSkills } = req.body || {};
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({ error: "token 是必填项" });
+      }
+      const sandbox = defaultSandbox === "workspace-write" ? "workspace-write" : "read-only";
+      const timeout = Math.max(30, Math.min(1800, Number(defaultTimeoutSeconds) || 120));
+      const skills = typeof defaultSkills === "string" ? defaultSkills : "";
+      const saved = await upsertCodexConfig({
+        token,
+        defaultSandbox: sandbox,
+        defaultTimeoutSeconds: timeout,
+        defaultSkills: skills,
+      });
+      res.json(saved);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/codex-config", async (req, res) => {
+    try {
+      await deleteCodexConfig();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 测试 Codex token 有效性：调 GET /me，返回 client 信息
+  app.post("/api/codex-config/test", async (req, res) => {
+    try {
+      const { token } = req.body || {};
+      if (!token) {
+        return res.status(400).json({ error: "token 是必填项" });
+      }
+      const resp = await fetch("https://codex-api.tangyinx.com/me", {
+        method: "GET",
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      if (!resp.ok) {
+        const errText = await resp.text();
+        return res.status(resp.status).json({
+          ok: false,
+          status: resp.status,
+          detail: errText.slice(0, 500),
+        });
+      }
+      const data = await resp.json();
+      res.json({ ok: true, client: data });
+    } catch (error: any) {
+      res.status(500).json({ ok: false, error: error.message });
     }
   });
 

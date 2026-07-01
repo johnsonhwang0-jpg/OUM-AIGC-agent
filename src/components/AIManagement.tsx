@@ -26,6 +26,32 @@ interface ApiKey {
   updatedAt: string;
 }
 
+// Codex CLI 配置（与后端 database.ts CodexConfig 对应）
+interface CodexConfig {
+  id: string;
+  token: string;
+  defaultSandbox: "read-only" | "workspace-write";
+  defaultTimeoutSeconds: number;
+  defaultSkills: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// 预置的 Codex Superpowers skills（来自 codex-api-frontend-integration-v3 文档）
+const CODEX_PRESET_SKILLS = [
+  "$using-superpowers",
+  "$brainstorming",
+  "$test-driven-development",
+  "$systematic-debugging",
+  "$writing-plans",
+  "$executing-plans",
+  "$verification-before-completion",
+  "$requesting-code-review",
+  "$receiving-code-review",
+  "$using-git-worktrees",
+  "$writing-skills",
+];
+
 const getAvailableVars = (language: "zh" | "en") => [
   { var: "{{bookTitle}}", desc: language === "en" ? "Book title" : "教材名称" },
   { var: "{{chapterTitle}}", desc: language === "en" ? "Slice title" : "切片标题" },
@@ -269,7 +295,7 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
   },
 };
 
-type TabKey = "models" | "prompts";
+type TabKey = "models" | "prompts" | "codex";
 
 export default function AIManagement({ onBack }: { onBack: () => void }) {
   const { language } = useLanguage();
@@ -302,12 +328,26 @@ export default function AIManagement({ onBack }: { onBack: () => void }) {
           >
             {language === "en" ? "AI Model API" : "AI 模型 API"}
           </button>
+          <button
+            onClick={() => setActiveTab("codex")}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition cursor-pointer ${
+              activeTab === "codex" ? "bg-emerald-500/30 text-white" : "text-slate-400 hover:text-white"
+            }`}
+          >
+            {language === "en" ? "Codex CLI" : "Codex CLI"}
+          </button>
         </div>
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === "prompts" ? <PromptTab language={language} /> : <ModelTab language={language} />}
+        {activeTab === "prompts" ? (
+          <PromptTab language={language} />
+        ) : activeTab === "models" ? (
+          <ModelTab language={language} />
+        ) : (
+          <CodexTab language={language} />
+        )}
       </div>
     </div>
   );
@@ -1235,6 +1275,420 @@ export function ModelTab({ language }: { language: "zh" | "en" }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ==================== Codex Tab（单条全局配置 + 测试连接）====================
+export function CodexTab({ language, onStatusChange }: { language: "zh" | "en"; onStatusChange?: (configured: boolean, connected: boolean) => void }) {
+  const [config, setConfig] = useState<CodexConfig | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  // 编辑态：表单字段
+  const [token, setToken] = useState("");
+  const [tokenConfirm, setTokenConfirm] = useState(""); // 编辑时需二次输入，避免误覆盖
+  const [sandbox, setSandbox] = useState<"read-only" | "workspace-write">("read-only");
+  const [timeout, setTimeout] = useState(120);
+  const [skills, setSkills] = useState<string[]>([]);
+  const [customSkillInput, setCustomSkillInput] = useState(""); // 自定义 skill 输入框
+
+  const t = (zh: string, en: string) => language === "en" ? en : zh;
+
+  // 加载已存配置
+  const loadConfig = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/codex-config");
+      const data = await res.json();
+      if (data && data.id) {
+        setConfig(data);
+        setSandbox(data.defaultSandbox || "read-only");
+        setTimeout(data.defaultTimeoutSeconds || 120);
+        const skillArr = (data.defaultSkills || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+        setSkills(skillArr);
+        onStatusChange?.(true, false); // 已配置，连接状态未知（不自动测）
+      } else {
+        setConfig(null);
+        onStatusChange?.(false, false);
+      }
+    } catch (e) {
+      console.error("Failed to load codex config:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  // 保存配置
+  const handleSave = async () => {
+    if (timeout < 30 || timeout > 1800) {
+      alert(t("超时时间必须在 30-1800 秒之间", "Timeout must be between 30-1800 seconds"));
+      return;
+    }
+    // 决定最终用哪个 token
+    let finalToken: string;
+    if (config) {
+      // 编辑模式
+      if (token) {
+        // 用户想改 token → 需要二次确认
+        if (!tokenConfirm) {
+          alert(t("修改 Token 时请二次输入以确认", "Please re-enter Token to confirm the change"));
+          return;
+        }
+        if (token !== tokenConfirm) {
+          alert(t("两次输入的 Token 不一致", "Tokens do not match"));
+          return;
+        }
+        finalToken = token;
+      } else {
+        // 不改 token → 沿用已存的，只更新其他字段
+        finalToken = config.token;
+      }
+    } else {
+      // 首次配置：必须填 token
+      if (!token) {
+        alert(t("请填写 Token", "Please fill in Token"));
+        return;
+      }
+      finalToken = token;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/codex-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: finalToken,
+          defaultSandbox: sandbox,
+          defaultTimeoutSeconds: timeout,
+          defaultSkills: skills.join(","),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const saved = await res.json();
+      setConfig(saved);
+      setToken("");
+      setTokenConfirm("");
+      setTestResult({ ok: true, msg: t("保存成功", "Saved successfully") });
+      window.setTimeout(() => setTestResult(null), 3000);
+      onStatusChange?.(true, false); // 保存后：已配置，连接状态未知（token 可能变了）
+    } catch (e: any) {
+      alert(t("保存失败：", "Save failed: ") + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 测试连接
+  const handleTest = async () => {
+    if (!token && !tokenConfirm && !config?.token) {
+      alert(t("请先填写 Token", "Please fill in Token first"));
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      // 优先用当前输入框的值（token 或 tokenConfirm），否则用已存配置
+      const testToken = tokenConfirm || token || config?.token || "";
+      const res = await fetch("/api/codex-config/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: testToken }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const clientId = data.client?.id || data.client?.clientId || "unknown";
+        setTestResult({ ok: true, msg: t(`连接成功！Client ID: ${clientId}`, `Connected! Client ID: ${clientId}`) });
+        onStatusChange?.(true, true); // 测试通过：已配置 + 已连接
+      } else {
+        setTestResult({ ok: false, msg: t(`连接失败 (${data.status || "error"})`, `Connection failed (${data.status || "error"})`) });
+        onStatusChange?.(true, false); // 测试失败：已配置但未连接
+      }
+    } catch (e: any) {
+      setTestResult({ ok: false, msg: t("测试失败：", "Test failed: ") + e.message });
+      onStatusChange?.(true, false);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  // 清除配置
+  const handleDelete = async () => {
+    if (!config) return;
+    if (!confirm(t("确定要清除 Codex 配置吗？此操作不可恢复。", "Are you sure to clear Codex config? This cannot be undone."))) return;
+    setLoading(true);
+    try {
+      await fetch("/api/codex-config", { method: "DELETE" });
+      setConfig(null);
+      setToken("");
+      setTokenConfirm("");
+      setSandbox("read-only");
+      setTimeout(120);
+      setSkills([]);
+      setTestResult(null);
+      onStatusChange?.(false, false); // 清除：未配置
+    } catch (e: any) {
+      alert(t("删除失败：", "Delete failed: ") + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 切换预置 skill 选中状态
+  const toggleSkill = (skill: string) => {
+    setSkills(prev => prev.includes(skill) ? prev.filter(s => s !== skill) : [...prev, skill]);
+  };
+
+  // 添加自定义 skill
+  const addCustomSkill = () => {
+    const s = customSkillInput.trim();
+    if (!s) return;
+    if (!s.startsWith("$")) {
+      alert(t("Skill 名必须以 $ 开头", "Skill name must start with $"));
+      return;
+    }
+    if (skills.includes(s)) {
+      setCustomSkillInput("");
+      return;
+    }
+    setSkills(prev => [...prev, s]);
+    setCustomSkillInput("");
+  };
+
+  // 移除 skill
+  const removeSkill = (skill: string) => {
+    setSkills(prev => prev.filter(s => s !== skill));
+  };
+
+  return (
+    <div className="h-full overflow-y-auto p-6">
+      <div className="max-w-2xl mx-auto">
+        {/* 标题区 */}
+        <div className="mb-6">
+          <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+            {t("Codex CLI 配置", "Codex CLI Configuration")}
+          </h2>
+          <p className="text-sm text-slate-400">
+            {t(
+              "Codex 是同事封装的 Agent 式 AI 执行服务，与 Model API 是两种不同的调用通道。这里只配置 Token 和默认参数，每个调用入口仍可单独选择是否使用 Codex。",
+              "Codex is an agent-style AI execution service wrapped by your colleague, different from Model API. Only Token and default params are configured here; each call site can independently choose whether to use Codex."
+            )}
+          </p>
+        </div>
+
+        {/* 配置卡片 */}
+        <div className="bg-white/[0.03] border border-white/10 rounded-xl p-6 space-y-5">
+          {/* Token */}
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              Token {config ? null : <span className="text-red-400">*</span>}
+            </label>
+            <input
+              type="password"
+              value={token}
+              onChange={e => setToken(e.target.value)}
+              placeholder={config ? t("已配置（留空表示不修改 Token，仅更新其他设置）", "Configured (leave empty to keep current Token, only update other settings)") : t("请输入 Codex Token", "Please enter Codex Token")}
+              className="w-full px-4 py-2.5 rounded-lg bg-black/40 border border-white/10 text-white text-sm font-mono focus:border-emerald-500/50 focus:outline-none transition"
+            />
+            {config && token && (
+              <input
+                type="password"
+                value={tokenConfirm}
+                onChange={e => setTokenConfirm(e.target.value)}
+                placeholder={t("再次输入新 Token 以确认修改", "Re-enter new Token to confirm modification")}
+                className="w-full mt-2 px-4 py-2.5 rounded-lg bg-black/40 border border-white/10 text-white text-sm font-mono focus:border-emerald-500/50 focus:outline-none transition"
+              />
+            )}
+            <p className="text-xs text-slate-500 mt-1.5">
+              {config
+                ? t("Token 已保存。仅在需要更换时填写，修改其他设置可直接点保存。", "Token is saved. Only fill in when you need to change it; other settings can be saved directly.")
+                : t("从同事处获取，唯一凭据，固定调用 https://codex-api.tangyinx.com", "Obtained from your colleague. Single credential, fixed endpoint https://codex-api.tangyinx.com")}
+            </p>
+          </div>
+
+          {/* Sandbox */}
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              {t("默认 Sandbox 模式", "Default Sandbox Mode")}
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setSandbox("read-only")}
+                className={`px-4 py-2.5 rounded-lg border text-sm transition cursor-pointer text-left ${
+                  sandbox === "read-only"
+                    ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
+                    : "bg-black/40 border-white/10 text-slate-400 hover:border-white/20"
+                }`}
+              >
+                <div className="font-semibold">read-only</div>
+                <div className="text-xs opacity-70 mt-0.5">{t("只读，安全", "Read-only, safe")}</div>
+              </button>
+              <button
+                onClick={() => setSandbox("workspace-write")}
+                className={`px-4 py-2.5 rounded-lg border text-sm transition cursor-pointer text-left ${
+                  sandbox === "workspace-write"
+                    ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
+                    : "bg-black/40 border-white/10 text-slate-400 hover:border-white/20"
+                }`}
+              >
+                <div className="font-semibold">workspace-write</div>
+                <div className="text-xs opacity-70 mt-0.5">{t("可写工作区", "Writable workspace")}</div>
+              </button>
+            </div>
+          </div>
+
+          {/* Timeout */}
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              {t("默认超时时间（秒）", "Default Timeout (seconds)")}
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={30}
+                max={1800}
+                value={timeout}
+                onChange={e => setTimeout(Number(e.target.value) || 120)}
+                className="w-32 px-4 py-2.5 rounded-lg bg-black/40 border border-white/10 text-white text-sm focus:border-emerald-500/50 focus:outline-none transition"
+              />
+              <span className="text-xs text-slate-500">{t("范围 30-1800，默认 120", "Range 30-1800, default 120")}</span>
+            </div>
+          </div>
+
+          {/* Skills */}
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              {t("默认 Skills", "Default Skills")}
+              <span className="ml-2 text-xs font-normal text-slate-500">
+                {t("（可选，调用时自动拼到 prompt 前）", "(optional, auto-prepended to prompt on call)")}
+              </span>
+            </label>
+
+            {/* 已选 skill 标签 */}
+            {skills.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {skills.map(s => (
+                  <span key={s} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono">
+                    {s}
+                    <button onClick={() => removeSkill(s)} className="hover:text-red-400 transition cursor-pointer">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* 预置 skill 多选 */}
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {CODEX_PRESET_SKILLS.map(skill => {
+                const selected = skills.includes(skill);
+                return (
+                  <button
+                    key={skill}
+                    onClick={() => toggleSkill(skill)}
+                    className={`px-3 py-1.5 rounded-md border text-xs font-mono transition cursor-pointer text-left ${
+                      selected
+                        ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
+                        : "bg-black/40 border-white/10 text-slate-400 hover:border-white/20"
+                    }`}
+                  >
+                    {skill}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 自定义 skill 输入 */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customSkillInput}
+                onChange={e => setCustomSkillInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addCustomSkill(); } }}
+                placeholder={t("$your-custom-skill", "$your-custom-skill")}
+                className="flex-1 px-3 py-2 rounded-lg bg-black/40 border border-white/10 text-white text-xs font-mono focus:border-emerald-500/50 focus:outline-none transition"
+              />
+              <button
+                onClick={addCustomSkill}
+                className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 text-xs transition cursor-pointer"
+              >
+                {t("添加", "Add")}
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mt-1.5">
+              {t(
+                "预置 skill 来自服务端已安装的 Superpowers skills；自定义 skill 需服务端已安装才生效。",
+                "Preset skills are from server-installed Superpowers; custom skills only work if installed on server."
+              )}
+            </p>
+          </div>
+
+          {/* 操作按钮 */}
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              onClick={handleSave}
+              disabled={loading}
+              className="px-5 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white text-sm font-semibold transition cursor-pointer disabled:opacity-50"
+            >
+              {loading ? t("保存中...", "Saving...") : t("保存", "Save")}
+            </button>
+            <button
+              onClick={handleTest}
+              disabled={testing}
+              className="px-5 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 text-sm transition cursor-pointer disabled:opacity-50"
+            >
+              {testing ? t("测试中...", "Testing...") : t("测试连接", "Test Connection")}
+            </button>
+            {config && (
+              <button
+                onClick={handleDelete}
+                disabled={loading}
+                className="px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm transition cursor-pointer disabled:opacity-50 ml-auto"
+              >
+                {t("清除配置", "Clear Config")}
+              </button>
+            )}
+          </div>
+
+          {/* 测试结果 */}
+          {testResult && (
+            <div className={`px-4 py-3 rounded-lg border text-sm ${
+              testResult.ok
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                : "bg-red-500/10 border-red-500/30 text-red-300"
+            }`}>
+              {testResult.msg}
+            </div>
+          )}
+
+          {/* 元信息 */}
+          {config && (
+            <div className="pt-4 border-t border-white/5 text-xs text-slate-500 space-y-1">
+              <div>{t("创建时间", "Created")}: {new Date(config.createdAt).toLocaleString()}</div>
+              <div>{t("更新时间", "Updated")}: {new Date(config.updatedAt).toLocaleString()}</div>
+            </div>
+          )}
+        </div>
+
+        {/* 说明区 */}
+        <div className="mt-6 p-4 rounded-lg bg-blue-500/[0.03] border border-blue-500/10">
+          <h3 className="text-sm font-semibold text-blue-300 mb-2">{t("Codex 与 Model API 的区别", "Codex vs Model API")}</h3>
+          <ul className="text-xs text-slate-400 space-y-1.5 leading-relaxed">
+            <li>• {t("Codex 单 Token 认证，无 provider/model 概念；Model API 按 provider 配置 Key。", "Codex uses single Token auth, no provider/model concept; Model API configures Key per provider.")}</li>
+            <li>• {t("Codex 是异步 Agent 执行（有 sandbox/timeout/skills）；Model API 是同步文本输入输出。", "Codex is async agent execution (with sandbox/timeout/skills); Model API is sync text in/out.")}</li>
+            <li>• {t("两者完全独立维护，调用入口可二选一（仅 build 步支持 Codex）。", "Both are maintained independently; call sites can choose either (Codex only available in build step).")}</li>
+          </ul>
+        </div>
+      </div>
     </div>
   );
 }

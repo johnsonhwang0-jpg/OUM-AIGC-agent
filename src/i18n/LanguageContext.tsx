@@ -41,6 +41,9 @@ export const translations = {
     systemSettings: "Setting",
     modelManagement: "AI 模型 API",
     promptManagement: "提示词管理",
+    codexManagement: "Codex CLI",
+    aiChannels: "AI 调用",
+    aiChannelsLabel: "调用渠道：",
     languageSettings: "语言设置",
 
     // Project
@@ -443,6 +446,9 @@ export const translations = {
     systemSettings: "Setting",
     modelManagement: "AI Model API",
     promptManagement: "Prompt Management",
+    codexManagement: "Codex CLI",
+    aiChannels: "AI Channels",
+    aiChannelsLabel: "Channel:",
     languageSettings: "Language Settings",
 
     // Project

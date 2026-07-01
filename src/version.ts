@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.3.1";
+export const APP_VERSION = "1.3.2";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,19 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.3.2",
+    updatedAt: "2026-07-01 00:00:00",
+    gitCommit: "",
+    changes: [
+      "Codex CLI 集成（阶段 2 独立配置）：新增 codex_configs 表（与 api_keys 完全独立，单条全局配置，id 固定 codex-default，upsert 语义），存储 token/defaultSandbox（read-only|workspace-write）/defaultTimeoutSeconds（30-1800，默认 120）/defaultSkills（逗号分隔的 Codex Superpowers skill 名）。新增 4 个 CRUD 函数 getCodexConfig/upsertCodexConfig/deleteCodexConfig/testCodexToken。",
+      "AIManagement 新增 CodexTab：Token 输入（新建必填/编辑留空不修改）+ sandbox 下拉 + timeout 数字输入 + skills 复选框网格（预置 9 个 Codex Superpowers skills：$using-superpowers/$brainstorming/$test-driven-development/$systematic-debugging/$writing-plans/$executing-plans/$verification-before-completion/$requesting-code-review/$receiving-code-review）。顶部「测试连接」按钮调用 /api/codex-config/test 验证 token 有效性。SystemSettings 顶部 tab 从 models 改为 ai（AI），内含 models + codex 两个 channel 切换。",
+      "后端 server.ts 新增 Codex API 调用：callCodexRun（同步版，用于 /api/generate-app-code?mode=codex 兼容）调用 codex-api.tangyinx.com，创建 run → 轮询状态（3s 间隔）→ 取 final_response。Prompt 拼接 skills 前缀 + system instruction + user prompt + 输出约束（强制纯 HTML 无 markdown）。新增 /api/codex-config CRUD + /api/codex-config/test 端点。",
+      "Codex 异步轮询架构（修复 ERR_ABORTED）：原 /api/generate-app-code?mode=codex 同步 await 导致 HTTP 长时间 pending 被浏览器/Node 超时中止（net::ERR_ABORTED）。拆分为三段式：①POST /api/codex-build/start 创建 run 立即返回 runId；②前端每 3s 轮询 GET /api/codex-build/:runId/status 更新 queued/running/completed/failed + elapsed；③completed 后 GET /api/codex-build/:runId/result 拉取结果。服务端拆分 callCodexRun 为 startCodexRun/pollCodexRun/getCodexRunResult 三个独立函数。前端 handleGenerateFinalApp 按 buildMode 分支：codex 走异步轮询，api 保持原同步逻辑。",
+      "Step 5 Build App 布局重构：移除顶部占空间的 Gamepad2 横幅，改为顶部紧凑栏（切片信息 + API/Codex 引擎切换分段按钮 + 构建按钮 + API 调试齿轮一行排列），Scene Simulation Game 用 flex-1 占满下方剩余空间。新增 codexDebugOpen（默认展开）和 lastCodexRaw（存 Codex 原始返回）状态。Codex 模式下在游戏区上方显示可折叠调试面板：runId（可复制）+ 实时状态徽章（queued/running · 12s/completed/failed）+ 发送给 Codex 的 Prompt（可复制）+ Codex 原始返回（截断 3000 字符，可复制）+ 错误信息。",
+      "buildMode 切换器从 Provider 列表分离：原 Codex 混入 ModelSelector Provider 列表导致按钮变灰（buildModelConfig.model 为空时禁用）。重构为独立 buildMode 切换器（API/Codex 分段按钮），Codex 模式下按钮禁用条件改为 codexConfigured 检查，齿轮按钮始终打开 ApiDebugDrawer。",
+    ],
+  },
   {
     version: "1.3.1",
     updatedAt: "2026-06-30 17:32:22",

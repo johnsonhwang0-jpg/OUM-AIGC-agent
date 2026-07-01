@@ -166,6 +166,19 @@ export interface ApiKey {
   updatedAt: string;
 }
 
+// Codex CLI 配置（与 api_keys 完全独立，单条全局配置）
+// 与 Model API 的差异：单 token 认证、固定 base URL、无 provider/model 概念、
+// 有 sandbox/timeout/skills 等 Codex 专属参数。
+export interface CodexConfig {
+  id: string;
+  token: string;           // Bearer token，明文存储（与 api_keys 一致策略）
+  defaultSandbox: "read-only" | "workspace-write";  // 默认 read-only
+  defaultTimeoutSeconds: number;  // 30-1800，默认 120
+  defaultSkills: string;   // 逗号分隔的 skill 名（如 "$using-superpowers,$test-driven-development"），可为空
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ==================== 自动化编排 ====================
 
 export type AutomationJobStatus = "pending" | "running" | "paused" | "completed" | "partial" | "cancelled" | "failed";
@@ -360,6 +373,20 @@ async function initDatabase(): Promise<Database> {
       provider TEXT NOT NULL,
       apiKey TEXT NOT NULL,
       baseUrl TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+
+  // Codex CLI 配置表（阶段 2 新增，与 api_keys 独立）
+  // 单条全局配置：id 固定为 "codex-default"，upsert 语义
+  database.run(`
+    CREATE TABLE IF NOT EXISTS codex_configs (
+      id TEXT PRIMARY KEY,
+      token TEXT NOT NULL,
+      defaultSandbox TEXT NOT NULL DEFAULT 'read-only',
+      defaultTimeoutSeconds INTEGER NOT NULL DEFAULT 120,
+      defaultSkills TEXT NOT NULL DEFAULT '',
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     )
@@ -1333,6 +1360,80 @@ export async function updateApiKey(id: string, data: {
 export async function deleteApiKey(id: string): Promise<boolean> {
   const database = await getDatabase();
   database.run(`DELETE FROM api_keys WHERE id = ?`, [id]);
+  saveDatabase(database);
+  return true;
+}
+
+// ==================== Codex Config CRUD（单条全局配置）====================
+// 与 api_keys 不同：Codex 只有一个 token，全局唯一配置。
+// 使用固定 id "codex-default"，upsert 语义：没记录就插入，有就更新。
+
+const CODEX_CONFIG_ID = "codex-default";
+
+export async function getCodexConfig(): Promise<CodexConfig | null> {
+  const database = await getDatabase();
+  const result = database.exec(
+    `SELECT id, token, defaultSandbox, defaultTimeoutSeconds, defaultSkills, createdAt, updatedAt FROM codex_configs WHERE id = ?`,
+    [CODEX_CONFIG_ID]
+  );
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  const row = result[0].values[0];
+  return {
+    id: row[0] as string,
+    token: row[1] as string,
+    defaultSandbox: row[2] as "read-only" | "workspace-write",
+    defaultTimeoutSeconds: row[3] as number,
+    defaultSkills: row[4] as string,
+    createdAt: row[5] as string,
+    updatedAt: row[6] as string,
+  };
+}
+
+export async function upsertCodexConfig(data: {
+  token: string;
+  defaultSandbox: "read-only" | "workspace-write";
+  defaultTimeoutSeconds: number;
+  defaultSkills: string;
+}): Promise<CodexConfig> {
+  const database = await getDatabase();
+  const now = new Date().toISOString();
+  const existing = await getCodexConfig();
+
+  if (existing) {
+    database.run(
+      `UPDATE codex_configs SET token=?, defaultSandbox=?, defaultTimeoutSeconds=?, defaultSkills=?, updatedAt=? WHERE id=?`,
+      [data.token, data.defaultSandbox, data.defaultTimeoutSeconds, data.defaultSkills, now, CODEX_CONFIG_ID]
+    );
+    saveDatabase(database);
+    return {
+      ...existing,
+      token: data.token,
+      defaultSandbox: data.defaultSandbox,
+      defaultTimeoutSeconds: data.defaultTimeoutSeconds,
+      defaultSkills: data.defaultSkills,
+      updatedAt: now,
+    };
+  }
+
+  database.run(
+    `INSERT INTO codex_configs (id, token, defaultSandbox, defaultTimeoutSeconds, defaultSkills, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [CODEX_CONFIG_ID, data.token, data.defaultSandbox, data.defaultTimeoutSeconds, data.defaultSkills, now, now]
+  );
+  saveDatabase(database);
+  return {
+    id: CODEX_CONFIG_ID,
+    token: data.token,
+    defaultSandbox: data.defaultSandbox,
+    defaultTimeoutSeconds: data.defaultTimeoutSeconds,
+    defaultSkills: data.defaultSkills,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export async function deleteCodexConfig(): Promise<boolean> {
+  const database = await getDatabase();
+  database.run(`DELETE FROM codex_configs WHERE id = ?`, [CODEX_CONFIG_ID]);
   saveDatabase(database);
   return true;
 }
