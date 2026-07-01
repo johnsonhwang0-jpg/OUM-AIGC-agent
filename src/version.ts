@@ -38,8 +38,8 @@ export interface VersionEntry {
 export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.3.2",
-    updatedAt: "2026-07-01 00:00:00",
-    gitCommit: "",
+    updatedAt: "2026-07-01 13:25:45",
+    gitCommit: "fba00bf",
     changes: [
       "Codex CLI 集成（阶段 2 独立配置）：新增 codex_configs 表（与 api_keys 完全独立，单条全局配置，id 固定 codex-default，upsert 语义），存储 token/defaultSandbox（read-only|workspace-write）/defaultTimeoutSeconds（30-1800，默认 120）/defaultSkills（逗号分隔的 Codex Superpowers skill 名）。新增 4 个 CRUD 函数 getCodexConfig/upsertCodexConfig/deleteCodexConfig/testCodexToken。",
       "AIManagement 新增 CodexTab：Token 输入（新建必填/编辑留空不修改）+ sandbox 下拉 + timeout 数字输入 + skills 复选框网格（预置 9 个 Codex Superpowers skills：$using-superpowers/$brainstorming/$test-driven-development/$systematic-debugging/$writing-plans/$executing-plans/$verification-before-completion/$requesting-code-review/$receiving-code-review）。顶部「测试连接」按钮调用 /api/codex-config/test 验证 token 有效性。SystemSettings 顶部 tab 从 models 改为 ai（AI），内含 models + codex 两个 channel 切换。",
