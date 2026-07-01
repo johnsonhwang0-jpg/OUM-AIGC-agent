@@ -332,6 +332,7 @@ function greet(name) {
   // Codex 配置状态（用于 Step 5 切换器显示是否可点击 Codex 模式）
   const [codexConfigured, setCodexConfigured] = useState(false);
   const [codexDebugOpen, setCodexDebugOpen] = useState(true); // codex debug 面板默认展开
+  const [showCodexDrawer, setShowCodexDrawer] = useState(false); // codex debug drawer（类似 API 模式）
   const [codexRunId, setCodexRunId] = useState<string>('');
   const [codexRunStatus, setCodexRunStatus] = useState<string>(''); // queued/running/completed/failed
   const [codexRunElapsed, setCodexRunElapsed] = useState<number>(0); // 秒
@@ -4270,6 +4271,29 @@ API地址：https://api.deepseek.com/chat/completions`}
             apiDebugInfo={appApiDebugInfo}
           />
 
+          {/* Codex Debug & Prompt Drawer（仅 codex 模式） */}
+          <ApiDebugDrawer
+            show={showCodexDrawer}
+            onClose={() => setShowCodexDrawer(false)}
+            aiEntry="codex-build"
+            title={language === "en" ? "Codex - Debug & Prompt" : "Codex-调试与指令"}
+            iconColor="text-emerald-400"
+            callSite="build"
+            provider=""
+            model=""
+            defaultSystemPrompt={appApiDebugInfo.systemPrompt}
+            defaultUserPrompt={appApiDebugInfo.userPrompt}
+            codexDebug={{
+              runId: codexRunId,
+              runStatus: codexRunStatus,
+              runElapsed: codexRunElapsed,
+              events: codexEvents,
+              artifacts: codexArtifacts,
+              artifactName: codexArtifactName,
+              rawResponse: lastCodexRaw,
+            }}
+          />
+
           {/* Step 5 View: App Building from selected slice */}
           {activeStep === 5 && (
             <div className="p-4 flex-1 flex flex-col md:flex-row gap-4 overflow-hidden h-full z-10 animate-fadeIn">
@@ -4402,16 +4426,6 @@ API地址：https://api.deepseek.com/chat/completions`}
                         </>
                       )}
                     </button>
-                    {isGeneratingApp && buildMode === "codex" && (
-                      <button
-                        onClick={() => { codexAbortRef.current = true; }}
-                        className="py-2.5 px-3 rounded-lg flex items-center gap-1.5 text-xs font-bold transition text-white bg-red-500 hover:bg-red-600 cursor-pointer shadow-[0_0_15px_rgba(239,68,68,0.4)]"
-                        title={language === "en" ? "Stop polling (Codex run continues server-side)" : "停止轮询（Codex 任务在服务端继续）"}
-                      >
-                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-                        {language === "en" ? "Stop" : "停止"}
-                      </button>
-                    )}
                     <button
                       onClick={() => setShowAppApiDrawer(true)}
                       className="p-2 rounded-lg transition cursor-pointer bg-white/5 text-slate-400 hover:bg-white/10 border border-white/10"
@@ -4422,132 +4436,44 @@ API地址：https://api.deepseek.com/chat/completions`}
                   </div>
                 </div>
 
-                {/* ── Codex 调试面板（仅 codex 模式） ── */}
+                {/* ── Codex 状态条（仅 codex 模式，详情在 drawer） ── */}
                 {buildMode === "codex" && (
-                  <div className="shrink-0 bg-[#0a0a0f] border border-emerald-500/20 rounded-2xl overflow-hidden">
-                    <button
-                      onClick={() => setCodexDebugOpen(!codexDebugOpen)}
-                      className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-white/[0.03] transition cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Bot className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-[11px] font-bold text-emerald-300">{language === "en" ? "Codex Debug" : "Codex 调试"}</span>
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono ${
-                          codexConfigured ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
-                        }`}>
-                          {codexConfigured ? (language === "en" ? "Configured" : "已配置") : (language === "en" ? "Not configured" : "未配置")}
-                        </span>
-                        {isGeneratingApp && buildMode === "codex" && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 animate-pulse">
-                            {codexRunStatus || 'starting'}{codexRunElapsed > 0 ? ` · ${codexRunElapsed}s` : ''}
-                          </span>
-                        )}
-                        {!isGeneratingApp && codexRunStatus === 'completed' && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">{language === "en" ? "Done" : "完成"}</span>
-                        )}
-                        {!isGeneratingApp && codexRunStatus === 'failed' && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">{language === "en" ? "Error" : "错误"}</span>
-                        )}
-                      </div>
-                      <span className={`text-slate-500 text-[10px] transition-transform ${codexDebugOpen ? 'rotate-90deg' : ''}`}>▶</span>
-                    </button>
-                    {codexDebugOpen && (
-                      <div className="px-3 pb-3 border-t border-emerald-500/10 space-y-2.5">
-                        {/* Run ID + 状态 */}
-                        {codexRunId && (
-                          <div className="flex items-center gap-2 text-[10px] font-mono">
-                            <span className="text-slate-500">run:</span>
-                            <span className="text-emerald-400/80 truncate">{codexRunId}</span>
-                            <button
-                              onClick={() => { try { navigator.clipboard.writeText(codexRunId); } catch {} }}
-                              className="text-slate-500 hover:text-slate-300 cursor-pointer shrink-0"
-                            >
-                              <Copy className="w-2.5 h-2.5" />
-                            </button>
-                          </div>
-                        )}
-                        {/* 发送的 Prompt */}
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Prompt sent to Codex" : "发送给 Codex 的 Prompt"}</span>
-                            <button
-                              onClick={() => { try { navigator.clipboard.writeText(appApiDebugInfo.userPrompt); } catch {} }}
-                              className="text-[9px] text-slate-500 hover:text-slate-300 flex items-center gap-0.5 cursor-pointer"
-                            >
-                              <Copy className="w-2.5 h-2.5" /> {language === "en" ? "Copy" : "复制"}
-                            </button>
-                          </div>
-                          <pre className="text-[10px] text-slate-400 font-mono bg-black/30 border border-white/5 rounded-lg p-2 max-h-24 overflow-auto whitespace-pre-wrap break-all leading-relaxed">{appApiDebugInfo.userPrompt || (language === "en" ? "(not sent yet)" : "(尚未发送)")}</pre>
-                        </div>
-                        {/* Codex 原始返回 */}
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Raw Codex Response" : "Codex 原始返回"}</span>
-                            <button
-                              onClick={() => { try { navigator.clipboard.writeText(lastCodexRaw); } catch {} }}
-                              className="text-[9px] text-slate-500 hover:text-slate-300 flex items-center gap-0.5 cursor-pointer"
-                            >
-                              <Copy className="w-2.5 h-2.5" /> {language === "en" ? "Copy" : "复制"}
-                            </button>
-                          </div>
-                          {lastCodexRaw ? (
-                            <pre className="text-[10px] text-emerald-300/70 font-mono bg-black/30 border border-emerald-500/10 rounded-lg p-2 max-h-48 overflow-auto whitespace-pre-wrap break-all leading-relaxed">{lastCodexRaw.slice(0, 3000)}{lastCodexRaw.length > 3000 ? `\n\n... (${lastCodexRaw.length - 3000} ${language === "en" ? "more chars" : "字符剩余"})` : ''}</pre>
-                          ) : (
-                            <div className="text-[10px] text-slate-600 italic py-2 text-center">{language === "en" ? "No response yet. Click Build to start a Codex run." : "暂无返回，点击构建按钮启动 Codex 执行。"}</div>
-                          )}
-                          {codexArtifactName && (
-                            <div className="text-[10px] text-emerald-400 font-mono mt-1 flex items-center gap-1">
-                              <span className="px-1 py-0.5 rounded bg-emerald-500/15">artifact</span>
-                              <span className="truncate">{codexArtifactName}</span>
-                              <span className="text-slate-500">{language === "en" ? "(HTML downloaded from artifact)" : "(从产物下载 HTML)"}</span>
-                            </div>
-                          )}
-                        </div>
-                        {/* Codex Agent 事件流 */}
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Agent Events" : "Agent 事件流"}</span>
-                            <span className="text-[9px] text-slate-600">{codexEvents.length} {language === "en" ? "events" : "条"}</span>
-                          </div>
-                          {codexEvents.length > 0 ? (
-                            <div className="text-[10px] font-mono bg-black/30 border border-white/5 rounded-lg p-2 max-h-32 overflow-auto space-y-0.5">
-                              {codexEvents.slice(-15).map((ev: any, i: number) => (
-                                <div key={i} className="text-slate-400 leading-relaxed flex gap-1">
-                                  <span className="text-slate-600 shrink-0">{typeof ev.type === 'string' ? ev.type.slice(0, 12) : 'evt'}</span>
-                                  <span className="truncate">{typeof ev.message === 'string' ? ev.message.slice(0, 120) : typeof ev.text === 'string' ? ev.text.slice(0, 120) : JSON.stringify(ev).slice(0, 120)}</span>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-[10px] text-slate-600 italic py-2 text-center">{language === "en" ? "No events yet." : "暂无事件。"}</div>
-                          )}
-                        </div>
-                        {/* Codex 产物列表 */}
-                        {codexArtifacts.length > 0 && (
-                          <div>
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Artifacts" : "产物文件"}</span>
-                              <span className="text-[9px] text-slate-600">{codexArtifacts.length} {language === "en" ? "files" : "个"}</span>
-                            </div>
-                            <div className="space-y-1">
-                              {codexArtifacts.map((art: any, i: number) => (
-                                <div key={i} className="text-[10px] font-mono bg-black/30 border border-white/5 rounded px-2 py-1 flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span className={`px-1 py-0.5 rounded shrink-0 ${art.name === codexArtifactName ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-slate-500'}`}>{art.name === codexArtifactName ? 'used' : 'file'}</span>
-                                    <span className="truncate text-slate-400">{art.name}</span>
-                                  </div>
-                                  <span className="text-slate-600 shrink-0">{art.size ? `${(art.size / 1024).toFixed(1)}KB` : ''}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {/* 错误信息 */}
-                        {appApiDebugInfo.status === 'error' && (
-                          <div className="text-[10px] text-red-400 font-mono bg-red-500/5 border border-red-500/10 rounded-lg p-2 break-all">{appApiDebugInfo.rawResponse.slice(0, 500)}</div>
-                        )}
-                      </div>
+                  <div className="shrink-0 bg-[#0a0a0f] border border-emerald-500/20 rounded-2xl px-3 py-2 flex items-center gap-2 flex-wrap">
+                    <Bot className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="text-[11px] font-bold text-emerald-300 shrink-0">{language === "en" ? "Codex" : "Codex"}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono shrink-0 ${
+                      codexConfigured ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
+                    }`}>
+                      {codexConfigured ? (language === "en" ? "Configured" : "已配置") : (language === "en" ? "Not configured" : "未配置")}
+                    </span>
+                    {isGeneratingApp && buildMode === "codex" && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 animate-pulse shrink-0">
+                        {codexRunStatus || 'starting'}{codexRunElapsed > 0 ? ` · ${codexRunElapsed}s` : ''}
+                      </span>
                     )}
+                    {!isGeneratingApp && codexRunStatus === 'completed' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 shrink-0">{language === "en" ? "Done" : "完成"}</span>
+                    )}
+                    {!isGeneratingApp && codexRunStatus === 'failed' && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 shrink-0">{language === "en" ? "Error" : "错误"}</span>
+                    )}
+                    {isGeneratingApp && buildMode === "codex" && (
+                      <button
+                        onClick={() => { codexAbortRef.current = true; }}
+                        className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 hover:bg-red-500/25 transition cursor-pointer flex items-center gap-0.5 shrink-0"
+                        title={language === "en" ? "Stop polling" : "停止轮询"}
+                      >
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-2.5 h-2.5"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                        {language === "en" ? "Stop" : "停止"}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setShowCodexDrawer(true)}
+                      className="ml-auto p-1.5 rounded-lg transition cursor-pointer bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 shrink-0"
+                      title={language === "en" ? "Codex Debug & Prompt" : "Codex 调试与指令"}
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 )}
 

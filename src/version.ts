@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.3.5";
+export const APP_VERSION = "1.3.6";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,17 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.3.6",
+    updatedAt: "2026-07-01 00:00:00",
+    gitCommit: "",
+    changes: [
+      "Codex Debug 改为独立小窗（drawer），复用 API 模式的 ApiDebugDrawer 组件，支持 codex-build aiEntry。",
+      "Drawer 内可直接编辑 system/user prompt，保存为新版本到 Prompt Management（与 API 模式行为一致）。",
+      "Codex 模式原有的内嵌展开面板替换为精简状态条（含配置/运行状态/停止按钮），详情点击齿轮图标打开 drawer。",
+      "ApiDebugDrawer 扩展：codexDebug 可选 prop 传 runId/status/events/artifacts/rawResponse；codex 模式不显示 ModelSelector，改为显示 Run ID + Agent 事件流 + 产物列表 + 原始返回。",
+    ],
+  },
   {
     version: "1.3.5",
     updatedAt: "2026-07-01 00:00:00",
