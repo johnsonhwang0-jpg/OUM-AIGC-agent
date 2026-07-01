@@ -983,6 +983,13 @@ export async function updatePromptTemplate(id: string, data: {
       id,
     ]
   );
+  // 同一 aiEntry 下互斥：设为 active 时，把同 aiEntry 其他记录设为 inactive
+  if (updated.isActive) {
+    database.run(
+      `UPDATE prompt_templates SET isActive=0 WHERE aiEntry=? AND id != ?`,
+      [existing.aiEntry, id]
+    );
+  }
   saveDatabase(database);
 
   return { ...existing, ...updated, updatedAt: now };

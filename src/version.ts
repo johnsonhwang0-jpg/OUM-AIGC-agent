@@ -12,7 +12,7 @@
 // 由 vite.config.ts 的 define 注入；tsc --noEmit 时声明可见
 declare const __BUILD_TIME__: string | undefined;
 
-export const APP_VERSION = "1.3.4";
+export const APP_VERSION = "1.3.5";
 // 构建时自动注入；兜底用于非 Vite 环境（如纯 tsc）
 export const VERSION_UPDATED_AT =
   typeof __BUILD_TIME__ !== "undefined"
@@ -36,6 +36,15 @@ export interface VersionEntry {
  * 版本历史（最新在前）
  */
 export const VERSION_HISTORY: VersionEntry[] = [
+  {
+    version: "1.3.5",
+    updatedAt: "2026-07-01 00:00:00",
+    gitCommit: "",
+    changes: [
+      "Codex prompt 使用修复：seedDefaults 创建时设 isActive=true（之前默认 inactive）；后端 /api/codex-build/start 加 DB 兜底，前端没传 prompt 时自动从 DB 读 active 的 codex-build prompt。",
+      "Prompt Management 新增 Enable/On 切换按钮：可手动激活/停用 prompt；updatePromptTemplate 加互斥逻辑，设为 active 时自动把同 aiEntry 其他记录设为 inactive。",
+    ],
+  },
   {
     version: "1.3.4",
     updatedAt: "2026-07-01 14:19:09",

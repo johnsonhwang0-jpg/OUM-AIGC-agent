@@ -32,23 +32,30 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 var database_exports = {};
 __export(database_exports, {
   closeDatabase: () => closeDatabase,
+  createApiKey: () => createApiKey,
   createAutomationJob: () => createAutomationJob,
   createAutomationTask: () => createAutomationTask,
   createModelConfig: () => createModelConfig,
   createProject: () => createProject,
   createPromptTemplate: () => createPromptTemplate,
   createPromptVersion: () => createPromptVersion,
+  deleteApiKey: () => deleteApiKey,
+  deleteCodexConfig: () => deleteCodexConfig,
   deleteModelConfig: () => deleteModelConfig,
   deleteProject: () => deleteProject,
   deletePromptTemplate: () => deletePromptTemplate,
   deletePromptVersion: () => deletePromptVersion,
+  getActiveAutomationJob: () => getActiveAutomationJob,
+  getAllApiKeys: () => getAllApiKeys,
   getAllModelConfigs: () => getAllModelConfigs,
   getAllProjects: () => getAllProjects,
   getAllPromptTemplates: () => getAllPromptTemplates,
   getAllVersionNotes: () => getAllVersionNotes,
+  getApiKeyById: () => getApiKeyById,
   getAutomationJob: () => getAutomationJob,
   getAutomationTask: () => getAutomationTask,
   getAutomationTasksByJob: () => getAutomationTasksByJob,
+  getCodexConfig: () => getCodexConfig,
   getDatabase: () => getDatabase,
   getExtractedContents: () => getExtractedContents,
   getGeneratedAppCode: () => getGeneratedAppCode,
@@ -61,17 +68,20 @@ __export(database_exports, {
   getPromptTemplate: () => getPromptTemplate,
   getPromptVersions: () => getPromptVersions,
   getTasksForSlice: () => getTasksForSlice,
+  recoverStaleJobs: () => recoverStaleJobs,
   saveExtractedContent: () => saveExtractedContent,
   saveGeneratedAppCode: () => saveGeneratedAppCode,
   saveModuleScript: () => saveModuleScript,
   setVersionNote: () => setVersionNote,
+  updateApiKey: () => updateApiKey,
   updateAutomationJob: () => updateAutomationJob,
   updateAutomationTask: () => updateAutomationTask,
   updateModelConfig: () => updateModelConfig,
   updateProject: () => updateProject,
   updateProjectPdf: () => updateProjectPdf,
   updatePromptTemplate: () => updatePromptTemplate,
-  updatePromptVersion: () => updatePromptVersion
+  updatePromptVersion: () => updatePromptVersion,
+  upsertCodexConfig: () => upsertCodexConfig
 });
 function backupDatabaseBeforeMigration(database) {
   if (!import_fs.default.existsSync(DB_BACKUP_DIR)) {
@@ -155,6 +165,16 @@ async function initDatabase() {
   `);
   database.run(`CREATE INDEX IF NOT EXISTS idx_scripts_project ON module_scripts(projectId)`);
   database.run(`
+    DELETE FROM module_scripts WHERE id NOT IN (
+      SELECT id FROM module_scripts s1
+      WHERE s1.createdAt = (
+        SELECT MAX(s2.createdAt) FROM module_scripts s2
+        WHERE s2.projectId = s1.projectId AND s2.moduleId = s1.moduleId
+      )
+    )
+  `);
+  database.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_scripts_project_module ON module_scripts(projectId, moduleId)`);
+  database.run(`
     CREATE TABLE IF NOT EXISTS extracted_content (
       id TEXT PRIMARY KEY,
       projectId TEXT NOT NULL,
@@ -176,6 +196,16 @@ async function initDatabase() {
     )
   `);
   database.run(`CREATE INDEX IF NOT EXISTS idx_app_code_project ON generated_app_code(projectId)`);
+  database.run(`
+    DELETE FROM generated_app_code WHERE id NOT IN (
+      SELECT id FROM generated_app_code a1
+      WHERE a1.createdAt = (
+        SELECT MAX(a2.createdAt) FROM generated_app_code a2
+        WHERE a2.projectId = a1.projectId AND a2.moduleId = a1.moduleId
+      )
+    )
+  `);
+  database.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_code_project_module ON generated_app_code(projectId, moduleId)`);
   database.run(`
     CREATE TABLE IF NOT EXISTS prompt_templates (
       id TEXT PRIMARY KEY,
@@ -223,6 +253,27 @@ async function initDatabase() {
     )
   `);
   database.run(`CREATE INDEX IF NOT EXISTS idx_model_configs_prompt ON model_configs(promptTemplateId)`);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      apiKey TEXT NOT NULL,
+      baseUrl TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS codex_configs (
+      id TEXT PRIMARY KEY,
+      token TEXT NOT NULL,
+      defaultSandbox TEXT NOT NULL DEFAULT 'read-only',
+      defaultTimeoutSeconds INTEGER NOT NULL DEFAULT 120,
+      defaultSkills TEXT NOT NULL DEFAULT '',
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
   const currentVersion = getSchemaVersion(database);
   if (currentVersion < CURRENT_SCHEMA_VERSION) {
     console.log(`\u{1F504} Schema \u8FC1\u79FB: v${currentVersion} \u2192 v${CURRENT_SCHEMA_VERSION}`);
@@ -493,11 +544,12 @@ async function deleteProject(id) {
 }
 async function saveModuleScript(projectId, moduleId, script) {
   const database = await getDatabase();
-  const id = `script-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const id = `script-${projectId}-${moduleId}`;
   const now = (/* @__PURE__ */ new Date()).toISOString();
   database.run(
-    `INSERT OR REPLACE INTO module_scripts (id, projectId, moduleId, script, createdAt)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO module_scripts (id, projectId, moduleId, script, createdAt)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(projectId, moduleId) DO UPDATE SET script = excluded.script, createdAt = excluded.createdAt`,
     [id, projectId, moduleId, JSON.stringify(script), now]
   );
   saveDatabase(database);
@@ -555,8 +607,9 @@ async function saveGeneratedAppCode(projectId, moduleId, code) {
   const id = `appcode-${projectId}-${moduleId}`;
   const now = (/* @__PURE__ */ new Date()).toISOString();
   database.run(
-    `INSERT OR REPLACE INTO generated_app_code (id, projectId, moduleId, code, createdAt)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO generated_app_code (id, projectId, moduleId, code, createdAt)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(projectId, moduleId) DO UPDATE SET code = excluded.code, createdAt = excluded.createdAt`,
     [id, projectId, moduleId, code, now]
   );
   saveDatabase(database);
@@ -577,7 +630,7 @@ async function getProjectCountStats(projectIds) {
     result[id] = { scriptCount: 0, appCount: 0 };
   }
   const scriptsResult = database.exec(
-    `SELECT projectId, COUNT(*) as cnt FROM module_scripts WHERE projectId IN (${projectIds.map(() => "?").join(",")}) GROUP BY projectId`,
+    `SELECT projectId, COUNT(DISTINCT moduleId) as cnt FROM module_scripts WHERE projectId IN (${projectIds.map(() => "?").join(",")}) GROUP BY projectId`,
     projectIds
   );
   if (scriptsResult.length > 0) {
@@ -589,7 +642,7 @@ async function getProjectCountStats(projectIds) {
     }
   }
   const appResult = database.exec(
-    `SELECT projectId, COUNT(*) as cnt FROM generated_app_code WHERE projectId IN (${projectIds.map(() => "?").join(",")}) GROUP BY projectId`,
+    `SELECT projectId, COUNT(DISTINCT moduleId) as cnt FROM generated_app_code WHERE projectId IN (${projectIds.map(() => "?").join(",")}) GROUP BY projectId`,
     projectIds
   );
   if (appResult.length > 0) {
@@ -692,6 +745,12 @@ async function updatePromptTemplate(id, data) {
       id
     ]
   );
+  if (updated.isActive) {
+    database.run(
+      `UPDATE prompt_templates SET isActive=0 WHERE aiEntry=? AND id != ?`,
+      [existing.aiEntry, id]
+    );
+  }
   saveDatabase(database);
   return { ...existing, ...updated, updatedAt: now };
 }
@@ -923,6 +982,132 @@ async function deleteModelConfig(id) {
   saveDatabase(database);
   return true;
 }
+async function getAllApiKeys() {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT id, provider, apiKey, baseUrl, createdAt, updatedAt FROM api_keys ORDER BY createdAt DESC`);
+  if (result.length === 0) return [];
+  return result[0].values.map((row) => ({
+    id: row[0],
+    provider: row[1],
+    apiKey: row[2],
+    baseUrl: row[3] || null,
+    createdAt: row[4],
+    updatedAt: row[5]
+  }));
+}
+async function getApiKeyById(id) {
+  const database = await getDatabase();
+  const result = database.exec(`SELECT id, provider, apiKey, baseUrl, createdAt, updatedAt FROM api_keys WHERE id = ?`, [id]);
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  const row = result[0].values[0];
+  return {
+    id: row[0],
+    provider: row[1],
+    apiKey: row[2],
+    baseUrl: row[3] || null,
+    createdAt: row[4],
+    updatedAt: row[5]
+  };
+}
+async function createApiKey(data) {
+  const database = await getDatabase();
+  const id = `ak-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  database.run(
+    `INSERT INTO api_keys (id, provider, apiKey, baseUrl, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`,
+    [id, data.provider, data.apiKey, data.baseUrl || null, now, now]
+  );
+  saveDatabase(database);
+  return {
+    id,
+    provider: data.provider,
+    apiKey: data.apiKey,
+    baseUrl: data.baseUrl || null,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+async function updateApiKey(id, data) {
+  const database = await getDatabase();
+  const existing = await getApiKeyById(id);
+  if (!existing) return null;
+  const updated = {
+    provider: data.provider ?? existing.provider,
+    apiKey: data.apiKey !== void 0 ? data.apiKey : existing.apiKey,
+    baseUrl: data.baseUrl !== void 0 ? data.baseUrl : existing.baseUrl
+  };
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  database.run(
+    `UPDATE api_keys SET provider=?, apiKey=?, baseUrl=?, updatedAt=? WHERE id=?`,
+    [updated.provider, updated.apiKey, updated.baseUrl, now, id]
+  );
+  saveDatabase(database);
+  return { ...existing, ...updated, updatedAt: now };
+}
+async function deleteApiKey(id) {
+  const database = await getDatabase();
+  database.run(`DELETE FROM api_keys WHERE id = ?`, [id]);
+  saveDatabase(database);
+  return true;
+}
+async function getCodexConfig() {
+  const database = await getDatabase();
+  const result = database.exec(
+    `SELECT id, token, defaultSandbox, defaultTimeoutSeconds, defaultSkills, createdAt, updatedAt FROM codex_configs WHERE id = ?`,
+    [CODEX_CONFIG_ID]
+  );
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  const row = result[0].values[0];
+  return {
+    id: row[0],
+    token: row[1],
+    defaultSandbox: row[2],
+    defaultTimeoutSeconds: row[3],
+    defaultSkills: row[4],
+    createdAt: row[5],
+    updatedAt: row[6]
+  };
+}
+async function upsertCodexConfig(data) {
+  const database = await getDatabase();
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const existing = await getCodexConfig();
+  if (existing) {
+    database.run(
+      `UPDATE codex_configs SET token=?, defaultSandbox=?, defaultTimeoutSeconds=?, defaultSkills=?, updatedAt=? WHERE id=?`,
+      [data.token, data.defaultSandbox, data.defaultTimeoutSeconds, data.defaultSkills, now, CODEX_CONFIG_ID]
+    );
+    saveDatabase(database);
+    return {
+      ...existing,
+      token: data.token,
+      defaultSandbox: data.defaultSandbox,
+      defaultTimeoutSeconds: data.defaultTimeoutSeconds,
+      defaultSkills: data.defaultSkills,
+      updatedAt: now
+    };
+  }
+  database.run(
+    `INSERT INTO codex_configs (id, token, defaultSandbox, defaultTimeoutSeconds, defaultSkills, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [CODEX_CONFIG_ID, data.token, data.defaultSandbox, data.defaultTimeoutSeconds, data.defaultSkills, now, now]
+  );
+  saveDatabase(database);
+  return {
+    id: CODEX_CONFIG_ID,
+    token: data.token,
+    defaultSandbox: data.defaultSandbox,
+    defaultTimeoutSeconds: data.defaultTimeoutSeconds,
+    defaultSkills: data.defaultSkills,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+async function deleteCodexConfig() {
+  const database = await getDatabase();
+  database.run(`DELETE FROM codex_configs WHERE id = ?`, [CODEX_CONFIG_ID]);
+  saveDatabase(database);
+  return true;
+}
 function rowToJob(row, columns) {
   return {
     id: row[columns.indexOf("id")],
@@ -995,6 +1180,15 @@ async function getLatestAutomationJob(projectId) {
   if (result.length === 0 || result[0].values.length === 0) return null;
   return rowToJob(result[0].values[0], result[0].columns);
 }
+async function getActiveAutomationJob(projectId) {
+  const database = await getDatabase();
+  const result = database.exec(
+    `SELECT * FROM automation_jobs WHERE projectId = ? AND status IN ('running', 'paused') ORDER BY createdAt DESC LIMIT 1`,
+    [projectId]
+  );
+  if (result.length === 0 || result[0].values.length === 0) return null;
+  return rowToJob(result[0].values[0], result[0].columns);
+}
 async function getLatestJobsForProjects(projectIds) {
   const result = {};
   for (const id of projectIds) result[id] = null;
@@ -1022,7 +1216,7 @@ async function updateAutomationJob(jobId, updates) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const fields = [];
   const values = [];
-  const allowed = ["status", "completedSlices", "failedSlices", "concurrency", "startedAt", "finishedAt", "error"];
+  const allowed = ["status", "totalSlices", "completedSlices", "failedSlices", "concurrency", "startedAt", "finishedAt", "error"];
   for (const key of allowed) {
     if (updates[key] !== void 0) {
       fields.push(`${key} = ?`);
@@ -1035,6 +1229,18 @@ async function updateAutomationJob(jobId, updates) {
   values.push(jobId);
   database.run(`UPDATE automation_jobs SET ${fields.join(", ")} WHERE id = ?`, values);
   saveDatabase(database);
+}
+async function recoverStaleJobs() {
+  const database = await getDatabase();
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const result = database.run(
+    `UPDATE automation_jobs
+     SET status = 'failed', error = 'Server restarted, job interrupted', finishedAt = ?, updatedAt = ?
+     WHERE status = 'running'`,
+    [now, now]
+  );
+  if (result.changes > 0) saveDatabase(database);
+  return result.changes;
 }
 async function createAutomationTask(data) {
   const database = await getDatabase();
@@ -1101,7 +1307,7 @@ async function getTasksForSlice(jobId, moduleId) {
   if (result.length === 0) return [];
   return result[0].values.map((row) => rowToTask(row, result[0].columns));
 }
-var import_sql, import_fs, import_path, db, DB_PATH, DB_BACKUP_DIR, CURRENT_SCHEMA_VERSION;
+var import_sql, import_fs, import_path, db, DB_PATH, DB_BACKUP_DIR, CURRENT_SCHEMA_VERSION, CODEX_CONFIG_ID;
 var init_database = __esm({
   "database.ts"() {
     import_sql = __toESM(require("sql.js"), 1);
@@ -1111,6 +1317,7 @@ var init_database = __esm({
     DB_PATH = import_path.default.join(process.cwd(), "booktogame.db");
     DB_BACKUP_DIR = import_path.default.join(process.cwd(), ".db-backups");
     CURRENT_SCHEMA_VERSION = 4;
+    CODEX_CONFIG_ID = "codex-default";
   }
 });
 
@@ -1119,7 +1326,6 @@ var import_express = __toESM(require("express"), 1);
 var import_path2 = __toESM(require("path"), 1);
 var import_child_process = require("child_process");
 var import_dotenv = __toESM(require("dotenv"), 1);
-var import_genai = require("@google/genai");
 var import_vite = require("vite");
 
 // ai-stream.ts
@@ -1226,6 +1432,31 @@ function applyPromptTemplate(template, variables) {
 
 // server.ts
 init_database();
+
+// middleware/projectLock.ts
+init_database();
+function createProjectWriteLock(getActiveJob) {
+  return async (req, res, next) => {
+    try {
+      const projectId = req.params.id;
+      if (!projectId) return next();
+      if (req.get("x-internal-call") === "orchestrator") return next();
+      const activeJob = await getActiveJob(projectId);
+      if (activeJob) {
+        return res.status(409).json({
+          error: "Project is locked by an active automation job",
+          jobId: activeJob.id,
+          jobStatus: activeJob.status
+        });
+      }
+      next();
+    } catch (err) {
+      console.error("projectWriteLock check failed:", err);
+      next();
+    }
+  };
+}
+var projectWriteLock = createProjectWriteLock(getActiveAutomationJob);
 
 // orchestrator.ts
 init_database();
@@ -1483,7 +1714,9 @@ async function internalPost(path3, body) {
   const url = `http://localhost:${port}${path3}`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    // 标记为 orchestrator 内部调用，projectWriteLock 据此放行
+    // 锁针对用户手工入口，内部编排调用不应被自己创建的锁拦截
+    headers: { "Content-Type": "application/json", "x-internal-call": "orchestrator" },
     body: JSON.stringify(body)
   });
   const text = await res.text();
@@ -1707,10 +1940,35 @@ async function runSliceScript(jobId, projectId, bookTitle, slice, extractedConte
     return { scripted: false, markdown: "" };
   }
   let scriptMarkdown = "";
-  const { getExtractedContents: getExtractedContents2 } = await Promise.resolve().then(() => (init_database(), database_exports));
+  const { getExtractedContents: getExtractedContents2, getModuleScripts: getModuleScripts2 } = await Promise.resolve().then(() => (init_database(), database_exports));
   const extractedRows = await getExtractedContents2(projectId);
   const matchedExtract = extractedRows.find((e) => e.moduleId === slice.id);
   const contentForScript = matchedExtract?.content || extractedContent || `General academic curriculum rules relative to ${slice.title}`;
+  const existingScripts = await getModuleScripts2(projectId);
+  const matchedScript = existingScripts.find((s) => s.moduleId === slice.id);
+  if (matchedScript) {
+    try {
+      const parsed = JSON.parse(matchedScript.script);
+      scriptMarkdown = parsed.markdown || matchedScript.script;
+    } catch {
+      scriptMarkdown = matchedScript.script;
+    }
+    const existingScriptTasks2 = await getTasksForSlice(jobId, slice.id);
+    let skipTask = existingScriptTasks2.find((t) => t.stage === "script") || null;
+    if (!skipTask) {
+      skipTask = await createAutomationTask({
+        jobId,
+        projectId,
+        moduleId: slice.id,
+        sliceId: slice.sliceId || null,
+        sliceTitle: slice.title,
+        stage: "script"
+      });
+    }
+    await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: (/* @__PURE__ */ new Date()).toISOString() });
+    emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "script", status: "skipped" } });
+    return { scripted: true, markdown: scriptMarkdown };
+  }
   const existingScriptTasks = await getTasksForSlice(jobId, slice.id);
   const scriptTask = existingScriptTasks.find((t) => t.stage === "script") || null;
   await runTaskWithRetry(jobId, projectId, slice, "script", scriptTask, async () => {
@@ -1748,7 +2006,25 @@ async function runSliceAppCode(jobId, projectId, bookTitle, slice, scriptMarkdow
   if (job && (job.status === "cancelled" || job.status === "paused")) {
     return { built: false };
   }
-  const { getModuleScripts: getModuleScripts2 } = await Promise.resolve().then(() => (init_database(), database_exports));
+  const { getModuleScripts: getModuleScripts2, getGeneratedAppCode: getGeneratedAppCode2 } = await Promise.resolve().then(() => (init_database(), database_exports));
+  const existingAppCode = await getGeneratedAppCode2(projectId, slice.id);
+  if (existingAppCode) {
+    const existingAppTasks2 = await getTasksForSlice(jobId, slice.id);
+    let skipTask = existingAppTasks2.find((t) => t.stage === "app-code") || null;
+    if (!skipTask) {
+      skipTask = await createAutomationTask({
+        jobId,
+        projectId,
+        moduleId: slice.id,
+        sliceId: slice.sliceId || null,
+        sliceTitle: slice.title,
+        stage: "app-code"
+      });
+    }
+    await updateAutomationTask(skipTask.id, { status: "skipped", finishedAt: (/* @__PURE__ */ new Date()).toISOString() });
+    emit(jobId, { event: "task_complete", data: { taskId: skipTask.id, moduleId: slice.id, sliceId: slice.sliceId, stage: "app-code", status: "skipped" } });
+    return { built: true };
+  }
   const scripts = await getModuleScripts2(projectId);
   const matchedScript = scripts.find((s) => s.moduleId === slice.id);
   let finalMarkdown = scriptMarkdown;
@@ -2065,191 +2341,316 @@ app.use(import_express.default.json({ limit: "50mb" }));
 app.use(import_express.default.urlencoded({ extended: true, limit: "50mb" }));
 app.use("/api/pdf-images", import_express.default.static(import_path2.default.join(process.cwd(), "uploads", "pdf_images")));
 var AI_PROVIDER = process.env.AI_PROVIDER || "deepseek";
-async function callDeepSeek(prompt, systemPrompt = "", model = "", maxTokens = 4096, jsonMode = true) {
-  try {
-    const deepseekModel = model || process.env.DEEPSEEK_MODEL || "deepseek-chat";
-    const deepseekApiKey = process.env.DEEPSEEK_API_KEY || "";
-    if (!deepseekApiKey) {
-      throw new Error("DEEPSEEK_API_KEY is not configured");
-    }
-    let accumulated = "";
-    const maxRounds = 5;
-    for (let round = 0; round < maxRounds; round++) {
-      const messages = [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: prompt }
-      ];
-      if (accumulated) {
-        messages.push({ role: "assistant", content: accumulated });
-        messages.push({ role: "user", content: "\u7EE7\u7EED\uFF0C\u4E0D\u8981\u505C\u3002\u5982\u679C\u4EE3\u7801\u8FD8\u6CA1\u5199\u5B8C\uFF0C\u8BF7\u63A5\u7740\u4E0A\u4E00\u6BB5\u7EE7\u7EED\u8F93\u51FA\u5269\u4F59\u90E8\u5206\u3002" });
-      }
-      let result = null;
-      let lastError = null;
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          result = await streamChatCompletion({
-            url: "https://api.deepseek.com/chat/completions",
-            apiKey: deepseekApiKey,
-            model: deepseekModel,
-            messages,
-            maxTokens,
-            jsonMode: jsonMode && round === 0,
-            thinking: "disabled"
-          });
-          lastError = null;
-          break;
-        } catch (err) {
-          lastError = err;
-          if (attempt === 2) throw err;
-          console.warn("DeepSeek fetch aborted, retrying once...");
-          await new Promise((resolve) => setTimeout(resolve, 700));
-        }
-      }
-      if (!result) {
-        throw lastError || new Error("DeepSeek API request failed");
-      }
-      const content = result.content;
-      const finishReason = result.finishReason;
-      accumulated += content;
-      console.log(`DeepSeek round ${round + 1}: +${content.length} chars, finish_reason=${finishReason}, interrupted=${result.interrupted}`);
-      const completeJson = jsonMode ? extractCompleteJsonContent(accumulated) : null;
-      if (completeJson) {
-        accumulated = completeJson;
-        console.log(`DeepSeek JSON completed after round ${round + 1}; stopping without waiting for [DONE].`);
-        break;
-      }
-      if (finishReason !== "length" && !result.interrupted) {
-        break;
-      }
-    }
-    return accumulated;
-  } catch (error) {
-    console.error("DeepSeek call failed:", error);
-    throw error;
+var PROVIDER_DEFAULT_BASE_URLS = {
+  deepseek: "https://api.deepseek.com",
+  qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  minimax: "https://api.minimax.chat/v1",
+  gemini: "https://generativelanguage.googleapis.com/v1beta",
+  openai: "https://api.openai.com/v1",
+  glm: "https://open.bigmodel.cn/api/paas/v4"
+};
+function getChatCompletionsUrl(provider, baseUrl) {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  if (provider === "gemini") {
+    return `${cleanBase}/openai/chat/completions`;
   }
+  return `${cleanBase}/chat/completions`;
 }
-async function callDashScope(prompt, systemPrompt = "", model = "", maxTokens = 4096, jsonMode = true) {
-  try {
-    const dashscopeModel = model || process.env.DASHSCOPE_MODEL || "qwen-plus";
-    const dashscopeApiKey = process.env.DASHSCOPE_API_KEY || "";
-    const baseUrl = process.env.DASHSCOPE_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
-    if (!dashscopeApiKey) {
-      throw new Error("DASHSCOPE_API_KEY is not configured");
-    }
-    let accumulated = "";
-    const maxRounds = 5;
-    for (let round = 0; round < maxRounds; round++) {
-      const messages = [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: prompt }
-      ];
-      if (accumulated) {
-        messages.push({ role: "assistant", content: accumulated });
-        messages.push({ role: "user", content: "\u7EE7\u7EED\uFF0C\u4E0D\u8981\u505C\u3002\u5982\u679C\u4EE3\u7801\u8FD8\u6CA1\u5199\u5B8C\uFF0C\u8BF7\u63A5\u7740\u4E0A\u4E00\u6BB5\u7EE7\u7EED\u8F93\u51FA\u5269\u4F59\u90E8\u5206\u3002" });
-      }
-      const result = await streamChatCompletion({
-        url: `${baseUrl}/chat/completions`,
-        apiKey: dashscopeApiKey,
-        model: dashscopeModel,
-        messages,
-        maxTokens,
-        jsonMode: jsonMode && round === 0
-      });
-      const content = result.content;
-      const finishReason = result.finishReason;
-      accumulated += content;
-      console.log(`DashScope round ${round + 1}: +${content.length} chars, finish_reason=${finishReason}, interrupted=${result.interrupted}`);
-      const completeJson = jsonMode ? extractCompleteJsonContent(accumulated) : null;
-      if (completeJson) {
-        accumulated = completeJson;
-        console.log(`DashScope JSON completed after round ${round + 1}; stopping without waiting for [DONE].`);
-        break;
-      }
-      if (finishReason !== "length" && !result.interrupted) {
-        break;
-      }
-    }
-    return accumulated;
-  } catch (error) {
-    console.error("DashScope call failed:", error);
-    throw error;
+async function resolveCredentials(provider) {
+  const allKeys = await getAllApiKeys();
+  const dbKey = allKeys.find((k) => k.provider === provider);
+  if (dbKey && dbKey.apiKey) {
+    return { apiKey: dbKey.apiKey, baseUrl: dbKey.baseUrl || PROVIDER_DEFAULT_BASE_URLS[provider] || "" };
   }
+  if (provider === "deepseek") {
+    return { apiKey: process.env.DEEPSEEK_API_KEY || "", baseUrl: process.env.DEEPSEEK_BASE_URL || PROVIDER_DEFAULT_BASE_URLS.deepseek };
+  }
+  if (provider === "qwen" || provider === "dashscope") {
+    return { apiKey: process.env.DASHSCOPE_API_KEY || "", baseUrl: process.env.DASHSCOPE_BASE_URL || PROVIDER_DEFAULT_BASE_URLS.qwen };
+  }
+  return { apiKey: "", baseUrl: PROVIDER_DEFAULT_BASE_URLS[provider] || "" };
 }
-var aiInstance = null;
-function getGenAI() {
-  if (!aiInstance) {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      console.warn("\u26A0\uFE0F Warning: GEMINI_API_KEY environment variable is not set!");
-    }
-    aiInstance = new import_genai.GoogleGenAI({
-      apiKey: key || "MOCK_KEY",
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build"
-        }
-      }
+var CODEX_API_BASE_URL = "https://codex-api.tangyinx.com";
+async function callCodexRun(promptText, systemInstruction) {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    throw new Error("Codex \u672A\u914D\u7F6E\uFF1A\u8BF7\u5728 Setting \u2192 AI \u8C03\u7528 \u2192 Codex CLI \u4E2D\u914D\u7F6E Token");
+  }
+  const skillsArr = (cfg.defaultSkills || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const skillsPrefix = skillsArr.length > 0 ? `${skillsArr.join(" ")}
+
+` : "";
+  const outputConstraint = `
+
+\u3010\u8F93\u51FA\u8981\u6C42\u3011\u8BF7\u76F4\u63A5\u8F93\u51FA\u4E00\u4E2A\u5B8C\u6574\u7684\u3001\u53EF\u72EC\u7ACB\u8FD0\u884C\u7684 HTML \u6587\u4EF6\uFF08\u4EE5 <!DOCTYPE html> \u5F00\u5934\uFF09\uFF0C\u4E0D\u8981\u8F93\u51FA\u4EFB\u4F55\u89E3\u91CA\u3001\u601D\u8003\u8FC7\u7A0B\u6216 markdown \u4EE3\u7801\u5757\u6807\u8BB0\u3002\u6240\u6709 CSS \u548C JS \u5185\u8054\u5728 <style> \u548C <script> \u6807\u7B7E\u4E2D\u3002`;
+  const fullPrompt = `${skillsPrefix}${systemInstruction}
+
+${promptText}${outputConstraint}`;
+  const sandbox = cfg.defaultSandbox === "workspace-write" ? "workspace-write" : "read-only";
+  const timeoutSeconds = Math.min(1800, Math.max(30, cfg.defaultTimeoutSeconds || 120));
+  console.log(`\u{1F504} [callCodexRun] sandbox=${sandbox} timeout=${timeoutSeconds}s skills=${skillsArr.length}`);
+  const createRes = await fetch(`${CODEX_API_BASE_URL}/runs`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${cfg.token}`,
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    },
+    body: JSON.stringify({
+      prompt: fullPrompt,
+      sandbox,
+      timeout_seconds: timeoutSeconds
+    })
+  });
+  if (!createRes.ok) {
+    const errText = await createRes.text();
+    throw new Error(`Codex create run failed: HTTP ${createRes.status} - ${errText.slice(0, 300)}`);
+  }
+  const createData = await createRes.json();
+  const runId = createData?.run?.id;
+  if (!runId) {
+    throw new Error(`Codex create run returned no id: ${JSON.stringify(createData).slice(0, 300)}`);
+  }
+  console.log(`\u2705 [callCodexRun] run created: ${runId}`);
+  const pollIntervalMs = 3e3;
+  const pollMaxMs = (timeoutSeconds + 60) * 1e3;
+  const startedAt = Date.now();
+  let lastStatus = "queued";
+  while (Date.now() - startedAt < pollMaxMs) {
+    await new Promise((r) => setTimeout(r, pollIntervalMs));
+    const statusRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}`, {
+      headers: { "Authorization": `Bearer ${cfg.token}` }
     });
-  }
-  return aiInstance;
-}
-async function callOllama(prompt, systemPrompt = "", model = "", jsonMode = true) {
-  try {
-    const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
-    const ollamaModel = model || process.env.OLLAMA_MODEL || "llama3.1:8b";
-    const response = await fetch(`${ollamaHost}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: ollamaModel,
-        prompt,
-        system: systemPrompt,
-        ...jsonMode ? { format: "json" } : {},
-        stream: false
-      })
-    });
-    if (!response.ok) {
-      throw new Error(`Ollama API error: ${response.status}`);
+    if (!statusRes.ok) {
+      const errText = await statusRes.text();
+      throw new Error(`Codex poll status failed: HTTP ${statusRes.status} - ${errText.slice(0, 200)}`);
     }
-    const data = await response.json();
-    return data.response || "";
-  } catch (error) {
-    console.error("Ollama call failed:", error);
-    throw error;
+    const statusData = await statusRes.json();
+    lastStatus = statusData?.run?.status || "unknown";
+    console.log(`\u23F3 [callCodexRun] ${runId} status=${lastStatus} elapsed=${Math.round((Date.now() - startedAt) / 1e3)}s`);
+    if (lastStatus === "completed" || lastStatus === "failed") break;
   }
+  if (lastStatus !== "completed" && lastStatus !== "failed") {
+    throw new Error(`Codex run timed out after ${Math.round((Date.now() - startedAt) / 1e3)}s (last status: ${lastStatus})`);
+  }
+  const resultRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/result`, {
+    headers: { "Authorization": `Bearer ${cfg.token}` }
+  });
+  if (!resultRes.ok) {
+    const errText = await resultRes.text();
+    throw new Error(`Codex get result failed: HTTP ${resultRes.status} - ${errText.slice(0, 200)}`);
+  }
+  const resultData = await resultRes.json();
+  if (resultData.status === "failed") {
+    throw new Error(`Codex run failed: ${resultData.error || "unknown error"}`);
+  }
+  const finalResponse = resultData.final_response;
+  if (!finalResponse || typeof finalResponse !== "string") {
+    console.error(`\u274C [callCodexRun] ${runId} final_response empty or not string. Result keys:`, Object.keys(resultData));
+    console.error(`\u274C [callCodexRun] full resultData:`, JSON.stringify(resultData).slice(0, 1e3));
+    throw new Error(`Codex run completed but final_response is empty`);
+  }
+  console.log(`\u2705 [callCodexRun] ${runId} completed, response length=${finalResponse.length}`);
+  console.log(`\u{1F4DD} [callCodexRun] first 800 chars:
+${finalResponse.slice(0, 800)}`);
+  console.log(`\u{1F4DD} [callCodexRun] last 300 chars:
+${finalResponse.slice(-300)}`);
+  return finalResponse;
 }
-async function callHuggingFace(prompt, systemPrompt = "", model = "") {
+function buildCodexPrompt(systemInstruction, promptText, cfg) {
+  const skillsArr = (cfg.defaultSkills || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const skillsPrefix = skillsArr.length > 0 ? `${skillsArr.join(" ")}
+
+` : "";
+  return `${skillsPrefix}${systemInstruction}
+
+${promptText}`;
+}
+async function startCodexRun(promptText, systemInstruction) {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    throw new Error("Codex \u672A\u914D\u7F6E\uFF1A\u8BF7\u5728 Setting \u2192 AI \u8C03\u7528 \u2192 Codex CLI \u4E2D\u914D\u7F6E Token");
+  }
+  const fullPrompt = buildCodexPrompt(systemInstruction, promptText, cfg);
+  const sandbox = cfg.defaultSandbox === "workspace-write" ? "workspace-write" : "read-only";
+  const timeoutSeconds = Math.min(1800, Math.max(30, cfg.defaultTimeoutSeconds || 120));
+  console.log(`\u{1F504} [startCodexRun] sandbox=${sandbox} timeout=${timeoutSeconds}s`);
+  const createRes = await fetch(`${CODEX_API_BASE_URL}/runs`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${cfg.token}`,
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    },
+    body: JSON.stringify({ prompt: fullPrompt, sandbox, timeout_seconds: timeoutSeconds })
+  });
+  if (!createRes.ok) {
+    const errText = await createRes.text();
+    throw new Error(`Codex create run failed: HTTP ${createRes.status} - ${errText.slice(0, 300)}`);
+  }
+  const createData = await createRes.json();
+  const runId = createData?.run?.id;
+  if (!runId) {
+    throw new Error(`Codex create run returned no id: ${JSON.stringify(createData).slice(0, 300)}`);
+  }
+  console.log(`\u2705 [startCodexRun] run created: ${runId}`);
+  return { runId, sandbox, timeoutSeconds };
+}
+async function pollCodexRun(runId) {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    throw new Error("Codex token \u4E22\u5931");
+  }
+  const statusRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}`, {
+    headers: { "Authorization": `Bearer ${cfg.token}` }
+  });
+  if (!statusRes.ok) {
+    const errText = await statusRes.text();
+    throw new Error(`Codex poll failed: HTTP ${statusRes.status} - ${errText.slice(0, 200)}`);
+  }
+  const statusData = await statusRes.json();
+  const status = statusData?.run?.status || "unknown";
+  return { status, raw: statusData };
+}
+async function getCodexRunResult(runId) {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    throw new Error("Codex token \u4E22\u5931");
+  }
+  const resultRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/result`, {
+    headers: { "Authorization": `Bearer ${cfg.token}` }
+  });
+  if (!resultRes.ok) {
+    const errText = await resultRes.text();
+    throw new Error(`Codex get result failed: HTTP ${resultRes.status} - ${errText.slice(0, 200)}`);
+  }
+  const resultData = await resultRes.json();
+  if (resultData.status === "failed") {
+    throw new Error(`Codex run failed: ${resultData.error || "unknown error"}`);
+  }
+  const finalResponse = (resultData.final_response || "").toString();
+  console.log(`\u2705 [getCodexRunResult] ${runId} final_response length=${finalResponse.length}`);
   try {
-    const hfModel = model || process.env.HUGGINGFACE_MODEL || "Qwen/Qwen2-7B-Instruct";
-    const hfToken = process.env.HUGGINGFACE_TOKEN || "";
-    const fullPrompt = systemPrompt ? `<|system|>${systemPrompt}</s><|user|>${prompt}</s><|assistant|>` : prompt;
-    const response = await fetch(`https://api-inference.huggingface.co/models/${hfModel}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...hfToken && { "Authorization": `Bearer ${hfToken}` }
-      },
-      body: JSON.stringify({
-        inputs: fullPrompt,
-        parameters: {
-          max_new_tokens: 2048,
-          temperature: 0.7,
-          top_p: 0.95,
-          repetition_penalty: 1,
-          return_full_text: false
+    const artifactsRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/artifacts`, {
+      headers: { "Authorization": `Bearer ${cfg.token}` }
+    });
+    if (artifactsRes.ok) {
+      const artifactsData = await artifactsRes.json();
+      const artifacts = artifactsData.artifacts || [];
+      const htmlArtifact = artifacts.find((a) => /\.html$/i.test(a.name)) || artifacts.find((a) => /index/i.test(a.name));
+      if (htmlArtifact) {
+        const dlRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/artifacts/${htmlArtifact.id}/download`, {
+          headers: { "Authorization": `Bearer ${cfg.token}` }
+        });
+        if (dlRes.ok) {
+          const htmlContent = await dlRes.text();
+          console.log(`\u2705 [getCodexRunResult] ${runId} artifact ${htmlArtifact.name} downloaded (${htmlContent.length} bytes)`);
+          return { code: htmlContent, rawCodexResponse: finalResponse, artifactName: htmlArtifact.name };
         }
-      })
-    });
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Hugging Face API error: ${response.status} - ${errorText}`);
+        console.warn(`\u26A0\uFE0F [getCodexRunResult] artifact download failed: HTTP ${dlRes.status}`);
+      } else {
+        console.log(`\u2139\uFE0F [getCodexRunResult] no HTML artifact found among ${artifacts.length} artifacts: ${artifacts.map((a) => a.name).join(", ")}`);
+      }
     }
-    const data = await response.json();
-    return data[0]?.generated_text || data?.generated_text || "";
-  } catch (error) {
-    console.error("Hugging Face call failed:", error);
-    throw error;
+  } catch (artifactErr) {
+    console.warn(`\u26A0\uFE0F [getCodexRunResult] artifact fetch error (fallback to final_response): ${artifactErr?.message || artifactErr}`);
   }
+  if (!finalResponse) {
+    throw new Error(`Codex run completed but final_response is empty and no artifacts found. Result keys: ${Object.keys(resultData).join(",")}`);
+  }
+  return { code: finalResponse, rawCodexResponse: finalResponse, artifactName: null };
+}
+async function getCodexRunEvents(runId) {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    return [];
+  }
+  try {
+    const eventsRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/events`, {
+      headers: { "Authorization": `Bearer ${cfg.token}` }
+    });
+    if (!eventsRes.ok) {
+      console.log(`\u2139\uFE0F [getCodexRunEvents] ${runId} HTTP ${eventsRes.status} (run may be early)`);
+      return [];
+    }
+    const eventsData = await eventsRes.json();
+    return Array.isArray(eventsData.events) ? eventsData.events : Array.isArray(eventsData) ? eventsData : [];
+  } catch (err) {
+    console.warn(`\u26A0\uFE0F [getCodexRunEvents] ${runId} error: ${err?.message || err}`);
+    return [];
+  }
+}
+async function getCodexRunArtifacts(runId) {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    throw new Error("Codex token \u4E22\u5931");
+  }
+  const artifactsRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/artifacts`, {
+    headers: { "Authorization": `Bearer ${cfg.token}` }
+  });
+  if (!artifactsRes.ok) {
+    const errText = await artifactsRes.text();
+    throw new Error(`Codex artifacts failed: HTTP ${artifactsRes.status} - ${errText.slice(0, 200)}`);
+  }
+  const artifactsData = await artifactsRes.json();
+  return Array.isArray(artifactsData.artifacts) ? artifactsData.artifacts : [];
+}
+async function callAIByProvider(provider, model, prompt, systemPrompt, maxTokens = 4096, jsonMode = true) {
+  const { apiKey, baseUrl } = await resolveCredentials(provider);
+  if (!apiKey) {
+    throw new Error(`No API key configured for provider "${provider}". Please configure it in Setting \u2192 AI Management.`);
+  }
+  if (!model) {
+    throw new Error(`No model specified for provider "${provider}".`);
+  }
+  const chatUrl = getChatCompletionsUrl(provider, baseUrl);
+  console.log(`\u{1F504} [callAIByProvider] provider=${provider} model=${model} url=${chatUrl} maxTokens=${maxTokens} jsonMode=${jsonMode}`);
+  let accumulated = "";
+  const maxRounds = 5;
+  for (let round = 0; round < maxRounds; round++) {
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: prompt }
+    ];
+    if (accumulated) {
+      messages.push({ role: "assistant", content: accumulated });
+      messages.push({ role: "user", content: "\u7EE7\u7EED\uFF0C\u4E0D\u8981\u505C\u3002\u5982\u679C\u4EE3\u7801\u8FD8\u6CA1\u5199\u5B8C\uFF0C\u8BF7\u63A5\u7740\u4E0A\u4E00\u6BB5\u7EE7\u7EED\u8F93\u51FA\u5269\u4F59\u90E8\u5206\u3002" });
+    }
+    let result = null;
+    let lastError = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        result = await streamChatCompletion({
+          url: chatUrl,
+          apiKey,
+          model,
+          messages,
+          maxTokens,
+          jsonMode: jsonMode && round === 0,
+          thinking: provider === "deepseek" ? "disabled" : void 0
+        });
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        if (attempt === 2) throw err;
+        console.warn(`[callAIByProvider] ${provider}/${model} fetch aborted, retrying once...`);
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+    }
+    if (!result) throw lastError || new Error("AI request failed");
+    const content = result.content;
+    const finishReason = result.finishReason;
+    accumulated += content;
+    console.log(`[callAIByProvider] ${provider}/${model} round ${round + 1}: +${content.length} chars, finish=${finishReason}, interrupted=${result.interrupted}`);
+    const completeJson = jsonMode ? extractCompleteJsonContent(accumulated) : null;
+    if (completeJson) {
+      accumulated = completeJson;
+      break;
+    }
+    if (finishReason !== "length" && !result.interrupted) break;
+  }
+  return accumulated;
 }
 function cleanCoveredChapters(covered, fallbackIndex) {
   if (!covered) return fallbackIndex || "1.1";
@@ -2389,7 +2790,7 @@ app.post("/api/projects", async (req, res) => {
     res.status(500).json({ error: "Failed to create project" });
   }
 });
-app.put("/api/projects/:id", async (req, res) => {
+app.put("/api/projects/:id", projectWriteLock, async (req, res) => {
   try {
     const { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData, pdfPageOffset, executionMode } = req.body;
     await updateProject(req.params.id, { name, bookTitle, bookContentText, directoryItems, modules, pdfFileName, pdfData, aiMeta, rawBlueprintData, pdfPageOffset, executionMode });
@@ -2399,7 +2800,7 @@ app.put("/api/projects/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to update project" });
   }
 });
-app.put("/api/projects/:id/pdf", async (req, res) => {
+app.put("/api/projects/:id/pdf", projectWriteLock, async (req, res) => {
   try {
     const { pdfFileName, pdfData } = req.body;
     await updateProjectPdf(req.params.id, pdfFileName, pdfData);
@@ -2427,7 +2828,7 @@ app.get("/api/projects/:id/scripts", async (req, res) => {
     res.status(500).json({ error: "Failed to get scripts" });
   }
 });
-app.post("/api/projects/:id/scripts", async (req, res) => {
+app.post("/api/projects/:id/scripts", projectWriteLock, async (req, res) => {
   try {
     const { moduleId, script } = req.body;
     await saveModuleScript(req.params.id, moduleId, script);
@@ -2446,7 +2847,7 @@ app.get("/api/projects/:id/extracted", async (req, res) => {
     res.status(500).json({ error: "Failed to get extracted content" });
   }
 });
-app.post("/api/projects/:id/extracted", async (req, res) => {
+app.post("/api/projects/:id/extracted", projectWriteLock, async (req, res) => {
   try {
     const { moduleId, content } = req.body;
     await saveExtractedContent(req.params.id, moduleId, content);
@@ -2456,7 +2857,7 @@ app.post("/api/projects/:id/extracted", async (req, res) => {
     res.status(500).json({ error: "Failed to save extracted content" });
   }
 });
-app.post("/api/projects/:id/app-code", async (req, res) => {
+app.post("/api/projects/:id/app-code", projectWriteLock, async (req, res) => {
   try {
     const { moduleId, code } = req.body;
     await saveGeneratedAppCode(req.params.id, moduleId, code);
@@ -2475,7 +2876,7 @@ app.get("/api/projects/:id/app-code/:moduleId", async (req, res) => {
     res.status(500).json({ error: "Failed to get app code" });
   }
 });
-app.post("/api/projects/:id/extract-pages", async (req, res) => {
+app.post("/api/projects/:id/extract-pages", projectWriteLock, async (req, res) => {
   try {
     const { startPage, endPage } = req.body;
     const project = await getProject(req.params.id);
@@ -2550,6 +2951,8 @@ app.get("/api/projects/:id/images", async (req, res) => {
   }
 });
 app.post("/api/parse-book", async (req, res) => {
+  const sliceProvider = req.body?.provider || "deepseek";
+  const sliceModel = req.body?.model || "deepseek-v4-flash";
   try {
     const { title, fullText, directoryStructure, systemPrompt, userPromptTemplate } = req.body;
     console.log("\n\u{1F4DA} ========== PARSE BOOK API CALL ==========");
@@ -2688,9 +3091,8 @@ ${directoryText}
     console.log("Full prompt message first 1500 chars:", finalPromptMessage.substring(0, 1500));
     console.log("==========================================\n");
     let outputText;
-    const sliceModel = "deepseek-v4-flash";
-    console.log(`\u{1F504} [parse-book] Forcing DeepSeek model: ${sliceModel}`);
-    outputText = await callDeepSeek(finalPromptMessage, finalSystemInstruction, sliceModel, 16384);
+    console.log(`\u{1F504} [parse-book] provider=${sliceProvider} model=${sliceModel}`);
+    outputText = await callAIByProvider(sliceProvider, sliceModel, finalPromptMessage, finalSystemInstruction, 16384, true);
     try {
       const resultObj = parseJsonResponse(outputText);
       if (resultObj && Array.isArray(resultObj.slices)) {
@@ -2758,8 +3160,8 @@ ${directoryText}
       res.json({
         ...blueprint,
         _meta: {
-          model: "deepseek-v4-flash",
-          provider: "deepseek",
+          model: sliceModel,
+          provider: sliceProvider,
           degraded: true,
           fallbackType: "heuristic",
           systemInstruction: "",
@@ -2976,6 +3378,8 @@ function getHeuristicOrMockBlueprint(title, fullText, directoryStructure = []) {
   };
 }
 app.post("/api/generate-script", async (req, res) => {
+  const scriptProvider = req.body?.provider || "deepseek";
+  const scriptModel = req.body?.model || "deepseek-v4-flash";
   try {
     let {
       bookTitle,
@@ -3089,46 +3493,13 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
       finalPromptText = promptText;
     }
     let outputText;
-    if (AI_PROVIDER === "deepseek") {
-      console.log(`\u{1F504} Using DeepSeek (deepseek-v4-flash) for scenario script generation...`);
-      outputText = await callDeepSeek(finalPromptText, finalSystemInstruction, "deepseek-v4-flash", 6144, false);
-    } else if (AI_PROVIDER === "dashscope") {
-      console.log("\u{1F504} Using DashScope (\u901A\u4E49\u5343\u95EE) for scenario script generation...");
-      outputText = await callDashScope(finalPromptText, finalSystemInstruction, "", 6144, false);
-    } else if (AI_PROVIDER === "ollama") {
-      console.log("\u{1F504} Using Ollama for scenario script generation...");
-      outputText = await callOllama(finalPromptText, finalSystemInstruction, "", false);
-    } else if (AI_PROVIDER === "huggingface") {
-      console.log("\u{1F504} Using Hugging Face for scenario script generation...");
-      outputText = await callHuggingFace(finalPromptText, finalSystemInstruction);
-    } else if (AI_PROVIDER === "gemini") {
-      const key = process.env.GEMINI_API_KEY;
-      if (!key || key.trim() === "" || key.trim() === "your-actual-gemini-api-key-here") {
-        return res.status(401).json({
-          error: "GEMINI_API_KEY \u672A\u914D\u7F6E",
-          message: "\u8BF7\u5728 .env \u6587\u4EF6\u4E2D\u8BBE\u7F6E\u6709\u6548\u7684 Google Gemini API Key\uFF0C\u6216\u8005\u8BBE\u7F6E AI_PROVIDER=dashscope \u4F7F\u7528\u963F\u91CC\u4E91\u901A\u4E49\u5343\u95EE\u3002",
-          detail: "\u5F53\u524D\u65E0\u6CD5\u8C03\u7528 AI \u6A21\u578B\u751F\u6210\u573A\u666F\u811A\u672C\uFF0C\u8BF7\u5148\u914D\u7F6E API Key \u6216\u5207\u6362\u5230 DashScope\u3002"
-        });
-      }
-      const ai = getGenAI();
-      console.log("\u{1F504} Using Gemini for scenario script generation...");
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: finalPromptText,
-        config: {
-          systemInstruction: finalSystemInstruction
-        }
-      });
-      outputText = response.text;
-      if (!outputText) {
-        throw new Error("No output generated from Gemini model.");
-      }
-    }
+    console.log(`\u{1F504} [generate-script] provider=${scriptProvider} model=${scriptModel}`);
+    outputText = await callAIByProvider(scriptProvider, scriptModel, finalPromptText, finalSystemInstruction, 6144, false);
     res.json({
       markdown: outputText.trim(),
       _meta: {
-        model: AI_PROVIDER === "deepseek" ? process.env.DEEPSEEK_SCRIPT_MODEL || process.env.DEEPSEEK_MODEL || "deepseek-chat" : AI_PROVIDER,
-        provider: AI_PROVIDER,
+        model: scriptModel,
+        provider: scriptProvider,
         systemInstruction: finalSystemInstruction,
         userPrompt: finalPromptText
       }
@@ -3139,8 +3510,11 @@ ${(extractedContent || "General academic curriculum rules relative to " + chapte
   }
 });
 app.post("/api/generate-app-code", async (req, res) => {
+  const appProvider = req.body?.provider || "deepseek";
+  const appModel = req.body?.model || "deepseek-v4-flash";
+  const buildMode = req.body?.mode === "codex" ? "codex" : "api";
   try {
-    const { bookTitle, chapterTitle, coveredChapters, scriptMarkdown, model, systemPrompt, userPromptTemplate } = req.body;
+    const { bookTitle, chapterTitle, coveredChapters, scriptMarkdown, systemPrompt, userPromptTemplate } = req.body;
     if (!scriptMarkdown || typeof scriptMarkdown !== "string") {
       return res.status(400).json({ error: "Missing scriptMarkdown." });
     }
@@ -3157,21 +3531,150 @@ ${scriptMarkdown}`;
       chapterTitle: chapterTitle || ""
     }) : defaultPromptText;
     let outputText;
-    const selectedModel = model || "deepseek-v4-flash";
-    if (selectedModel === "qwen3.7-plus") {
-      outputText = await callDashScope(promptText, systemInstruction, "qwen3.7-plus", 32e3, false);
+    let rawCodexResponse;
+    if (buildMode === "codex") {
+      console.log(`\u{1F504} [generate-app-code] mode=codex, calling Codex API...`);
+      outputText = await callCodexRun(promptText, systemInstruction);
+      rawCodexResponse = outputText;
     } else {
-      outputText = await callDeepSeek(promptText, systemInstruction, "deepseek-v4-flash", 32e3, false);
+      console.log(`\u{1F504} [generate-app-code] mode=api provider=${appProvider} model=${appModel}`);
+      outputText = await callAIByProvider(appProvider, appModel, promptText, systemInstruction, 32e3, false);
     }
     let code = outputText.trim();
     code = code.replace(/^```(?:html|HTML)?\s*\n?/i, "");
     code = code.replace(/\n?\s*```$/i, "");
     code = code.replace(/```(?:html|HTML)?\s*\n?/gi, "");
     code = code.trim();
-    res.json({ code, model: selectedModel });
+    const respPayload = { code, model: appModel, provider: appProvider };
+    if (rawCodexResponse !== void 0) {
+      respPayload.rawCodexResponse = rawCodexResponse;
+      respPayload.mode = "codex";
+    }
+    res.json(respPayload);
   } catch (error) {
     console.error("Error generating app code:", error);
     res.status(500).json({ error: error.message || "Failed to generate app code" });
+  }
+});
+app.post("/api/codex-build/start", async (req, res) => {
+  try {
+    const { scriptMarkdown, systemPrompt, userPromptTemplate, bookTitle, chapterTitle, coveredChapters } = req.body;
+    if (!scriptMarkdown || typeof scriptMarkdown !== "string") {
+      return res.status(400).json({ error: "Missing scriptMarkdown." });
+    }
+    const defaultSystemInstruction = `You are a top-tier full-stack engineer agent with autonomous file-write capability. Your task is to build a self-contained, runnable HTML scene simulation game by writing files into the run workspace.
+
+Critical workflow rules:
+1. You MUST write the complete HTML game to the file path: output/index.html (relative to your workspace root). Only files under output/ are exposed to the caller.
+2. The HTML must be a single self-contained file with all CSS in <style> and all JS in <script> tags. No external local file dependencies.
+3. Do NOT print the HTML content in your final response. Your final response should be a short natural-language summary (1-3 sentences) naming the file you created (output/index.html) and a one-line description of the game.
+4. The HTML must be complete and runnable. If you are interrupted, retry writing the full file.
+5. Focus on immersive, multi-scene UI with rich visual feedback for each interaction.`;
+    const defaultPromptText = `Build a web-based HTML scene simulation game. This game helps students apply what they learned in a textbook chapter through an immersive, scenario-driven experience.
+
+Requirements:
+- Immersive: every interaction has rich visual scene feedback.
+- Multi-scene: each behavior happens on its own page/screen; completing a behavior may transition to a new scene.
+- Implement scenes, characters, interaction flows, and feedback rules from the script below.
+
+Interactive script content:
+${scriptMarkdown}
+
+Chapter info:
+- Book title: ${bookTitle || ""}
+- Chapter title: ${chapterTitle || ""}
+
+DELIVERABLE: Write the complete HTML game to output/index.html. Do not output HTML in your response text; only write it to the file. After writing, reply with the filename and a one-line summary.`;
+    let finalSystemPrompt = systemPrompt;
+    let finalUserPromptTemplate = userPromptTemplate;
+    if (!finalSystemPrompt || !finalUserPromptTemplate) {
+      try {
+        const dbTemplates = await getAllPromptTemplates("codex-build");
+        const activeTpl = dbTemplates.find((t) => t.isActive) || dbTemplates[0];
+        if (activeTpl) {
+          if (!finalSystemPrompt) finalSystemPrompt = activeTpl.systemPrompt || void 0;
+          if (!finalUserPromptTemplate) finalUserPromptTemplate = activeTpl.userPromptTemplate || void 0;
+        }
+      } catch (e) {
+        console.warn("\u26A0\uFE0F [codex-build/start] DB fallback read failed:", e);
+      }
+    }
+    const systemInstruction = finalSystemPrompt || defaultSystemInstruction;
+    const promptText = finalUserPromptTemplate ? applyPromptTemplate(finalUserPromptTemplate, {
+      scriptMarkdown,
+      bookTitle: bookTitle || "",
+      chapterTitle: chapterTitle || ""
+    }) : defaultPromptText;
+    const { runId, sandbox, timeoutSeconds } = await startCodexRun(promptText, systemInstruction);
+    res.json({
+      runId,
+      sandbox,
+      timeoutSeconds,
+      status: "queued",
+      // 返回实际使用的 prompt 摘要供前端 Debug 面板显示
+      systemPromptUsed: systemInstruction.slice(0, 500),
+      promptTextUsed: promptText.slice(0, 1e3)
+    });
+  } catch (error) {
+    console.error("Error starting codex build:", error);
+    res.status(500).json({ error: error.message || "Failed to start codex build" });
+  }
+});
+app.get("/api/codex-build/:runId/status", async (req, res) => {
+  try {
+    const { runId } = req.params;
+    if (!runId) return res.status(400).json({ error: "Missing runId" });
+    const { status, raw } = await pollCodexRun(runId);
+    res.json({ runId, status, raw });
+  } catch (error) {
+    console.error("Error polling codex status:", error);
+    res.status(500).json({ error: error.message || "Failed to poll codex status" });
+  }
+});
+app.get("/api/codex-build/:runId/result", async (req, res) => {
+  try {
+    const { runId } = req.params;
+    if (!runId) return res.status(400).json({ error: "Missing runId" });
+    const result = await getCodexRunResult(runId);
+    let code = result.code;
+    if (!result.artifactName) {
+      code = code.replace(/^```(?:html|HTML)?\s*\n?/i, "");
+      code = code.replace(/\n?\s*```$/i, "");
+      code = code.replace(/```(?:html|HTML)?\s*\n?/gi, "");
+      code = code.trim();
+    }
+    res.json({
+      runId,
+      code,
+      rawCodexResponse: result.rawCodexResponse,
+      artifactName: result.artifactName,
+      mode: "codex"
+    });
+  } catch (error) {
+    console.error("Error getting codex result:", error);
+    res.status(500).json({ error: error.message || "Failed to get codex result" });
+  }
+});
+app.get("/api/codex-build/:runId/events", async (req, res) => {
+  try {
+    const { runId } = req.params;
+    if (!runId) return res.status(400).json({ error: "Missing runId" });
+    const events = await getCodexRunEvents(runId);
+    res.json({ runId, events });
+  } catch (error) {
+    console.error("Error getting codex events:", error);
+    res.status(500).json({ error: error.message || "Failed to get codex events" });
+  }
+});
+app.get("/api/codex-build/:runId/artifacts", async (req, res) => {
+  try {
+    const { runId } = req.params;
+    if (!runId) return res.status(400).json({ error: "Missing runId" });
+    const artifacts = await getCodexRunArtifacts(runId);
+    res.json({ runId, artifacts });
+  } catch (error) {
+    console.error("Error getting codex artifacts:", error);
+    res.status(500).json({ error: error.message || "Failed to get codex artifacts" });
   }
 });
 app.post("/api/recommend-scenario", async (req, res) => {
@@ -3180,61 +3683,22 @@ app.post("/api/recommend-scenario", async (req, res) => {
     if (!chapterTitle || !gameType) {
       return res.status(400).json({ error: "Missing required chapter meta (chapterTitle, gameType)." });
     }
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      let gameTitle = "\u5FAE\u7F29\u5B87\u5B99\uFF1A\u672A\u77E5\u5E73\u8861\u6001\u8C03\u63A7";
-      let gameRules = "\u5F53\u524D\u7269\u7406\u7CFB\u7EDF\u5904\u4E8E\u7D27\u6025\u6CC4\u9732\u4E34\u754C\u72B6\u6001\u3002\u4F60\u5C06\u626E\u6F14\u7279\u9063\u5371\u673A\u5904\u7F6E\u4E13\u5458\uFF0C\u5FC5\u987B\u4F9D\u9760\u5BF9\u672C\u5355\u5143\u77E5\u8BC6\u70B9\u7684\u7CFB\u7EDF\u5185\u5316\uFF0C\u5B9E\u65F6\u8BCA\u65AD\u5404\u7C7B\u504F\u5DEE\u53D8\u91CF\uFF0C\u5E73\u8861\u4E0D\u7A33\u5B9A\u6027\uFF0C\u505A\u51FA\u660E\u667A\u7684\u5173\u952E\u6027\u51B3\u7B56\u4EE5\u62EF\u6551\u8BBE\u65BD\u3002";
-      if (gameType === "interactive-story") {
-        gameTitle = `\u300A${chapterTitle}\uFF1A\u5371\u673A\u51B3\u7B56\u98CE\u66B4\u300B`;
-        gameRules = `\u4F60\u88AB\u7D27\u6025\u6295\u9001\u5230\u4E00\u5904\u9762\u4E34\u89E3\u4F53\u5371\u673A\u7684\u79D1\u5B66\u57FA\u7AD9\uFF01\u5F53\u524D\u7684\u6838\u5FC3\u6311\u6218\u662F\uFF1A\u5982\u4F55\u5229\u7528 [${summary}] \u7684\u76F8\u4E92\u4F5C\u7528\u94FE\u6761\u5236\u6B62\u707E\u96BE\u3002\u4F60\u5FC5\u987B\u5728\u6570\u4E2A\u6D89\u53CA\u751F\u6B7B\u6743\u8861\u548C\u903B\u8F91\u94FE\u51B2\u7A81\u7684\u9009\u9879\u4E2D\u505A\u51FA\u6838\u5FC3\u9009\u62E9\uFF0C\u6BCF\u4E00\u6B65\u90FD\u4F1A\u8BF1\u53D1\u7269\u7406\u7CFB\u7EDF\u7684\u8FDE\u9501\u5D29\u6E83\u6216\u6551\u8D4E\u3002`;
-      } else if (gameType === "quiz") {
-        gameTitle = `\u300A${chapterTitle}\uFF1A\u591A\u7EF4\u8BCA\u65AD\u5927\u5BC6\u5BA4\u300B`;
-        gameRules = `\u4F60\u88AB\u9501\u5728\u4E86\u4E00\u53F0\u66B4\u8D70\u7684\u4EBA\u9020\u53CD\u5E94\u8231\u4E2D\uFF01\u7CFB\u7EDF\u4E3B\u63A7\u8111\u629B\u51FA\u4E86\u4E00\u7CFB\u5217\u5173\u4E8E [${summary}] \u7684\u6DF1\u5EA6\u53CD\u76F4\u89C9\u73B0\u8C61\u8BCA\u65AD\u3002\u4F60\u5FC5\u987B\u62C5\u4EFB\u903B\u8F91\u6392\u969C\u4E13\u5BB6\uFF0C\u5728\u9650\u65F6\u5185\u8BCA\u65AD\u5E76\u8BBA\u8BC1\u6B63\u786E\u7684\u6210\u56E0\u4EE5\u89E3\u9501\u6C14\u95F8\u5B89\u5168\u534F\u8BAE\u3002`;
-      } else if (gameType === "coding-puzzle") {
-        gameTitle = `\u300A${chapterTitle}\uFF1A\u903B\u8F91\u91CD\u6784\u4E0E\u6570\u636E\u963B\u65AD\u884C\u52A8\u300B`;
-        gameRules = `\u53D7\u963B\u4E8E [${summary}] \u7269\u7406\u6570\u636E\u6D41\u7684\u5F02\u5E38\u6EA2\u51FA\uFF0C\u63A7\u5236\u4E2D\u67A2\u4EE3\u7801\u5927\u9762\u79EF\u762B\u75EA\u3002\u4F5C\u4E3A\u903B\u8F91\u67B6\u6784\u5E08\uFF0C\u4F60\u9700\u8981\u8BCA\u65AD\u6EA2\u51FA\u6F0F\u6D1E\uFF0C\u91CD\u7F6E\u7269\u7406\u5B88\u6052\u5B9A\u5F8B\u7684\u6570\u636E\u7ED3\u6784\uFF0C\u4FEE\u8865\u5931\u8861\u7684\u4EE3\u7801\u63A7\u5236\u5F8B\uFF0C\u5728\u6EA2\u51FA\u7EA2\u7EBF\u524D\u91CD\u5EFA\u6570\u636E\u7F51\u3002`;
-      } else if (gameType === "math-quest") {
-        gameTitle = `\u300A${chapterTitle}\uFF1A\u7CBE\u5BC6\u8BA1\u7B97\u7A81\u56F4\u534F\u8BAE\u300B`;
-        gameRules = `\u707E\u96BE\u5DF2\u7ECF\u8FDB\u5165\u7269\u7406\u7A81\u51FB\u671F\uFF01\u8981\u5F3A\u884C\u6291\u5236\u53C2\u6570\u66B4\u6DA8\uFF0C\u4F60\u5FC5\u987B\u5316\u8EAB\u5B89\u5168\u8BA1\u7B97\u603B\u6307\u6325\uFF0C\u5728\u6781\u5C0F\u7684\u65F6\u95F4\u7A97\u53E3\u91CC\u5BF9 [${summary}] \u8FDB\u884C\u53C2\u6570\u6781\u503C\u5E73\u8861\u3001\u53CD\u5E94\u516C\u5F0F\u5BF9\u9F50\u3001\u4EE5\u53CA\u6D41\u91CF\u8BA1\u7B97\uFF0C\u7CBE\u51C6\u5C06\u6307\u9488\u56DE\u8C03\u5230\u5B89\u5168\u533A\u95F4\u3002`;
-      }
-      return res.json({ gameTitle, gameRules });
+    let gameTitle = "\u5FAE\u7F29\u5B87\u5B99\uFF1A\u672A\u77E5\u5E73\u8861\u6001\u8C03\u63A7";
+    let gameRules = "\u5F53\u524D\u7269\u7406\u7CFB\u7EDF\u5904\u4E8E\u7D27\u6025\u6CC4\u9732\u4E34\u754C\u72B6\u6001\u3002\u4F60\u5C06\u626E\u6F14\u7279\u9063\u5371\u673A\u5904\u7F6E\u4E13\u5458\uFF0C\u5FC5\u987B\u4F9D\u9760\u5BF9\u672C\u5355\u5143\u77E5\u8BC6\u70B9\u7684\u7CFB\u7EDF\u5185\u5316\uFF0C\u5B9E\u65F6\u8BCA\u65AD\u5404\u7C7B\u504F\u5DEE\u53D8\u91CF\uFF0C\u5E73\u8861\u4E0D\u7A33\u5B9A\u6027\uFF0C\u505A\u51FA\u660E\u667A\u7684\u5173\u952E\u6027\u51B3\u7B56\u4EE5\u62EF\u6551\u8BBE\u65BD\u3002";
+    if (gameType === "interactive-story") {
+      gameTitle = `\u300A${chapterTitle}\uFF1A\u5371\u673A\u51B3\u7B56\u98CE\u66B4\u300B`;
+      gameRules = `\u4F60\u88AB\u7D27\u6025\u6295\u9001\u5230\u4E00\u5904\u9762\u4E34\u89E3\u4F53\u5371\u673A\u7684\u79D1\u5B66\u57FA\u7AD9\uFF01\u5F53\u524D\u7684\u6838\u5FC3\u6311\u6218\u662F\uFF1A\u5982\u4F55\u5229\u7528 [${summary}] \u7684\u76F8\u4E92\u4F5C\u7528\u94FE\u6761\u5236\u6B62\u707E\u96BE\u3002\u4F60\u5FC5\u987B\u5728\u6570\u4E2A\u6D89\u53CA\u751F\u6B7B\u6743\u8861\u548C\u903B\u8F91\u94FE\u51B2\u7A81\u7684\u9009\u9879\u4E2D\u505A\u51FA\u6838\u5FC3\u9009\u62E9\uFF0C\u6BCF\u4E00\u6B65\u90FD\u4F1A\u8BF1\u53D1\u7269\u7406\u7CFB\u7EDF\u7684\u8FDE\u9501\u5D29\u6E83\u6216\u6551\u8D4E\u3002`;
+    } else if (gameType === "quiz") {
+      gameTitle = `\u300A${chapterTitle}\uFF1A\u591A\u7EF4\u8BCA\u65AD\u5927\u5BC6\u5BA4\u300B`;
+      gameRules = `\u4F60\u88AB\u9501\u5728\u4E86\u4E00\u53F0\u66B4\u8D70\u7684\u4EBA\u9020\u53CD\u5E94\u8231\u4E2D\uFF01\u7CFB\u7EDF\u4E3B\u63A7\u8111\u629B\u51FA\u4E86\u4E00\u7CFB\u5217\u5173\u4E8E [${summary}] \u7684\u6DF1\u5EA6\u53CD\u76F4\u89C9\u73B0\u8C61\u8BCA\u65AD\u3002\u4F60\u5FC5\u987B\u62C5\u4EFB\u903B\u8F91\u6392\u969C\u4E13\u5BB6\uFF0C\u5728\u9650\u65F6\u5185\u8BCA\u65AD\u5E76\u8BBA\u8BC1\u6B63\u786E\u7684\u6210\u56E0\u4EE5\u89E3\u9501\u6C14\u95F8\u5B89\u5168\u534F\u8BAE\u3002`;
+    } else if (gameType === "coding-puzzle") {
+      gameTitle = `\u300A${chapterTitle}\uFF1A\u903B\u8F91\u91CD\u6784\u4E0E\u6570\u636E\u963B\u65AD\u884C\u52A8\u300B`;
+      gameRules = `\u53D7\u963B\u4E8E [${summary}] \u7269\u7406\u6570\u636E\u6D41\u7684\u5F02\u5E38\u6EA2\u51FA\uFF0C\u63A7\u5236\u4E2D\u67A2\u4EE3\u7801\u5927\u9762\u79EF\u762B\u75EA\u3002\u4F5C\u4E3A\u903B\u8F91\u67B6\u6784\u5E08\uFF0C\u4F60\u9700\u8981\u8BCA\u65AD\u6EA2\u51FA\u6F0F\u6D1E\uFF0C\u91CD\u7F6E\u7269\u7406\u5B88\u6052\u5B9A\u5F8B\u7684\u6570\u636E\u7ED3\u6784\uFF0C\u4FEE\u8865\u5931\u8861\u7684\u4EE3\u7801\u63A7\u5236\u5F8B\uFF0C\u5728\u6EA2\u51FA\u7EA2\u7EBF\u524D\u91CD\u5EFA\u6570\u636E\u7F51\u3002`;
+    } else if (gameType === "math-quest") {
+      gameTitle = `\u300A${chapterTitle}\uFF1A\u7CBE\u5BC6\u8BA1\u7B97\u7A81\u56F4\u534F\u8BAE\u300B`;
+      gameRules = `\u707E\u96BE\u5DF2\u7ECF\u8FDB\u5165\u7269\u7406\u7A81\u51FB\u671F\uFF01\u8981\u5F3A\u884C\u6291\u5236\u53C2\u6570\u66B4\u6DA8\uFF0C\u4F60\u5FC5\u987B\u5316\u8EAB\u5B89\u5168\u8BA1\u7B97\u603B\u6307\u6325\uFF0C\u5728\u6781\u5C0F\u7684\u65F6\u95F4\u7A97\u53E3\u91CC\u5BF9 [${summary}] \u8FDB\u884C\u53C2\u6570\u6781\u503C\u5E73\u8861\u3001\u53CD\u5E94\u516C\u5F0F\u5BF9\u9F50\u3001\u4EE5\u53CA\u6D41\u91CF\u8BA1\u7B97\uFF0C\u7CBE\u51C6\u5C06\u6307\u9488\u56DE\u8C03\u5230\u5B89\u5168\u533A\u95F4\u3002`;
     }
-    const ai = getGenAI();
-    const systemInstruction = `You are a creative educational writer and interactive gamification designer (\u4E2D\u6587\u73AF\u5883).
-Your sole task is to recommend a highly polished, high-tension educational game title and a concise, high-cognition gameplay conflict description based on the provided core concepts and preferred game mechanics.
-
-Instructions for generation:
-1. "gameTitle" must be a punchy, dramatic sci-fi, fantasy, historic, or high-concept narrative title (e.g., "\u91D1\u65AF\u9650\u754C\u5F15\u529B\u5931\u8861\u6F0F\u6C14\u8B66\u62A5", "\u6CF0\u5766\u9738\u6743\u7EC8\u7ED3\u4E0E\u79E9\u5E8F\u8FC7\u6E21", "\u6570\u636E\u9B54\u5492\u91CD\u6784\u963B\u65AD\u534F\u8BAE"). It should capture attention instantly.
-2. "gameRules" must be a concise paragraph (100-150 words in Chinese) describing:
-   - The virtual role/occupation of the player.
-   - The urgent crisis or trigger event they face.
-   - The cognitive conflict they must resolve using the target concepts (avoid simple quiz memory lookup; frame it as a trade-off, diagnostic study, or logic repair).
-   - What the player must do to gain victory.
-   
-Respond strictly in JSON format matching the schema. Do not use markdown wraps.`;
-    const promptText = `Suggest a dramatic game title and gameplay scenario ruleset for:
-- Concept Chapter Slice: "${chapterTitle}"
-- Target Core Concepts: [${summary}]
-- Gamification Mechanic Mode: "${gameType}"
-- Pedagogical Objective: "${designRationale || "None"}"`;
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: promptText,
-      config: {
-        systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: import_genai.Type.OBJECT,
-          properties: {
-            gameTitle: { type: import_genai.Type.STRING, description: "A beautifully crafted, high-traction game title." },
-            gameRules: { type: import_genai.Type.STRING, description: "Detailed 1-paragraph game objective/rules in Chinese explaining the crisis, role, and key choices." }
-          },
-          required: ["gameTitle", "gameRules"]
-        }
-      }
-    });
-    const parsed = parseJsonResponse(response.text);
-    res.json(parsed);
+    return res.json({ gameTitle, gameRules });
   } catch (error) {
     console.error("Error recommending scenario:", error);
     res.status(500).json({ error: error.message || "External recommender error" });
@@ -3246,35 +3710,17 @@ app.post("/api/chat", async (req, res) => {
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: "Messages array is required." });
     }
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      const lastMsg = messages[messages.length - 1]?.text?.toLowerCase() || "";
-      let reply = "\u4F60\u597D\uFF01\u6211\u662F\u4F60\u7684 AI \u5B66\u4E60\u6E38\u620F\u7B56\u5212\u4E13\u5BB6\u3002\u6709\u4EC0\u4E48\u5173\u4E8E\u5F53\u524D\u8BFE\u672C\u3001\u7AE0\u8282\u62C6\u5206\u6216\u4E92\u52A8\u6E38\u620F\u73A9\u6CD5\u8BBE\u8BA1\u7684\uFF0C\u5C3D\u7BA1\u95EE\u6211\uFF01";
-      if (lastMsg.includes("\u5EFA\u8BAE") || lastMsg.includes("\u63A8\u8350") || lastMsg.includes("\u73A9\u6CD5")) {
-        reply = "\u6211\u53EF\u4EE5\u4E3A\u4F60\u914D\u7F6E\u591A\u79CD\u6E38\u620F\uFF1A\u77E5\u8BC6\u5927\u6BD4\u62FC (Quiz)\u3001\u8FDE\u7EBF\u642D\u914D (Match)\u3001\u6587\u672C\u586B\u7A7A (Blank Fill)\u3001\u63A2\u9669\u6289\u62E9\u6587\u672C\u5192\u9669 (Story Quest)\u3001\u4EE3\u7801\u7EA0\u9519\u9B54\u5492 (Coding Puzzle) \u6216\u8005\u662F \u7B97\u672F\u901F\u7B97\u95EF\u5173 (Math Quest)\uFF01";
-      } else if (lastMsg.includes("\u7AE0\u8282") || lastMsg.includes("\u76EE\u5F55")) {
-        reply = "\u8BFE\u4EF6\u6700\u597D\u5212\u5206\u4E3A 3-6 \u4E2A\u72EC\u7ACB\u6A21\u5757\u3002\u4F60\u53EF\u4EE5\u5728 Step 2 \u9875\u9762\u5BF9\u6BCF\u4E2A\u7AE0\u8282\u6807\u9898\u548C\u5177\u4F53\u7684\u6E38\u620F\u89C4\u5219\u8FDB\u884C\u5B8C\u5168\u5B9A\u5236\u7684\u6C49\u5316\u4E0E\u4FEE\u6539\uFF01";
-      }
-      return res.json({ reply });
+    const lastMsg = messages[messages.length - 1]?.text?.toLowerCase() || "";
+    let reply = "\u4F60\u597D\uFF01\u6211\u662F\u4F60\u7684 AI \u5B66\u4E60\u6E38\u620F\u7B56\u5212\u4E13\u5BB6\u3002\u6709\u4EC0\u4E48\u5173\u4E8E\u5F53\u524D\u8BFE\u672C\u3001\u7AE0\u8282\u62C6\u5206\u6216\u4E92\u52A8\u6E38\u620F\u73A9\u6CD5\u8BBE\u8BA1\u7684\uFF0C\u5C3D\u7BA1\u95EE\u6211\uFF01";
+    if (lastMsg.includes("\u5EFA\u8BAE") || lastMsg.includes("\u63A8\u8350") || lastMsg.includes("\u73A9\u6CD5")) {
+      reply = "\u6211\u53EF\u4EE5\u4E3A\u4F60\u914D\u7F6E\u591A\u79CD\u6E38\u620F\uFF1A\u77E5\u8BC6\u5927\u6BD4\u62FC (Quiz)\u3001\u8FDE\u7EBF\u642D\u914D (Match)\u3001\u6587\u672C\u586B\u7A7A (Blank Fill)\u3001\u63A2\u9669\u6289\u62E9\u6587\u672C\u5192\u9669 (Story Quest)\u3001\u4EE3\u7801\u7EA0\u9519\u9B54\u5492 (Coding Puzzle) \u6216\u8005\u662F \u7B97\u672F\u901F\u7B97\u95EF\u5173 (Math Quest)\uFF01";
+    } else if (lastMsg.includes("\u7AE0\u8282") || lastMsg.includes("\u76EE\u5F55")) {
+      reply = "\u8BFE\u4EF6\u6700\u597D\u5212\u5206\u4E3A 3-6 \u4E2A\u72EC\u7ACB\u6A21\u5757\u3002\u4F60\u53EF\u4EE5\u5728 Step 2 \u9875\u9762\u5BF9\u6BCF\u4E2A\u7AE0\u8282\u6807\u9898\u548C\u5177\u4F53\u7684\u6E38\u620F\u89C4\u5219\u8FDB\u884C\u5B8C\u5168\u5B9A\u5236\u7684\u6C49\u5316\u4E0E\u4FEE\u6539\uFF01";
     }
-    const ai = getGenAI();
-    const contentsPayload = messages.map((m) => ({
-      role: m.sender === "user" ? "user" : "model",
-      parts: [{ text: m.text }]
-    }));
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: contentsPayload,
-      config: {
-        systemInstruction: `You are an expert educational gamification consultant and curriculum advisor.
-Support the user in organizing, outlining, and refining highly immersive educational simulations based on textbooks.
-Reply in Chinese, keep answers insightful and focused on scenario design.`
-      }
-    });
-    return res.json({ reply: response.text });
+    return res.json({ reply });
   } catch (error) {
     console.error("Error in conversational API:", error);
-    res.status(500).json({ error: error.message || "Failed to engage Gemini chat." });
+    res.status(500).json({ error: error.message || "Chat service error." });
   }
 });
 function getMockBlueprint(title) {
@@ -4151,6 +4597,144 @@ async function startServer() {
       res.status(500).json({ error: error.message });
     }
   });
+  app.get("/api/api-keys", async (req, res) => {
+    try {
+      const keys = await getAllApiKeys();
+      res.json(keys);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/api-keys", async (req, res) => {
+    try {
+      const { provider, apiKey, baseUrl } = req.body || {};
+      if (!provider || !apiKey) {
+        return res.status(400).json({ error: "provider, apiKey are required" });
+      }
+      const created = await createApiKey({ provider, apiKey, baseUrl: baseUrl || null });
+      res.json(created);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.put("/api/api-keys/:id", async (req, res) => {
+    try {
+      const updated = await updateApiKey(req.params.id, req.body || {});
+      if (!updated) return res.status(404).json({ error: "API key not found" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.delete("/api/api-keys/:id", async (req, res) => {
+    try {
+      await deleteApiKey(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/codex-config", async (req, res) => {
+    try {
+      const config = await getCodexConfig();
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.put("/api/codex-config", async (req, res) => {
+    try {
+      const { token, defaultSandbox, defaultTimeoutSeconds, defaultSkills } = req.body || {};
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({ error: "token \u662F\u5FC5\u586B\u9879" });
+      }
+      const sandbox = defaultSandbox === "workspace-write" ? "workspace-write" : "read-only";
+      const timeout = Math.max(30, Math.min(1800, Number(defaultTimeoutSeconds) || 120));
+      const skills = typeof defaultSkills === "string" ? defaultSkills : "";
+      const saved = await upsertCodexConfig({
+        token,
+        defaultSandbox: sandbox,
+        defaultTimeoutSeconds: timeout,
+        defaultSkills: skills
+      });
+      res.json(saved);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.delete("/api/codex-config", async (req, res) => {
+    try {
+      await deleteCodexConfig();
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/codex-config/test", async (req, res) => {
+    try {
+      const { token } = req.body || {};
+      if (!token) {
+        return res.status(400).json({ error: "token \u662F\u5FC5\u586B\u9879" });
+      }
+      const resp = await fetch("https://codex-api.tangyinx.com/me", {
+        method: "GET",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!resp.ok) {
+        const errText = await resp.text();
+        return res.status(resp.status).json({
+          ok: false,
+          status: resp.status,
+          detail: errText.slice(0, 500)
+        });
+      }
+      const data = await resp.json();
+      res.json({ ok: true, client: data });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  });
+  app.get("/api/api-keys/:id/models", async (req, res) => {
+    try {
+      const key = await getApiKeyById(req.params.id);
+      if (!key) return res.status(404).json({ error: "API key not found" });
+      const PROVIDER_MODELS_ENDPOINT = {
+        deepseek: "https://api.deepseek.com/models",
+        qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+        minimax: "https://api.minimax.chat/v1/models",
+        gemini: "https://generativelanguage.googleapis.com/v1beta/models",
+        openai: "https://api.openai.com/v1/models",
+        glm: "https://open.bigmodel.cn/api/paas/v4/models"
+      };
+      const baseUrl = key.baseUrl || PROVIDER_MODELS_ENDPOINT[key.provider] || "";
+      if (!baseUrl) {
+        return res.status(400).json({ error: `Unknown provider: ${key.provider}` });
+      }
+      const isGemini = key.provider === "gemini";
+      const url = isGemini ? `${baseUrl}?key=${encodeURIComponent(key.apiKey)}` : baseUrl;
+      const fetchResp = await fetch(url, {
+        method: "GET",
+        headers: isGemini ? { "Content-Type": "application/json" } : { "Authorization": `Bearer ${key.apiKey}`, "Content-Type": "application/json" }
+      });
+      if (!fetchResp.ok) {
+        const errText = await fetchResp.text();
+        return res.status(502).json({
+          error: `Provider API returned ${fetchResp.status}`,
+          detail: errText.slice(0, 500)
+        });
+      }
+      const data = await fetchResp.json();
+      let models = [];
+      if (Array.isArray(data?.data)) {
+        models = data.data.map((m) => m.id).filter(Boolean);
+      } else if (Array.isArray(data?.models)) {
+        models = data.models.map((m) => (m.name || "").replace(/^models\//, "")).filter(Boolean);
+      }
+      res.json({ models });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
   app.put("/api/projects/:id/execution-mode", async (req, res) => {
     try {
       const { executionMode } = req.body;
@@ -4293,6 +4877,10 @@ data: ${JSON.stringify(snapshot)}
       res.sendFile(import_path2.default.join(distPath, "index.html"));
     });
     console.log("\u{1F4E6} Production assets statically mounted.");
+  }
+  const staleCount = await recoverStaleJobs();
+  if (staleCount > 0) {
+    console.log(`\u{1F9F9} \u5DF2\u6E05\u7406 ${staleCount} \u4E2A\u50F5\u5C38\u81EA\u52A8\u5316\u4EFB\u52A1\uFF08running \u2192 failed\uFF09`);
   }
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`\u{1F680} Full-stack Book-to-Game server running on http://0.0.0.0:${PORT} [${SERVER_VERSION}]`);

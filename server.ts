@@ -1715,9 +1715,24 @@ Chapter info:
 - Chapter title: ${chapterTitle || ""}
 
 DELIVERABLE: Write the complete HTML game to output/index.html. Do not output HTML in your response text; only write it to the file. After writing, reply with the filename and a one-line summary.`;
-    const systemInstruction = systemPrompt || defaultSystemInstruction;
-    const promptText = userPromptTemplate
-      ? applyPromptTemplate(userPromptTemplate, {
+    // 优先级：前端传的 > DB active 的 codex-build prompt > 代码 default
+    let finalSystemPrompt = systemPrompt;
+    let finalUserPromptTemplate = userPromptTemplate;
+    if (!finalSystemPrompt || !finalUserPromptTemplate) {
+      try {
+        const dbTemplates = await getAllPromptTemplates("codex-build");
+        const activeTpl = dbTemplates.find(t => t.isActive) || dbTemplates[0];
+        if (activeTpl) {
+          if (!finalSystemPrompt) finalSystemPrompt = activeTpl.systemPrompt || undefined;
+          if (!finalUserPromptTemplate) finalUserPromptTemplate = activeTpl.userPromptTemplate || undefined;
+        }
+      } catch (e) {
+        console.warn("⚠️ [codex-build/start] DB fallback read failed:", e);
+      }
+    }
+    const systemInstruction = finalSystemPrompt || defaultSystemInstruction;
+    const promptText = finalUserPromptTemplate
+      ? applyPromptTemplate(finalUserPromptTemplate, {
           scriptMarkdown,
           bookTitle: bookTitle || "",
           chapterTitle: chapterTitle || "",

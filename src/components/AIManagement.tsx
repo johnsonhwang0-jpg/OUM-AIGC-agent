@@ -473,6 +473,7 @@ export function PromptTab({ language }: { language: "zh" | "en" }) {
           name: def.name,
           systemPrompt: def.systemPrompt,
           userPromptTemplate: def.userPromptTemplate,
+          isActive: true,
         }),
       });
       const created = await res.json();
@@ -511,6 +512,22 @@ export function PromptTab({ language }: { language: "zh" | "en" }) {
   const handleEdit = (p: PromptTemplate) => {
     setEditingPrompt({ ...p });
     setShowEditModal(true);
+  };
+
+  const handleToggleActive = async (p: PromptTemplate) => {
+    try {
+      const res = await fetch(`/api/prompt-templates/${p.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...p, isActive: !p.isActive }),
+      });
+      if (res.ok) {
+        // 同一个 aiEntry 下只允许一个 active，后端会处理；前端刷新列表
+        await loadPrompts(selectedEntry);
+      }
+    } catch (e) {
+      console.error("Failed to toggle active:", e);
+    }
   };
 
   const handleDuplicate = (p: PromptTemplate) => {
@@ -731,6 +748,13 @@ export function PromptTab({ language }: { language: "zh" | "en" }) {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => handleToggleActive(p)}
+                          className={`text-[10px] px-2.5 py-1 rounded border transition cursor-pointer ${p.isActive ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20" : "bg-slate-500/10 text-slate-400 border-slate-500/20 hover:bg-slate-500/20"}`}
+                          title={p.isActive ? t("点击停用", "Click to deactivate") : t("点击启用", "Click to activate")}
+                        >
+                          {p.isActive ? t("启用中", "On") : t("启用", "Enable")}
+                        </button>
                         <button
                           onClick={() => handleEdit(p)}
                           className="text-[10px] px-2.5 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition cursor-pointer"
