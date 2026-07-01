@@ -38,8 +38,8 @@ export interface VersionEntry {
 export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.3.6",
-    updatedAt: "2026-07-01 00:00:00",
-    gitCommit: "",
+    updatedAt: "2026-07-01 14:41:19",
+    gitCommit: "a0fba6f",
     changes: [
       "Codex Debug 改为独立小窗（drawer），复用 API 模式的 ApiDebugDrawer 组件，支持 codex-build aiEntry。",
       "Drawer 内可直接编辑 system/user prompt，保存为新版本到 Prompt Management（与 API 模式行为一致）。",
