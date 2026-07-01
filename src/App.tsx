@@ -335,6 +335,9 @@ function greet(name) {
   const [codexRunId, setCodexRunId] = useState<string>('');
   const [codexRunStatus, setCodexRunStatus] = useState<string>(''); // queued/running/completed/failed
   const [codexRunElapsed, setCodexRunElapsed] = useState<number>(0); // 秒
+  const [codexEvents, setCodexEvents] = useState<any[]>([]); // Codex Agent 执行事件流
+  const [codexArtifacts, setCodexArtifacts] = useState<any[]>([]); // Codex 产物列表
+  const [codexArtifactName, setCodexArtifactName] = useState<string>(''); // 实际下载的产物文件名
   useEffect(() => {
     fetch("/api/codex-config")
       .then(r => r.json())
@@ -2285,17 +2288,19 @@ ${script.conclusion}
         : `🚀 正在基于切片 **${mod.chapterIndex} · ${mod.title}** 的互动脚本生成场景模拟游戏...`));
 
     // Fetch saved prompts from DB
+    // Codex 模式加载独立的 codex-build prompt（agent 范式），API 模式加载 app-code prompt（LLM 范式）
+    const promptAiEntry = buildMode === "codex" ? "codex-build" : "app-code";
     let appSavedSystemPrompt: string | undefined;
     let appSavedUserPromptTemplate: string | undefined;
     try {
-      const res = await fetch('/api/prompt-templates?aiEntry=app-code');
+      const res = await fetch(`/api/prompt-templates?aiEntry=${promptAiEntry}`);
       const data = await res.json();
       if (data && data.length > 0) {
         appSavedSystemPrompt = data[0].systemPrompt || undefined;
         appSavedUserPromptTemplate = data[0].userPromptTemplate || undefined;
       }
     } catch (e) {
-      console.warn('Failed to fetch saved app prompts, using defaults');
+      console.warn('Failed to fetch saved prompts, using defaults');
     }
 
     try {
@@ -2325,6 +2330,10 @@ ${script.conclusion}
         setCodexRunId(runId);
         setCodexRunStatus('queued');
         setCodexRunElapsed(0);
+        setCodexEvents([]);
+        setCodexArtifacts([]);
+        setCodexArtifactName('');
+        setLastCodexRaw('');
 
         const startedAt = Date.now();
         const pollIntervalMs = 3000;
@@ -2340,8 +2349,22 @@ ${script.conclusion}
           lastStatus = statusData.status || 'unknown';
           setCodexRunStatus(lastStatus);
           setCodexRunElapsed(Math.round((Date.now() - startedAt) / 1000));
+          // 并行拉 events（不阻塞轮询，失败容忍）
+          fetch(`/api/codex-build/${runId}/events`)
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d && Array.isArray(d.events)) setCodexEvents(d.events.slice(-30)); })
+            .catch(() => {});
           if (lastStatus === 'completed' || lastStatus === 'failed') break;
         }
+
+        // 完成后拉一次 artifacts（无论成功失败都尝试，便于排查）
+        try {
+          const artsRes = await fetch(`/api/codex-build/${runId}/artifacts`);
+          if (artsRes.ok) {
+            const artsData = await artsRes.json();
+            if (Array.isArray(artsData.artifacts)) setCodexArtifacts(artsData.artifacts);
+          }
+        } catch {}
 
         if (lastStatus !== 'completed') {
           throw new Error(`Codex run ${lastStatus} after ${Math.round((Date.now() - startedAt) / 1000)}s`);
@@ -2355,6 +2378,7 @@ ${script.conclusion}
         generatedCode = resultData.code || '';
         rawCodex = resultData.rawCodexResponse as string | undefined;
         if (rawCodex) setLastCodexRaw(rawCodex);
+        if (resultData.artifactName) setCodexArtifactName(resultData.artifactName);
       } else {
         // ── API 同步模式（原逻辑） ──
         const response = await fetch('/api/generate-app-code', {
@@ -4442,7 +4466,53 @@ API地址：https://api.deepseek.com/chat/completions`}
                           ) : (
                             <div className="text-[10px] text-slate-600 italic py-2 text-center">{language === "en" ? "No response yet. Click Build to start a Codex run." : "暂无返回，点击构建按钮启动 Codex 执行。"}</div>
                           )}
+                          {codexArtifactName && (
+                            <div className="text-[10px] text-emerald-400 font-mono mt-1 flex items-center gap-1">
+                              <span className="px-1 py-0.5 rounded bg-emerald-500/15">artifact</span>
+                              <span className="truncate">{codexArtifactName}</span>
+                              <span className="text-slate-500">{language === "en" ? "(HTML downloaded from artifact)" : "(从产物下载 HTML)"}</span>
+                            </div>
+                          )}
                         </div>
+                        {/* Codex Agent 事件流 */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Agent Events" : "Agent 事件流"}</span>
+                            <span className="text-[9px] text-slate-600">{codexEvents.length} {language === "en" ? "events" : "条"}</span>
+                          </div>
+                          {codexEvents.length > 0 ? (
+                            <div className="text-[10px] font-mono bg-black/30 border border-white/5 rounded-lg p-2 max-h-32 overflow-auto space-y-0.5">
+                              {codexEvents.slice(-15).map((ev: any, i: number) => (
+                                <div key={i} className="text-slate-400 leading-relaxed flex gap-1">
+                                  <span className="text-slate-600 shrink-0">{typeof ev.type === 'string' ? ev.type.slice(0, 12) : 'evt'}</span>
+                                  <span className="truncate">{typeof ev.message === 'string' ? ev.message.slice(0, 120) : typeof ev.text === 'string' ? ev.text.slice(0, 120) : JSON.stringify(ev).slice(0, 120)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-[10px] text-slate-600 italic py-2 text-center">{language === "en" ? "No events yet." : "暂无事件。"}</div>
+                          )}
+                        </div>
+                        {/* Codex 产物列表 */}
+                        {codexArtifacts.length > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{language === "en" ? "Artifacts" : "产物文件"}</span>
+                              <span className="text-[9px] text-slate-600">{codexArtifacts.length} {language === "en" ? "files" : "个"}</span>
+                            </div>
+                            <div className="space-y-1">
+                              {codexArtifacts.map((art: any, i: number) => (
+                                <div key={i} className="text-[10px] font-mono bg-black/30 border border-white/5 rounded px-2 py-1 flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className={`px-1 py-0.5 rounded shrink-0 ${art.name === codexArtifactName ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-slate-500'}`}>{art.name === codexArtifactName ? 'used' : 'file'}</span>
+                                    <span className="truncate text-slate-400">{art.name}</span>
+                                  </div>
+                                  <span className="text-slate-600 shrink-0">{art.size ? `${(art.size / 1024).toFixed(1)}KB` : ''}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         {/* 错误信息 */}
                         {appApiDebugInfo.status === 'error' && (
                           <div className="text-[10px] text-red-400 font-mono bg-red-500/5 border border-red-500/10 rounded-lg p-2 break-all">{appApiDebugInfo.rawResponse.slice(0, 500)}</div>

@@ -367,15 +367,17 @@ async function callCodexRun(promptText: string, systemInstruction: string): Prom
 
 // ==================== Codex 异步轮询架构（拆分为 start/poll/result 三步）====================
 
-/** 构建 Codex prompt（skills + system + user + 输出约束） */
+/** 构建 Codex prompt（skills 前缀 + system + user）。
+ *  Codex 是 Agent，prompt 末尾不再附加"直接输出 HTML 字符串"约束——
+ *  默认 codex-build 模板已要求把 HTML 写到 output/index.html，
+ *  通过 artifacts 下载返回，而非从 final_response 提取字符串。 */
 function buildCodexPrompt(systemInstruction: string, promptText: string, cfg: any): string {
   const skillsArr = (cfg.defaultSkills || "")
     .split(",")
     .map((s: string) => s.trim())
     .filter(Boolean);
   const skillsPrefix = skillsArr.length > 0 ? `${skillsArr.join(" ")}\n\n` : "";
-  const outputConstraint = `\n\n【输出要求】请直接输出一个完整的、可独立运行的 HTML 文件（以 <!DOCTYPE html> 开头），不要输出任何解释、思考过程或 markdown 代码块标记。所有 CSS 和 JS 内联在 <style> 和 <script> 标签中。`;
-  return `${skillsPrefix}${systemInstruction}\n\n${promptText}${outputConstraint}`;
+  return `${skillsPrefix}${systemInstruction}\n\n${promptText}`;
 }
 
 /** 步骤 1：创建 Codex run，返回 runId */
@@ -430,12 +432,15 @@ async function pollCodexRun(runId: string): Promise<{ status: string; raw: any }
   return { status, raw: statusData };
 }
 
-/** 步骤 3：获取 Codex run 结果（仅在 status=completed 时调用） */
-async function getCodexRunResult(runId: string): Promise<string> {
+/** 步骤 3：获取 Codex run 结果（仅在 status=completed 时调用）。
+ *  Agent 范式：优先从 artifacts 下载 HTML 文件（output/index.html），
+ *  fallback 到 final_response（旧 LLM 范式兼容）。 */
+async function getCodexRunResult(runId: string): Promise<{ code: string; rawCodexResponse: string; artifactName: string | null }> {
   const cfg = await getCodexConfig();
   if (!cfg || !cfg.token) {
     throw new Error("Codex token 丢失");
   }
+  // 1. 拉 final_response（无论是否走 artifact，都作为 raw 返回供调试）
   const resultRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/result`, {
     headers: { "Authorization": `Bearer ${cfg.token}` },
   });
@@ -447,12 +452,76 @@ async function getCodexRunResult(runId: string): Promise<string> {
   if (resultData.status === "failed") {
     throw new Error(`Codex run failed: ${resultData.error || "unknown error"}`);
   }
-  const finalResponse = resultData.final_response;
-  if (!finalResponse || typeof finalResponse !== "string") {
-    throw new Error(`Codex run completed but final_response is empty. Result keys: ${Object.keys(resultData).join(",")}`);
+  const finalResponse = (resultData.final_response || "").toString();
+  console.log(`✅ [getCodexRunResult] ${runId} final_response length=${finalResponse.length}`);
+
+  // 2. 尝试从 artifacts 下载 HTML（Agent 范式优先路径）
+  try {
+    const artifactsRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/artifacts`, {
+      headers: { "Authorization": `Bearer ${cfg.token}` },
+    });
+    if (artifactsRes.ok) {
+      const artifactsData = await artifactsRes.json();
+      const artifacts: Array<{ id: string; name: string; relative_path: string; size: number; content_type: string }> = artifactsData.artifacts || [];
+      // 优先选 .html 文件，其次选 index.* / 任意 HTML
+      const htmlArtifact = artifacts.find(a => /\.html$/i.test(a.name)) || artifacts.find(a => /index/i.test(a.name));
+      if (htmlArtifact) {
+        const dlRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/artifacts/${htmlArtifact.id}/download`, {
+          headers: { "Authorization": `Bearer ${cfg.token}` },
+        });
+        if (dlRes.ok) {
+          const htmlContent = await dlRes.text();
+          console.log(`✅ [getCodexRunResult] ${runId} artifact ${htmlArtifact.name} downloaded (${htmlContent.length} bytes)`);
+          return { code: htmlContent, rawCodexResponse: finalResponse, artifactName: htmlArtifact.name };
+        }
+        console.warn(`⚠️ [getCodexRunResult] artifact download failed: HTTP ${dlRes.status}`);
+      } else {
+        console.log(`ℹ️ [getCodexRunResult] no HTML artifact found among ${artifacts.length} artifacts: ${artifacts.map(a => a.name).join(", ")}`);
+      }
+    }
+  } catch (artifactErr: any) {
+    console.warn(`⚠️ [getCodexRunResult] artifact fetch error (fallback to final_response): ${artifactErr?.message || artifactErr}`);
   }
-  console.log(`✅ [getCodexRunResult] ${runId} response length=${finalResponse.length}`);
-  return finalResponse;
+
+  // 3. Fallback：从 final_response 提取 HTML（兼容旧 LLM 范式）
+  if (!finalResponse) {
+    throw new Error(`Codex run completed but final_response is empty and no artifacts found. Result keys: ${Object.keys(resultData).join(",")}`);
+  }
+  return { code: finalResponse, rawCodexResponse: finalResponse, artifactName: null };
+}
+
+/** 辅助：获取 Codex run 的 events（调试用，返回原始事件流） */
+async function getCodexRunEvents(runId: string): Promise<any[]> {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    throw new Error("Codex token 丢失");
+  }
+  const eventsRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/events`, {
+    headers: { "Authorization": `Bearer ${cfg.token}` },
+  });
+  if (!eventsRes.ok) {
+    const errText = await eventsRes.text();
+    throw new Error(`Codex events failed: HTTP ${eventsRes.status} - ${errText.slice(0, 200)}`);
+  }
+  const eventsData = await eventsRes.json();
+  return Array.isArray(eventsData.events) ? eventsData.events : (Array.isArray(eventsData) ? eventsData : []);
+}
+
+/** 辅助：获取 Codex run 的 artifacts 列表（调试用） */
+async function getCodexRunArtifacts(runId: string): Promise<any[]> {
+  const cfg = await getCodexConfig();
+  if (!cfg || !cfg.token) {
+    throw new Error("Codex token 丢失");
+  }
+  const artifactsRes = await fetch(`${CODEX_API_BASE_URL}/runs/${runId}/artifacts`, {
+    headers: { "Authorization": `Bearer ${cfg.token}` },
+  });
+  if (!artifactsRes.ok) {
+    const errText = await artifactsRes.text();
+    throw new Error(`Codex artifacts failed: HTTP ${artifactsRes.status} - ${errText.slice(0, 200)}`);
+  }
+  const artifactsData = await artifactsRes.json();
+  return Array.isArray(artifactsData.artifacts) ? artifactsData.artifacts : [];
 }
 
 // 统一 AI 调用：按 provider 查 key，用 model 调 OpenAI 兼容端点，支持自动续写
@@ -1616,8 +1685,30 @@ app.post("/api/codex-build/start", async (req, res) => {
     if (!scriptMarkdown || typeof scriptMarkdown !== "string") {
       return res.status(400).json({ error: "Missing scriptMarkdown." });
     }
-    const defaultSystemInstruction = `你是一个顶级的全栈工程师，必须输出可直接运行的完整代码，注重UI美感和交互细节，如果代码被截断要主动重试。只需要输出代码，不需要解释文字。`;
-    const defaultPromptText = `根据以下要求，帮我实现一个web端的html。这是一个场景模拟游戏，让学生通过这个模拟游戏，将所学的知识进行应用，学以致用。我希望整体互动是沉浸式的，就是每个操作都有丰富的可视化的场景画面。并且我希望不要所有内容都是局限在一个页面上的，而是一个行为可能就是在一个页面上完成。完成这个行为可能就需要进入到新场景了。\n\n以下是该章节的互动脚本内容，请根据脚本中的场景、角色、交互流程、反馈规则等来实现HTML场景模拟游戏：\n\n${scriptMarkdown}`;
+    // Codex 模式独立默认 prompt（agent 范式：写文件到 output/index.html，而非返回 HTML 字符串）
+    const defaultSystemInstruction = `You are a top-tier full-stack engineer agent with autonomous file-write capability. Your task is to build a self-contained, runnable HTML scene simulation game by writing files into the run workspace.
+
+Critical workflow rules:
+1. You MUST write the complete HTML game to the file path: output/index.html (relative to your workspace root). Only files under output/ are exposed to the caller.
+2. The HTML must be a single self-contained file with all CSS in <style> and all JS in <script> tags. No external local file dependencies.
+3. Do NOT print the HTML content in your final response. Your final response should be a short natural-language summary (1-3 sentences) naming the file you created (output/index.html) and a one-line description of the game.
+4. The HTML must be complete and runnable. If you are interrupted, retry writing the full file.
+5. Focus on immersive, multi-scene UI with rich visual feedback for each interaction.`;
+    const defaultPromptText = `Build a web-based HTML scene simulation game. This game helps students apply what they learned in a textbook chapter through an immersive, scenario-driven experience.
+
+Requirements:
+- Immersive: every interaction has rich visual scene feedback.
+- Multi-scene: each behavior happens on its own page/screen; completing a behavior may transition to a new scene.
+- Implement scenes, characters, interaction flows, and feedback rules from the script below.
+
+Interactive script content:
+${scriptMarkdown}
+
+Chapter info:
+- Book title: ${bookTitle || ""}
+- Chapter title: ${chapterTitle || ""}
+
+DELIVERABLE: Write the complete HTML game to output/index.html. Do not output HTML in your response text; only write it to the file. After writing, reply with the filename and a one-line summary.`;
     const systemInstruction = systemPrompt || defaultSystemInstruction;
     const promptText = userPromptTemplate
       ? applyPromptTemplate(userPromptTemplate, {
@@ -1648,21 +1739,57 @@ app.get("/api/codex-build/:runId/status", async (req, res) => {
   }
 });
 
-/** GET /api/codex-build/:runId/result — 获取 Codex run 结果（仅在 status=completed 时调用） */
+/** GET /api/codex-build/:runId/result — 获取 Codex run 结果（仅在 status=completed 时调用）。
+ *  Agent 范式：优先从 artifacts 下载 HTML，返回 code + artifactName + rawCodexResponse。 */
 app.get("/api/codex-build/:runId/result", async (req, res) => {
   try {
     const { runId } = req.params;
     if (!runId) return res.status(400).json({ error: "Missing runId" });
-    const finalResponse = await getCodexRunResult(runId);
-    let code = finalResponse.trim();
-    code = code.replace(/^```(?:html|HTML)?\s*\n?/i, "");
-    code = code.replace(/\n?\s*```$/i, "");
-    code = code.replace(/```(?:html|HTML)?\s*\n?/gi, "");
-    code = code.trim();
-    res.json({ runId, code, rawCodexResponse: finalResponse, mode: "codex" });
+    const result = await getCodexRunResult(runId);
+    let code = result.code;
+    // 仅在 fallback（artifactName 为 null，从 final_response 提取）时剥离 markdown 围栏
+    if (!result.artifactName) {
+      code = code.replace(/^```(?:html|HTML)?\s*\n?/i, "");
+      code = code.replace(/\n?\s*```$/i, "");
+      code = code.replace(/```(?:html|HTML)?\s*\n?/gi, "");
+      code = code.trim();
+    }
+    res.json({
+      runId,
+      code,
+      rawCodexResponse: result.rawCodexResponse,
+      artifactName: result.artifactName,
+      mode: "codex"
+    });
   } catch (error: any) {
     console.error("Error getting codex result:", error);
     res.status(500).json({ error: error.message || "Failed to get codex result" });
+  }
+});
+
+/** GET /api/codex-build/:runId/events — 获取 Codex run 事件流（调试用） */
+app.get("/api/codex-build/:runId/events", async (req, res) => {
+  try {
+    const { runId } = req.params;
+    if (!runId) return res.status(400).json({ error: "Missing runId" });
+    const events = await getCodexRunEvents(runId);
+    res.json({ runId, events });
+  } catch (error: any) {
+    console.error("Error getting codex events:", error);
+    res.status(500).json({ error: error.message || "Failed to get codex events" });
+  }
+});
+
+/** GET /api/codex-build/:runId/artifacts — 获取 Codex run 产物列表（调试用） */
+app.get("/api/codex-build/:runId/artifacts", async (req, res) => {
+  try {
+    const { runId } = req.params;
+    if (!runId) return res.status(400).json({ error: "Missing runId" });
+    const artifacts = await getCodexRunArtifacts(runId);
+    res.json({ runId, artifacts });
+  } catch (error: any) {
+    console.error("Error getting codex artifacts:", error);
+    res.status(500).json({ error: error.message || "Failed to get codex artifacts" });
   }
 });
 

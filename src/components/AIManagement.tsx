@@ -62,7 +62,7 @@ const getAvailableVars = (language: "zh" | "en") => [
 ];
 
 // ==================== 3 AI Entry Points ====================
-type AIEntryKey = "smart-split" | "script-gen" | "app-code";
+type AIEntryKey = "smart-split" | "script-gen" | "app-code" | "codex-build";
 
 interface AIEntryDef {
   key: AIEntryKey;
@@ -104,6 +104,16 @@ const AI_ENTRIES: AIEntryDef[] = [
     descEn: "Generate HTML scene simulation games from interactive scripts",
     endpoint: "/api/generate-app-code",
     icon: "🎮",
+    color: "emerald",
+  },
+  {
+    key: "codex-build",
+    name: "Codex Agent 构建",
+    nameEn: "Codex Agent Build",
+    desc: "Codex Agent 把 HTML 写入 output/index.html，通过 artifacts 返回",
+    descEn: "Codex Agent writes HTML to output/index.html, returns via artifacts",
+    endpoint: "/api/codex-build/start",
+    icon: "🤖",
     color: "emerald",
   },
 ];
@@ -292,6 +302,32 @@ designRationale: 描述2-3个综合应用场景，说明完整的问题场景
 6. 完整可运行：输出完整的HTML文件，包含所有CSS和JavaScript
 
 请输出完整的HTML代码，可以直接在浏览器中打开运行。`,
+  },
+  "codex-build": {
+    name: "Codex Agent 构建提示词",
+    systemPrompt: `You are a top-tier full-stack engineer agent with autonomous file-write capability. Your task is to build a self-contained, runnable HTML scene simulation game by writing files into the run workspace.
+
+Critical workflow rules:
+1. You MUST write the complete HTML game to the file path: output/index.html (relative to your workspace root). Only files under output/ are exposed to the caller.
+2. The HTML must be a single self-contained file with all CSS in <style> and all JS in <script> tags. No external local file dependencies.
+3. Do NOT print the HTML content in your final response. Your final response should be a short natural-language summary (1-3 sentences) naming the file you created (output/index.html) and a one-line description of the game.
+4. The HTML must be complete and runnable. If you are interrupted, retry writing the full file.
+5. Focus on immersive, multi-scene UI with rich visual feedback for each interaction.`,
+    userPromptTemplate: `Build a web-based HTML scene simulation game. This game helps students apply what they learned in a textbook chapter through an immersive, scenario-driven experience.
+
+Requirements:
+- Immersive: every interaction has rich visual scene feedback.
+- Multi-scene: each behavior happens on its own page/screen; completing a behavior may transition to a new scene.
+- Implement scenes, characters, interaction flows, and feedback rules from the script below.
+
+Interactive script content:
+{{scriptMarkdown}}
+
+Chapter info:
+- Book title: {{bookTitle}}
+- Chapter title: {{chapterTitle}}
+
+DELIVERABLE: Write the complete HTML game to output/index.html. Do not output HTML in your response text; only write it to the file. After writing, reply with the filename and a one-line summary.`,
   },
 };
 
