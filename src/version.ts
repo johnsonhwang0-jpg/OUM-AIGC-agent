@@ -38,8 +38,8 @@ export interface VersionEntry {
 export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.3.4",
-    updatedAt: "2026-07-01 00:00:00",
-    gitCommit: "",
+    updatedAt: "2026-07-01 14:19:09",
+    gitCommit: "8dca558",
     changes: [
       "Prompt Management 左侧标签重构：3 个主组（Slice / Script Generation / Build App）替代原来的 4 个 AI_ENTRIES 平铺，Build App 组内通过 API / Codex CLI 子 tab 切换管理两套 prompt。数据层不变，仍是 4 个独立 aiEntry。",
       "Codex Debug 面板修复：之前显示 fixedPrompt（硬编码旧 API prompt），改为显示后端 start 返回的实际 systemPromptUsed + promptTextUsed（真实发给 Codex 的 codex-build prompt 摘要）。",
