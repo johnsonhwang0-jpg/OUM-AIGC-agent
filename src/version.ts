@@ -38,8 +38,8 @@ export interface VersionEntry {
 export const VERSION_HISTORY: VersionEntry[] = [
   {
     version: "1.3.3",
-    updatedAt: "2026-07-01 00:00:00",
-    gitCommit: "",
+    updatedAt: "2026-07-01 14:01:34",
+    gitCommit: "1e1f087",
     changes: [
       "Codex Agent 范式重构（修复 ERR_ABORTED 根因）：诊断到 Codex 是异步 Agent（30s-30min），但原架构用同步 fetch 等待 + 期望 final_response 直接返回 HTML 字符串。workspace-write 模式下 Codex 会把 HTML 写到文件而非返回字符串，导致前端 extractValidHtml 找不到 <!DOCTYPE html> → 黑屏/超时。本次改为正确的 Agent 范式：①新增独立 codex-build prompt（aiEntry='codex-build'），system/user prompt 明确要求 Codex 把 HTML 写到 output/index.html，final_response 只返回文件名+简短总结；②getCodexRunResult 优先调 /artifacts 列文件 → 下载 HTML artifact 内容，fallback 到 final_response（兼容旧 LLM 范式）；③buildCodexPrompt 移除末尾的『直接输出 HTML 字符串』约束（与 Agent 范式冲突）。",
       "Prompt Management 新增 codex-build 分区：AIManagement.tsx 的 AI_ENTRIES 和 DEFAULT_PROMPTS 新增 codex-build entry（🤖 图标，emerald 色），独立 systemPrompt（agent 工作流规则：写文件到 output/、不自述 HTML、完整可运行）和 userPromptTemplate（DELIVERABLE 明确要求写 output/index.html）。前端 handleGenerateFinalApp 按 buildMode 分支加载 codex-build 或 app-code prompt，两套 prompt 完全解耦。API 模式（app-code）保持原 LLM 范式不动，作为兜底链路。",
